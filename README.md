@@ -1,8 +1,10 @@
 <img src=".github/assets/icon.png" align="left" width="100" height="100">
 
-### `PartyDeck`
+### `Splitux`
 
 A split-screen game launcher for Linux/SteamOS
+
+> Fork of [PartyDeck](https://github.com/wunnr/partydeck-rs) by [wunnr](https://github.com/wunnr)
 
 ---
 
@@ -12,7 +14,7 @@ A split-screen game launcher for Linux/SteamOS
 </p>
 
 > [!NOTE]
-> PartyDeck is in early development, and may contain violations of software best practices and security flaws; use at your own discretion! If you are experienced in software any advice and contributions are greatly appreciated.
+> Splitux is in early development, and may contain violations of software best practices and security flaws; use at your own discretion! If you are experienced in software any advice and contributions are greatly appreciated.
 
 ## Features
 
@@ -29,25 +31,25 @@ A split-screen game launcher for Linux/SteamOS
 
 ## Installing & Usage
 
-Download the latest release [here](https://github.com/wunnr/partydeck-rs/releases) and extract it into a folder. Download game handlers [here](https://drive.proton.me/urls/D9HBKM18YR#zG8XC8yVy9WL).
+Download the latest release [here](https://github.com/gabrielgad/splitux/releases) and extract it into a folder. Download game handlers [here](https://drive.proton.me/urls/D9HBKM18YR#zG8XC8yVy9WL).
 
 ### SteamOS
 
-SteamOS includes all of PartyDeck's dependencies, but you will need to be on SteamOS 3.7.0 or above for the splitscreen script to work.
+SteamOS includes all of Splitux's dependencies, but you will need to be on SteamOS 3.7.0 or above for the splitscreen script to work.
 
-If you're in desktop mode, simply run `partydeck-rs`. To use PartyDeck in Gaming Mode, add `GamingModeLauncher.sh` as a shortcut to Steam, and in the settings for that shortcut disable Steam Input.
+If you're in desktop mode, simply run `splitux`. To use Splitux in Gaming Mode, add `GamingModeLauncher.sh` as a shortcut to Steam, and in the settings for that shortcut disable Steam Input.
 
 ### Desktop Linux
 
-You'll need to install KDE Plasma, Gamescope, Bubblewrap, and Fuse-overlayfs using your distro's package manager. Then, while in a KDE Plasma session, run `partydeck-rs` to get started. If you're running Steam, make sure none of the controllers are using a Steam Input desktop layout, as Steam Input causes issues such as duplicate controllers being detected.
+You'll need to install KDE Plasma, Gamescope, Bubblewrap, and Fuse-overlayfs using your distro's package manager. Then, while in a KDE Plasma session, run `splitux` to get started. If you're running Steam, make sure none of the controllers are using a Steam Input desktop layout, as Steam Input causes issues such as duplicate controllers being detected.
 
 ### Getting Started
-Once in the main menu, click the + button to add a game: this can be just a regular Linux executable, a Windows game (.exe), or a PartyDeck Handler (.pdh). Create profiles if you want to store save data, and have a look through the settings menu.
+Once in the main menu, click the + button to add a game: this can be just a regular Linux executable, a Windows game (.exe), or a Splitux Handler (.pdh). Create profiles if you want to store save data, and have a look through the settings menu.
 
 ## Building
 
-To build PartyDeck, You'll need a Rust toolchain installed with the 2024 Edition. For the mouse/keyboard gamescope build, you'll need ninja and meson installed.
-Clone the repo with submodules by running `git clone --recurse-submodules https://github.com/wunnr/partydeck-rs.git`. Navigate to the gamescope submodule at `deps/gamescope` and run these commands to build the mouse/keyboard gamescope:
+To build Splitux, you'll need a Rust toolchain installed with the 2024 Edition. For the mouse/keyboard gamescope build, you'll need ninja and meson installed.
+Clone the repo with submodules by running `git clone --recurse-submodules https://github.com/gabrielgad/splitux.git`. Navigate to the gamescope submodule at `deps/gamescope` and run these commands to build the mouse/keyboard gamescope:
 
 ```
 git submodule update --init
@@ -56,12 +58,12 @@ ninja -C build/
 build/gamescope -- <game>
 ```
 
-Then, in the main partydeck folder, run `build.sh`. This will build the executable, and place it in the `build` folder, along with the relevant dependencies and resources.
+Then, in the main splitux folder, run `build.sh`. This will build the executable, and place it in the `build` folder, along with the relevant dependencies and resources.
 
 
 ## How it Works
 
-PartyDeck uses a few software layers to provide a console-like split-screen gaming experience:
+Splitux uses a few software layers to provide a console-like split-screen gaming experience:
 
 - **KWin Session:** This KWin Session displays all running game instances and runs a script to automatically resize and reposition each Gamescope window.
 - **Gamescope:** Contains each instance of the game to its own window. Also has the neat side effect of receiving controller input even when the window is not currently active, meaning multiple Gamescope instances can all receive input simultaneously
@@ -78,6 +80,7 @@ PartyDeck uses a few software layers to provide a console-like split-screen gami
 
 ## Credits/Thanks
 
+- [wunnr](https://github.com/wunnr) - Original creator of [PartyDeck](https://github.com/wunnr/partydeck-rs)
 - @davidawesome02-backup for the [Gamescope keyboard/mouse fork](https://github.com/davidawesome02-backup/gamescope), and Valve for Gamescope
 - [@blckink](https://github.com/blckink) for contributions
 - MrGoldberg & Detanup01 for [Goldberg Steam Emu](https://github.com/Detanup01/gbe_fork/)
