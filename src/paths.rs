@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 pub static PATH_RES: LazyLock<PathBuf> = LazyLock::new(|| {
-    let localinstall = PathBuf::from("/usr/share/partydeck");
+    let localinstall = PathBuf::from("/usr/share/splitux");
     if localinstall.exists() {
         return localinstall;
     }
@@ -17,9 +17,9 @@ pub static PATH_LOCAL_SHARE: LazyLock<PathBuf> = LazyLock::new(|| PATH_HOME.join
 
 pub static PATH_PARTY: LazyLock<PathBuf> = LazyLock::new(|| {
     if let Ok(xdg_data_home) = env::var("XDG_DATA_HOME") {
-        return PathBuf::from(xdg_data_home).join("partydeck");
+        return PathBuf::from(xdg_data_home).join("splitux");
     }
-    PATH_LOCAL_SHARE.join("partydeck")
+    PATH_LOCAL_SHARE.join("splitux")
 });
 
 pub static PATH_STEAM: LazyLock<PathBuf> = LazyLock::new(|| {

@@ -1,19 +1,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::app::{PartyConfig, PadFilterType};
+use crate::app::{PartyConfig, PadFilterType, WindowManagerType};
 use crate::handler::*;
 use crate::input::*;
 use crate::instance::*;
+use crate::monitor::Monitor;
 use crate::paths::*;
 use crate::profiles::{create_profile, create_profile_gamesave};
 use crate::util::*;
+use crate::wm::{LayoutContext, LayoutOrientation, WindowManager, WindowManagerBackend};
 
 pub fn setup_profiles(
     h: &Handler,
     instances: &Vec<Instance>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("\n[partydeck] Instances:");
+    println!("\n[splitux] Instances:");
     for instance in instances {
         if instance.profname.starts_with(".") {
             create_profile(&instance.profname)?;
@@ -22,7 +24,7 @@ pub fn setup_profiles(
             create_profile_gamesave(&instance.profname, h)?;
         }
         println!(
-            "[partydeck] - Profile: {}, Monitor: {}, Resolution: {}x{}",
+            "[splitux] - Profile: {}, Monitor: {}, Resolution: {}x{}",
             instance.profname, instance.monitor, instance.width, instance.height
         );
     }
@@ -34,19 +36,39 @@ pub fn launch_game(
     h: &Handler,
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
+    monitors: &[Monitor],
     cfg: &PartyConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let new_cmds = launch_cmds(h, input_devices, instances, cfg)?;
     print_launch_cmds(&new_cmds);
 
-    if cfg.enable_kwin_script {
-        let script = match cfg.vertical_two_player {
-            true => "splitscreen_kwin_vertical.js",
-            false => "splitscreen_kwin.js",
-        };
+    // Create WM backend based on config
+    let mut wm = match &cfg.window_manager {
+        WindowManagerType::Auto => WindowManagerBackend::detect(),
+        WindowManagerType::KWin => WindowManagerBackend::KWin(crate::wm::KWinManager::new()),
+        WindowManagerType::Hyprland => {
+            WindowManagerBackend::Hyprland(crate::wm::HyprlandManager::new())
+        }
+        WindowManagerType::GamescopeOnly => {
+            WindowManagerBackend::GamescopeOnly(crate::wm::GamescopeOnlyManager::new())
+        }
+    };
 
-        kwin_dbus_start_script(PATH_RES.join(script))?;
-    }
+    // Setup WM with layout context
+    let orientation = if cfg.vertical_two_player {
+        LayoutOrientation::Vertical
+    } else {
+        LayoutOrientation::Horizontal
+    };
+
+    let ctx = LayoutContext {
+        instances: instances.clone(),
+        monitors: monitors.to_vec(),
+        orientation,
+    };
+
+    println!("[splitux] Setting up {} window manager", wm.name());
+    wm.setup(&ctx)?;
 
     let sleep_time = match h.pause_between_starts {
         Some(f) => f,
@@ -66,9 +88,20 @@ pub fn launch_game(
         i += 1;
     }
 
+    // Notify WM that all instances have been launched (for positioning)
+    // Only non-reactive WMs (like Hyprland) need explicit positioning
+    if !wm.is_reactive() {
+        println!("[splitux] Non-reactive WM, positioning windows explicitly");
+        wm.on_instances_launched(&ctx)?;
+    }
+
     for mut handle in handles {
         handle.wait()?;
     }
+
+    // Teardown WM
+    println!("[splitux] Tearing down {} window manager", wm.name());
+    wm.teardown()?;
 
     Ok(())
 }
@@ -323,37 +356,37 @@ pub fn launch_cmds(
 
 fn print_launch_cmds(cmds: &Vec<Command>) {
     for (i, cmd) in cmds.iter().enumerate() {
-        println!("[partydeck] INSTANCE {}:", i + 1);
+        println!("[splitux] INSTANCE {}:", i + 1);
 
         let cwd = cmd.get_current_dir().unwrap_or_else(|| Path::new(""));
-        println!("[partydeck] CWD={}", cwd.display());
+        println!("[splitux] CWD={}", cwd.display());
 
         for var in cmd.get_envs() {
             let value = var.1.ok_or_else(|| "").unwrap_or_default();
             println!(
-                "[partydeck] {}={}",
+                "[splitux] {}={}",
                 var.0.to_string_lossy(),
                 value.display()
             );
         }
 
-        println!("[partydeck] \"{}\"", cmd.get_program().display());
+        println!("[splitux] \"{}\"", cmd.get_program().display());
 
-        print!("[partydeck] ");
+        print!("[splitux] ");
         for arg in cmd.get_args() {
             let fmtarg = arg.to_string_lossy();
             if fmtarg == "--bind"
                 || fmtarg == "bwrap"
                 || (fmtarg.starts_with("/") && fmtarg.len() > 1)
             {
-                print!("\n[partydeck] ");
+                print!("\n[splitux] ");
             } else {
                 print!(" ");
             }
             print!("\"{}\"", fmtarg);
         }
 
-        println!("\n[partydeck] ---------------------");
+        println!("\n[splitux] ---------------------");
     }
 }
 

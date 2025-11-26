@@ -11,7 +11,7 @@ use crate::util::*;
 
 use eframe::egui::{self, Key};
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum MenuPage {
     Home,
     Settings,
@@ -93,7 +93,7 @@ impl PartyApp {
         };
 
         app.spawn_task("Checking for updates", move || {
-            app.needs_update = check_for_partydeck_update();
+            app.needs_update = check_for_splitux_update();
         });
 
         app
@@ -101,17 +101,26 @@ impl PartyApp {
 }
 
 impl eframe::App for PartyApp {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if !raw_input.focused || self.task.is_some() {
             return;
         }
         match self.cur_page {
             MenuPage::Instances => self.handle_devices_instance_menu(),
-            _ => self.handle_gamepad_gui(raw_input),
+            _ => self.handle_gamepad_gui(ctx, raw_input),
         }
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Enhance focus visuals for controller navigation
+        ctx.style_mut(|style| {
+            // Make focus stroke more visible (bright cyan outline)
+            style.visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
+            style.visuals.selection.stroke =
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
+        });
+
         egui::TopBottomPanel::top("menu_nav_panel").show(ctx, |ui| {
             if self.task.is_some() {
                 ui.disable();
@@ -214,8 +223,10 @@ impl PartyApp {
         self.handler_lite.is_some()
     }
 
-    fn handle_gamepad_gui(&mut self, raw_input: &mut egui::RawInput) {
+    fn handle_gamepad_gui(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let mut key: Option<egui::Key> = None;
+        let mut page_changed = false;
+
         for pad in &mut self.input_devices {
             if !pad.enabled() {
                 continue;
@@ -228,12 +239,17 @@ impl PartyApp {
                     } else {
                         self.cur_page = MenuPage::Home;
                     }
+                    page_changed = true;
                 }
                 Some(PadButton::XBtn) => {
                     self.profiles = scan_profiles(false);
                     self.cur_page = MenuPage::Profiles;
+                    page_changed = true;
                 }
-                Some(PadButton::YBtn) => self.cur_page = MenuPage::Settings,
+                Some(PadButton::YBtn) => {
+                    self.cur_page = MenuPage::Settings;
+                    page_changed = true;
+                }
                 Some(PadButton::SelectBtn) => key = Some(Key::Tab),
                 Some(PadButton::StartBtn) => {
                     if self.cur_page == MenuPage::Game {
@@ -241,12 +257,49 @@ impl PartyApp {
                         self.profiles = scan_profiles(true);
                         self.instance_add_dev = None;
                         self.cur_page = MenuPage::Instances;
+                        page_changed = true;
                     }
                 }
                 Some(PadButton::Up) => key = Some(Key::ArrowUp),
                 Some(PadButton::Down) => key = Some(Key::ArrowDown),
                 Some(PadButton::Left) => key = Some(Key::ArrowLeft),
                 Some(PadButton::Right) => key = Some(Key::ArrowRight),
+                Some(PadButton::LB) => {
+                    // Cycle to previous page: Home -> Settings -> Profiles -> Home
+                    match self.cur_page {
+                        MenuPage::Home => {
+                            self.cur_page = MenuPage::Settings;
+                            page_changed = true;
+                        }
+                        MenuPage::Profiles => {
+                            self.cur_page = MenuPage::Home;
+                            page_changed = true;
+                        }
+                        MenuPage::Settings => {
+                            self.cur_page = MenuPage::Profiles;
+                            page_changed = true;
+                        }
+                        _ => {} // Don't cycle from special pages
+                    }
+                }
+                Some(PadButton::RB) => {
+                    // Cycle to next page: Home -> Profiles -> Settings -> Home
+                    match self.cur_page {
+                        MenuPage::Home => {
+                            self.cur_page = MenuPage::Profiles;
+                            page_changed = true;
+                        }
+                        MenuPage::Profiles => {
+                            self.cur_page = MenuPage::Settings;
+                            page_changed = true;
+                        }
+                        MenuPage::Settings => {
+                            self.cur_page = MenuPage::Home;
+                            page_changed = true;
+                        }
+                        _ => {} // Don't cycle from special pages
+                    }
+                }
                 Some(_) => {}
                 None => {}
             }
@@ -260,6 +313,11 @@ impl PartyApp {
                 repeat: false,
                 modifiers: egui::Modifiers::default(),
             });
+        }
+
+        // When page changes, clear focus so sidebar doesn't stay highlighted
+        if page_changed {
+            ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::NULL));
         }
     }
 
@@ -420,6 +478,7 @@ impl PartyApp {
         };
 
         let instances = self.instances.clone();
+        let monitors = self.monitors.clone();
         let dev_infos: Vec<DeviceInfo> = self.input_devices.iter().map(|p| p.info()).collect();
 
         let cfg = self.options.clone();
@@ -432,7 +491,7 @@ impl PartyApp {
                 sleep(std::time::Duration::from_secs_f32(1.5));
 
                 if let Err(err) = setup_profiles(&handler, &instances) {
-                    println!("[partydeck] Error mounting game directories: {}", err);
+                    println!("[splitux] Error mounting game directories: {}", err);
                     msg("Failed mounting game directories", &format!("{err}"));
                     return;
                 }
@@ -440,26 +499,21 @@ impl PartyApp {
                     && !cfg.disable_mount_gamedirs
                     && let Err(err) = fuse_overlayfs_mount_gamedirs(&handler, &instances)
                 {
-                    println!("[partydeck] Error mounting game directories: {}", err);
+                    println!("[splitux] Error mounting game directories: {}", err);
                     msg("Failed mounting game directories", &format!("{err}"));
                     return;
                 }
-                if let Err(err) = launch_game(&handler, &dev_infos, &instances, &cfg) {
-                    println!("[partydeck] Error launching instances: {}", err);
+                if let Err(err) = launch_game(&handler, &dev_infos, &instances, &monitors, &cfg) {
+                    println!("[splitux] Error launching instances: {}", err);
                     msg("Launch Error", &format!("{err}"));
                 }
-                if cfg.enable_kwin_script {
-                    if let Err(err) = kwin_dbus_unload_script() {
-                        println!("[partydeck] Error unloading KWin script: {}", err);
-                        msg("Failed unloading KWin script", &format!("{err}"));
-                    }
-                }
+                // WM teardown is now handled inside launch_game
                 if let Err(err) = remove_guest_profiles() {
-                    println!("[partydeck] Error removing guest profiles: {}", err);
+                    println!("[splitux] Error removing guest profiles: {}", err);
                     msg("Failed removing guest profiles", &format!("{err}"));
                 }
                 if let Err(err) = clear_tmp() {
-                    println!("[partydeck] Error removing tmp directory: {}", err);
+                    println!("[splitux] Error removing tmp directory: {}", err);
                     msg("Failed removing tmp directory", &format!("{err}"));
                 }
             },

@@ -9,7 +9,7 @@ pub fn create_profile(name: &str) -> Result<(), std::io::Error> {
         return Ok(());
     }
 
-    println!("[partydeck] Creating profile {name}");
+    println!("[splitux] Creating profile {name}");
     let path_profile = PATH_PARTY.join(format!("profiles/{name}"));
     let path_steam = path_profile.join("steam/settings");
 
@@ -26,7 +26,7 @@ pub fn create_profile(name: &str) -> Result<(), std::io::Error> {
     let usersettings = format!("[user::general]\naccount_name={name}");
     std::fs::write(path_steam.join("configs.user.ini"), usersettings)?;
 
-    println!("[partydeck] Profile created successfully");
+    println!("[splitux] Profile created successfully");
     Ok(())
 }
 
@@ -41,7 +41,7 @@ pub fn create_profile_gamesave(name: &str, h: &Handler) -> Result<(), Box<dyn Er
     if path_gamesave.exists() {
         return Ok(());
     }
-    println!("[partydeck] Creating game save {} for {}", uid, name);
+    println!("[splitux] Creating game save {} for {}", uid, name);
 
     std::fs::create_dir_all(&path_gamesave)?;
     
@@ -69,7 +69,7 @@ pub fn create_profile_gamesave(name: &str, h: &Handler) -> Result<(), Box<dyn Er
         copy_dir_recursive(&profile_copy_windata, &path_windata)?;
     }
 
-    println!("[partydeck] Profile save data created successfully");
+    println!("[splitux] Profile save data created successfully");
     Ok(())
 }
 

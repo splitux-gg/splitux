@@ -21,34 +21,18 @@ macro_rules! cur_handler {
 
 impl PartyApp {
     pub fn display_page_main(&mut self, ui: &mut Ui) {
-        ui.heading("Welcome to PartyDeck");
+        ui.heading("Welcome to Splitux");
         ui.separator();
         ui.label("Press SELECT/BACK or Tab to unlock gamepad navigation.");
-        ui.label("PartyDeck is in the very early stages of development; as such, you will likely encounter bugs, issues, and strange design decisions.");
+        ui.label("Splitux is a local co-op split-screen launcher for Linux.");
         ui.label("For debugging purposes, it's recommended to read terminal output (stdout) for further information on errors.");
         ui.separator();
         ui.horizontal_wrapped(|ui| {
-            ui.label("Thank you to");
-            ui.hyperlink_to("♥Ko-fi", "https://ko-fi.com/wunner");
-            ui.label("supporters:");
+            ui.label("Based on");
+            ui.hyperlink_to("PartyDeck", "https://github.com/wunnr/partydeck");
+            ui.label("by @wunnr");
         });
-        ui.label("Framilano, Jayden, Marc, Max Rei");
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Thank you to");
-            ui.hyperlink_to(" GitHub", "https://github.com/wunnr/partydeck");
-            ui.label("contributors/handler creators:")
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.hyperlink_to("@Blahkaey", "https://github.com/Blahkaey");
-            ui.hyperlink_to("@blckink", "https://github.com/blckink");
-            ui.hyperlink_to("@davidawesome-02", "https://github.com/davidawesome-02");
-            ui.hyperlink_to("@felipecrs", "https://github.com/felipecrs");
-            ui.hyperlink_to("@framilano", "https://github.com/framilano");
-            ui.hyperlink_to("@FrancisBernard34", "https://github.com/FrancisBernard34");
-            ui.hyperlink_to("@Rudicito", "https://github.com/Rudicito");
-            ui.hyperlink_to("@Tau5", "https://github.com/Tau5");
-            ui.hyperlink_to("@Twig6943", "https://github.com/Twig6943");
-        });
+        ui.separator();
     }
 
     pub fn display_page_settings(&mut self, ui: &mut Ui) {
@@ -299,11 +283,11 @@ impl PartyApp {
                     };
                     let mismatch2 = match h.spec_ver < HANDLER_SPEC_CURRENT_VERSION {
                         true => "Up-to-date handlers can be found by clicking the ⮋ button on the top bar of the launcher.",
-                        false => "It is recommended to update PartyDeck to the latest version.",
+                        false => "It is recommended to update Splitux to the latest version.",
                     };
                     msg(
                         "Handler version mismatch",
-                        &format!("This handler was meant for use with {} version of PartyDeck; you may experience issues or the game may not work at all. {} If everything still works fine, you can prevent this message appearing in the future by editing the handler, updating the spec version and saving.",
+                        &format!("This handler was meant for use with {} version of Splitux; you may experience issues or the game may not work at all. {} If everything still works fine, you can prevent this message appearing in the future by editing the handler, updating the spec version and saving.",
                             mismatch, mismatch2
                         )
                     );
@@ -475,13 +459,33 @@ impl PartyApp {
     }
 
     pub fn display_settings_general(&mut self, ui: &mut Ui) {
-        let enable_kwin_script_check = ui.checkbox(
-            &mut self.options.enable_kwin_script,
-            "(KDE) Automatically resize/reposition instances using KWin script",
-        );
-        if enable_kwin_script_check.hovered() {
-            self.infotext = "DEFAULT: Enabled\n\n Resizes/repositions instances to fit the screen using a KWin script. If using a desktop environment or window manager other than KDE Plasma, uncheck this; note that you will need to manually resize and reposition the windows.".to_string();
-        }
+        ui.horizontal(|ui| {
+            let wm_label = ui.label("Window Manager");
+            let r1 = ui.radio_value(
+                &mut self.options.window_manager,
+                WindowManagerType::Auto,
+                "Auto",
+            );
+            let r2 = ui.radio_value(
+                &mut self.options.window_manager,
+                WindowManagerType::KWin,
+                "KWin",
+            );
+            let r3 = ui.radio_value(
+                &mut self.options.window_manager,
+                WindowManagerType::Hyprland,
+                "Hyprland",
+            );
+            let r4 = ui.radio_value(
+                &mut self.options.window_manager,
+                WindowManagerType::GamescopeOnly,
+                "None",
+            );
+
+            if wm_label.hovered() || r1.hovered() || r2.hovered() || r3.hovered() || r4.hovered() {
+                self.infotext = "DEFAULT: Auto\n\nSelect window manager for positioning game windows. Auto detects your WM. Use 'None' for manual positioning or Gamescope-only mode.".to_string();
+            }
+        });
 
         ui.horizontal(|ui| {
             let split_style_label = ui.label("Split style");
@@ -560,7 +564,7 @@ impl PartyApp {
             "(Debug) Force run instances from original game directory",
         );
         if disable_mount_gamedirs_check.hovered() {
-            self.infotext = "DEFAULT: Disabled\n\nBy default, PartyDeck mounts game directories using fuse-overlayfs to let each instance write to the game's directory without conflicting with each other or affecting the game's installation. In addition, this lets handlers overlay content like mods or config files onto the game directory. Enabling this forces instances to launch from the original game directory without mounting, which will prevent handlers from using built-in mods, but may be useful for diagnosing issues.".to_string();
+            self.infotext = "DEFAULT: Disabled\n\nBy default, Splitux mounts game directories using fuse-overlayfs to let each instance write to the game's directory without conflicting with each other or affecting the game's installation. In addition, this lets handlers overlay content like mods or config files onto the game directory. Enabling this forces instances to launch from the original game directory without mounting, which will prevent handlers from using built-in mods, but may be useful for diagnosing issues.".to_string();
         }
 
         ui.separator();
@@ -568,7 +572,7 @@ impl PartyApp {
         if ui.button("Erase All Proton Prefix Data").clicked() {
             if yesno(
                 "Erase Prefix?",
-                "This will erase all Proton prefixes used by PartyDeck. This shouldn't erase profile/game-specific data, but exercise caution. Are you sure?",
+                "This will erase all Proton prefixes used by Splitux. This shouldn't erase profile/game-specific data, but exercise caution. Are you sure?",
             ) && PATH_PARTY.join("prefixes").exists()
             {
                 if let Err(err) = std::fs::remove_dir_all(PATH_PARTY.join("prefixes")) {
@@ -579,12 +583,12 @@ impl PartyApp {
             }
         }
 
-        if ui.button("Open PartyDeck Data Folder").clicked() {
+        if ui.button("Open Splitux Data Folder").clicked() {
             if let Err(_) = std::process::Command::new("xdg-open")
                 .arg(PATH_PARTY.clone())
                 .status()
             {
-                msg("Error", "Couldn't open PartyDeck Data Folder!");
+                msg("Error", "Couldn't open Splitux Data Folder!");
             }
         }
     }

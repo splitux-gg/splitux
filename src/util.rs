@@ -46,7 +46,7 @@ pub fn file_dialog_relative(base_dir: &PathBuf) -> Result<PathBuf, Box<dyn Error
 
 pub fn copy_dir_recursive(src: &PathBuf, dest: &PathBuf) -> Result<(), Box<dyn Error>> {
     println!(
-        "[partydeck] util::copy_dir_recursive - src: {}, dest: {}",
+        "[splitux] util::copy_dir_recursive - src: {}, dest: {}",
         src.display(),
         dest.display()
     );
@@ -164,11 +164,11 @@ pub fn clear_tmp() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn check_for_partydeck_update() -> bool {
+pub fn check_for_splitux_update() -> bool {
     // Try to get the latest release tag from GitHub
     if let Ok(client) = reqwest::blocking::Client::new()
-        .get("https://api.github.com/repos/wunnr/partydeck/releases/latest")
-        .header("User-Agent", "partydeck")
+        .get("https://api.github.com/repos/wunnr/splitux/releases/latest")
+        .header("User-Agent", "splitux")
         .send()
     {
         if let Ok(release) = client.json::<serde_json::Value>() {
@@ -195,47 +195,7 @@ pub fn check_for_partydeck_update() -> bool {
     false
 }
 
-// Sends the splitscreen script to the active KWin session through DBus
-pub fn kwin_dbus_start_script(file: PathBuf) -> Result<(), Box<dyn Error>> {
-    println!(
-        "[partydeck] util::kwin_dbus_start_script - Loading script {}...",
-        file.display()
-    );
-    if !file.exists() {
-        return Err("[partydeck] util::kwin_dbus_start_script - Script file doesn't exist!".into());
-    }
-
-    let conn = zbus::blocking::Connection::session()?;
-    let proxy = zbus::blocking::Proxy::new(
-        &conn,
-        "org.kde.KWin",
-        "/Scripting",
-        "org.kde.kwin.Scripting",
-    )?;
-
-    let _: i32 = proxy.call("loadScript", &(file.to_string_lossy(), "splitscreen"))?;
-    println!("[partydeck] util::kwin_dbus_start_script - Script loaded. Starting...");
-    let _: () = proxy.call("start", &())?;
-
-    println!("[partydeck] util::kwin_dbus_start_script - KWin script started.");
-    Ok(())
-}
-
-pub fn kwin_dbus_unload_script() -> Result<(), Box<dyn Error>> {
-    println!("[partydeck] util::kwin_dbus_unload_script - Unloading splitscreen script...");
-    let conn = zbus::blocking::Connection::session()?;
-    let proxy = zbus::blocking::Proxy::new(
-        &conn,
-        "org.kde.KWin",
-        "/Scripting",
-        "org.kde.kwin.Scripting",
-    )?;
-
-    let _: bool = proxy.call("unloadScript", &("splitscreen"))?;
-
-    println!("[partydeck] util::kwin_dbus_unload_script - Script unloaded.");
-    Ok(())
-}
+// KWin D-Bus functions have been moved to src/wm/kwin.rs
 
 pub trait SanitizePath {
     fn sanitize_path(&self) -> String;

@@ -13,8 +13,21 @@ pub enum PadFilterType {
     OnlySteamInput,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+pub enum WindowManagerType {
+    #[default]
+    Auto,
+    KWin,
+    Hyprland,
+    GamescopeOnly,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PartyConfig {
+    #[serde(default)]
+    pub window_manager: WindowManagerType,
+    // Keep enable_kwin_script for backwards compatibility (will be migrated)
+    #[serde(default = "default_enable_kwin_script")]
     pub enable_kwin_script: bool,
     pub gamescope_fix_lowres: bool,
     pub gamescope_sdl_backend: bool,
@@ -30,9 +43,14 @@ pub struct PartyConfig {
     pub disable_mount_gamedirs: bool,
 }
 
+fn default_enable_kwin_script() -> bool {
+    true
+}
+
 impl Default for PartyConfig {
     fn default() -> Self {
         PartyConfig {
+            window_manager: WindowManagerType::Auto,
             enable_kwin_script: true,
             gamescope_fix_lowres: true,
             gamescope_sdl_backend: true,
@@ -52,13 +70,18 @@ pub fn load_cfg() -> PartyConfig {
     let path = PATH_PARTY.join("settings.json");
 
     if let Ok(file) = File::open(path) {
-        if let Ok(config) = serde_json::from_reader::<_, PartyConfig>(BufReader::new(file)) {
+        if let Ok(mut config) = serde_json::from_reader::<_, PartyConfig>(BufReader::new(file)) {
+            // Migrate old enable_kwin_script setting to window_manager
+            // If enable_kwin_script is false and window_manager is Auto, set to GamescopeOnly
+            if !config.enable_kwin_script && config.window_manager == WindowManagerType::Auto {
+                config.window_manager = WindowManagerType::GamescopeOnly;
+            }
             return config;
         }
     }
 
     // Return default settings if file doesn't exist or has error
-    return PartyConfig::default();
+    PartyConfig::default()
 }
 
 pub fn save_cfg(config: &PartyConfig) -> Result<(), Box<dyn Error>> {

@@ -7,6 +7,7 @@ mod monitor;
 mod paths;
 mod profiles;
 mod util;
+mod wm;
 
 use crate::app::*;
 use crate::handler::Handler;
@@ -23,10 +24,10 @@ fn main() -> eframe::Result {
 
     let monitors = get_monitors_sdl();
 
-    println!("[partydeck] Monitors detected:");
+    println!("[splitux] Monitors detected:");
     for monitor in &monitors {
         println!(
-            "[partydeck] {} ({}x{})",
+            "[splitux] {} ({}x{})",
             monitor.name(),
             monitor.width(),
             monitor.height()
@@ -41,30 +42,36 @@ fn main() -> eframe::Result {
     }
 
     if std::env::args().any(|arg| arg == "--kwin") {
+        use crate::wm::{KWinManager, NestedSession};
+
         let args: Vec<String> = std::env::args().filter(|arg| arg != "--kwin").collect();
+        let kwin = KWinManager::new();
+        let mut cmd = kwin.nested_session_command(&args, &monitors[0]);
 
-        let (w, h) = (monitors[0].width(), monitors[0].height());
-        let mut cmd = std::process::Command::new("kwin_wayland");
-
-        cmd.arg("--xwayland");
-        cmd.arg("--width");
-        cmd.arg(w.to_string());
-        cmd.arg("--height");
-        cmd.arg(h.to_string());
-        cmd.arg("--exit-with-session");
-        let args_string = args
-            .iter()
-            .map(|arg| format!("\"{}\"", arg))
-            .collect::<Vec<String>>()
-            .join(" ");
-        cmd.arg(args_string);
-
-        println!("[partydeck] Launching kwin session: {:?}", cmd);
+        println!("[splitux] Launching kwin session: {:?}", cmd);
 
         match cmd.spawn() {
             Ok(_) => std::process::exit(0),
             Err(e) => {
-                eprintln!("[partydeck] Failed to start kwin_wayland: {}", e);
+                eprintln!("[splitux] Failed to start kwin_wayland: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if std::env::args().any(|arg| arg == "--hyprland") {
+        use crate::wm::{HyprlandManager, NestedSession};
+
+        let args: Vec<String> = std::env::args().filter(|arg| arg != "--hyprland").collect();
+        let hyprland = HyprlandManager::new();
+        let mut cmd = hyprland.nested_session_command(&args, &monitors[0]);
+
+        println!("[splitux] Launching hyprland session: {:?}", cmd);
+
+        match cmd.spawn() {
+            Ok(_) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("[splitux] Failed to start Hyprland: {}", e);
                 std::process::exit(1);
             }
         }
@@ -130,10 +137,10 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    println!("[partydeck] Starting eframe app...");
+    println!("[splitux] Starting eframe app...");
 
     eframe::run_native(
-        "PartyDeck",
+        "Splitux",
         options,
         Box::new(|cc| {
             // This gives us image support:
@@ -149,11 +156,12 @@ fn main() -> eframe::Result {
 
 static USAGE_TEXT: &str = r#"
 {}
-Usage: partydeck [OPTIONS]
+Usage: splitux [OPTIONS]
 
 Options:
-    --exec <executable>   Execute the specified executable in splitscreen. If this isn't specified, PartyDeck will launch in the regular GUI mode.
+    --exec <executable>   Execute the specified executable in splitscreen. If this isn't specified, Splitux will launch in the regular GUI mode.
     --args [args]         Specify arguments for the executable to be launched with. Must be quoted if containing spaces.
     --fullscreen          Start the GUI in fullscreen mode
-    --kwin                Launch PartyDeck inside of a KWin session
+    --kwin                Launch Splitux inside of a nested KWin session
+    --hyprland            Launch Splitux inside of a nested Hyprland session
 "#;

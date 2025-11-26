@@ -255,7 +255,7 @@ impl Handler {
         let mut file = FileDialog::new()
             .set_title("Save file to:")
             .set_directory(&*PATH_HOME)
-            .add_filter("PartyDeck Handler Package", &["pd2"])
+            .add_filter("Splitux Handler Package", &["pd2"])
             .save_file()
             .ok_or_else(|| "File not specified")?;
 
@@ -315,7 +315,7 @@ pub fn import_pd2() -> Result<(), Box<dyn Error>> {
     let Some(file) = FileDialog::new()
         .set_title("Select File")
         .set_directory(&*PATH_HOME)
-        .add_filter("PartyDeck Handler Package", &["pd2"])
+        .add_filter("Splitux Handler Package", &["pd2"])
         .pick_file()
     else {
         return Ok(());

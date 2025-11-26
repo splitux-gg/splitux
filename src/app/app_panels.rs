@@ -21,8 +21,8 @@ impl PartyApp {
     pub fn display_panel_top(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             let hometext = match self.is_lite() {
-                true => "▶",
-                false => "ℹ",
+                true => "▶ Play",
+                false => "ℹ Home",
             };
             let homepage = match self.is_lite() {
                 true => MenuPage::Instances,
@@ -42,7 +42,7 @@ impl PartyApp {
             }
 
             let settingsbtn = ui.add(
-                egui::Button::image_and_text(egui::include_image!("../../res/BTN_NORTH.png"), "⛭")
+                egui::Button::image_and_text(egui::include_image!("../../res/BTN_NORTH.png"), "⛭ Settings")
                     .selected(self.cur_page == MenuPage::Settings),
             );
             if settingsbtn.clicked() {
@@ -50,7 +50,7 @@ impl PartyApp {
             }
 
             let profilesbtn = ui.add(
-                egui::Button::image_and_text(egui::include_image!("../../res/BTN_WEST.png"), "👥")
+                egui::Button::image_and_text(egui::include_image!("../../res/BTN_WEST.png"), "👥 Profiles")
                     .selected(self.cur_page == MenuPage::Profiles),
             );
             if profilesbtn.clicked() {
@@ -77,18 +77,18 @@ impl PartyApp {
                     true => format!("v{} (🆕 available)", env!("CARGO_PKG_VERSION")),
                     false => format!("v{}", env!("CARGO_PKG_VERSION")),
                 };
-                ui.hyperlink_to(version_label, "https://github.com/wunnr/partydeck/releases");
+                ui.hyperlink_to(version_label, "https://github.com/gabrielgad/splitux/releases");
                 ui.add(egui::Separator::default().vertical());
                 ui.hyperlink_to("⮋", "https://drive.proton.me/urls/D9HBKM18YR#zG8XC8yVy9WL")
                     .on_hover_text("Download Game Handlers");
                 ui.hyperlink_to("♥", "https://ko-fi.com/wunner")
-                    .on_hover_text("Support PartyDeck Development");
+                    .on_hover_text("Support Splitux Development");
                 ui.hyperlink_to(
                     "🖹",
-                    "https://github.com/wunnr/partydeck/tree/main?tab=License-2-ov-file",
+                    "https://github.com/gabrielgad/splitux/tree/main?tab=License-2-ov-file",
                 )
                 .on_hover_text("Third-Party Licenses");
-                ui.hyperlink_to("", "https://github.com/wunnr/partydeck")
+                ui.hyperlink_to("", "https://github.com/gabrielgad/splitux")
                     .on_hover_text("GitHub");
             });
         });
@@ -173,7 +173,7 @@ impl PartyApp {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
             ui.link("ℹ Incorrect/missing controller mappings in-game?").on_hover_ui(|ui| {
-                ui.label("Some native Linux games run using an older version of SDL2 that doesn't support newer controllers; you can edit the handler and change the SDL2 Override setting to \"Steam Runtime\" for older 32-bit games, or \"System Installation\" for 64-bit games.\n\nWindows Unity-based games may not recognize input from PlayStation controllers; the current workaround for this is to use them through Steam Input, and change PartyDeck controller filter setting to \"Only Steam Input\".");
+                ui.label("Some native Linux games run using an older version of SDL2 that doesn't support newer controllers; you can edit the handler and change the SDL2 Override setting to \"Steam Runtime\" for older 32-bit games, or \"System Installation\" for 64-bit games.\n\nWindows Unity-based games may not recognize input from PlayStation controllers; the current workaround for this is to use them through Steam Input, and change Splitux controller filter setting to \"Only Steam Input\".");
             });
             ui.link("ℹ Devices not being detected?").on_hover_ui(|ui| {
                 ui.style_mut().interaction.selectable_labels = true;
@@ -244,7 +244,7 @@ impl PartyApp {
                 ),
             ) {
                 if let Err(err) = self.handlers[i].remove_handler() {
-                    println!("[partydeck] Failed to remove handler: {}", err);
+                    println!("[splitux] Failed to remove handler: {}", err);
                     msg("Error", &format!("Failed to remove handler: {}", err));
                 }
 
@@ -260,7 +260,7 @@ impl PartyApp {
 
         if ui.button("Export").clicked() {
             if let Err(err) = self.handlers[i].export_pd2() {
-                println!("[partydeck] Failed to export handler: {}", err);
+                println!("[splitux] Failed to export handler: {}", err);
                 msg("Error", &format!("Failed to export handler: {}", err));
             }
         }
