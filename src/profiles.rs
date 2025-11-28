@@ -3,6 +3,32 @@ use std::path::PathBuf;
 
 use crate::{handler::Handler, paths::*, util::copy_dir_recursive};
 
+// Simple hash function for generating unique values from profile name
+fn hash_name(name: &str) -> u64 {
+    let mut hash: u64 = 5381;
+    for byte in name.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+    }
+    hash
+}
+
+// Generate a unique Steam64 ID based on the profile name
+// Steam64 IDs start at 76561197960265728 (base) + account_id
+pub fn generate_steam_id(name: &str) -> u64 {
+    const STEAM64_BASE: u64 = 76561197960265728;
+    // Limit to valid account ID range (roughly 0 to 1 billion)
+    let account_id = (hash_name(name) % 1_000_000_000) + 1;
+    STEAM64_BASE + account_id
+}
+
+// Generate a unique Goldberg listen port based on profile name
+// Ports range from 47584 to 48583 (1000 possible ports)
+pub fn generate_listen_port(name: &str) -> u16 {
+    const BASE_PORT: u16 = 47584;
+    const PORT_RANGE: u16 = 1000;
+    BASE_PORT + (hash_name(name) % PORT_RANGE as u64) as u16
+}
+
 // Makes a folder and sets up Goldberg Steam Emu profile for Steam games
 pub fn create_profile(name: &str) -> Result<(), std::io::Error> {
     if PATH_PARTY.join(format!("profiles/{name}")).exists() {
@@ -11,7 +37,8 @@ pub fn create_profile(name: &str) -> Result<(), std::io::Error> {
 
     println!("[splitux] Creating profile {name}");
     let path_profile = PATH_PARTY.join(format!("profiles/{name}"));
-    let path_steam = path_profile.join("steam/settings");
+    // Goldberg expects settings in {GseAppPath}/steam_settings/
+    let path_steam = path_profile.join("steam/steam_settings");
 
     std::fs::create_dir_all(path_profile.join("windata/AppData/Local/Temp"))?;
     std::fs::create_dir_all(path_profile.join("windata/AppData/LocalLow"))?;
@@ -23,10 +50,41 @@ pub fn create_profile(name: &str) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(path_profile.join("home/.config"))?;
     std::fs::create_dir_all(path_steam.clone())?;
 
-    let usersettings = format!("[user::general]\naccount_name={name}");
+    // Generate unique Steam ID and listen port for this profile
+    let steam_id = generate_steam_id(name);
+    let listen_port = generate_listen_port(name);
+
+    // User settings (account name and Steam ID)
+    let usersettings = format!(
+        "[user::general]\naccount_name={name}\naccount_steamid={steam_id}"
+    );
     std::fs::write(path_steam.join("configs.user.ini"), usersettings)?;
 
-    println!("[splitux] Profile created successfully");
+    // Main settings (unique listen port for LAN multiplayer)
+    let mainsettings = format!(
+        r#"[main::general]
+new_app_ticket=1
+gc_token=1
+matchmaking_server_list_actual_type=0
+matchmaking_server_details_via_source_query=0
+
+[main::connectivity]
+disable_lan_only=0
+disable_networking=0
+listen_port={listen_port}
+offline=0
+disable_lobby_creation=0
+disable_source_query=0
+share_leaderboards_over_network=0
+"#
+    );
+    std::fs::write(path_steam.join("configs.main.ini"), mainsettings)?;
+
+    // Auto-accept and auto-send invites for seamless multiplayer
+    std::fs::write(path_steam.join("auto_accept_invite.txt"), "")?;
+    std::fs::write(path_steam.join("auto_send_invite.txt"), "")?;
+
+    println!("[splitux] Profile created: Steam ID {steam_id}, Port {listen_port}");
     Ok(())
 }
 

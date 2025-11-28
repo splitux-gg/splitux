@@ -1,4 +1,7 @@
 mod app;
+mod bwrap;
+mod gamescope;
+mod goldberg;
 mod handler;
 mod input;
 mod instance;
@@ -6,6 +9,7 @@ mod launch;
 mod monitor;
 mod paths;
 mod profiles;
+mod proton;
 mod util;
 mod wm;
 

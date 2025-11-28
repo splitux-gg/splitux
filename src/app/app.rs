@@ -491,18 +491,12 @@ impl PartyApp {
                 sleep(std::time::Duration::from_secs_f32(1.5));
 
                 if let Err(err) = setup_profiles(&handler, &instances) {
-                    println!("[splitux] Error mounting game directories: {}", err);
-                    msg("Failed mounting game directories", &format!("{err}"));
+                    println!("[splitux] Error setting up profiles: {}", err);
+                    msg("Failed setting up profiles", &format!("{err}"));
                     return;
                 }
-                if handler.is_saved_handler()
-                    && !cfg.disable_mount_gamedirs
-                    && let Err(err) = fuse_overlayfs_mount_gamedirs(&handler, &instances)
-                {
-                    println!("[splitux] Error mounting game directories: {}", err);
-                    msg("Failed mounting game directories", &format!("{err}"));
-                    return;
-                }
+                // Note: fuse_overlayfs_mount_gamedirs is now called inside launch_cmds
+                // with proper Goldberg overlay support
                 if let Err(err) = launch_game(&handler, &dev_infos, &instances, &monitors, &cfg) {
                     println!("[splitux] Error launching instances: {}", err);
                     msg("Launch Error", &format!("{err}"));
