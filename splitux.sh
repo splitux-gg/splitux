@@ -28,30 +28,94 @@ get_target_dir() {
 }
 
 check_deps() {
-    local missing=()
-    local optional=()
     local mode="${1:-runtime}"
+    local missing_pacman=()
+    local missing_aur=()
+    local optional=()
 
-    # Required runtime dependencies
-    command -v fuse-overlayfs >/dev/null 2>&1 || missing+=("fuse-overlayfs")
-    command -v bwrap >/dev/null 2>&1 || missing+=("bubblewrap")
+    step "Checking dependencies..."
+
+    # Required runtime dependencies (always checked)
+    command -v fuse-overlayfs >/dev/null 2>&1 || missing_pacman+=("fuse-overlayfs")
+    command -v bwrap >/dev/null 2>&1 || missing_pacman+=("bubblewrap")
 
     # Build dependencies
     if [[ "$mode" == "build" ]]; then
-        command -v cargo >/dev/null 2>&1 || missing+=("cargo/rust")
+        # Build tools
+        command -v cargo >/dev/null 2>&1 || missing_pacman+=("rust")
+        command -v meson >/dev/null 2>&1 || missing_pacman+=("meson")
+        command -v ninja >/dev/null 2>&1 || missing_pacman+=("ninja")
+        command -v cmake >/dev/null 2>&1 || missing_pacman+=("cmake")
+        command -v pkg-config >/dev/null 2>&1 || missing_pacman+=("pkgconf")
+        command -v git >/dev/null 2>&1 || missing_pacman+=("git")
+
+        # Gamescope build libraries (only if no system gamescope)
+        if ! command -v gamescope >/dev/null 2>&1; then
+            declare -A pkgmap=(
+                ["vulkan"]="vulkan-headers"
+                ["libpipewire-0.3"]="pipewire"
+                ["wayland-client"]="wayland"
+                ["x11"]="libx11"
+                ["xkbcommon"]="libxkbcommon"
+                ["libdrm"]="libdrm"
+                ["libinput"]="libinput"
+                ["sdl2"]="sdl2"
+                ["xcomposite"]="libxcomposite"
+                ["xtst"]="libxtst"
+                ["xres"]="libxres"
+                ["xmu"]="libxmu"
+                ["libcap"]="libcap"
+                ["libdecor-0"]="libdecor"
+                ["libavif"]="libavif"
+                ["benchmark"]="benchmark"
+                ["lcms2"]="lcms2"
+                ["libdisplay-info"]="libdisplay-info"
+                ["pixman-1"]="pixman"
+            )
+
+            for pkg in "${!pkgmap[@]}"; do
+                if ! pkg-config --exists "$pkg" 2>/dev/null; then
+                    missing_pacman+=("${pkgmap[$pkg]}")
+                fi
+            done
+
+            # Check vulkan header specifically
+            if ! echo '#include <vulkan/vulkan.h>' | cpp -x c - >/dev/null 2>&1; then
+                [[ ! " ${missing_pacman[*]} " =~ " vulkan-headers " ]] && missing_pacman+=("vulkan-headers")
+            fi
+        fi
     fi
 
     # Optional but recommended
     command -v gamescope >/dev/null 2>&1 || optional+=("gamescope")
-    command -v umu-run >/dev/null 2>&1 || optional+=("umu-launcher (for Windows games)")
+    command -v umu-run >/dev/null 2>&1 || missing_aur+=("umu-launcher")
     command -v premake5 >/dev/null 2>&1 || optional+=("premake5 (for goldberg/Steam LAN)")
 
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        error "Missing required dependencies: ${missing[*]}"
+    # Report missing dependencies
+    if [[ ${#missing_pacman[@]} -gt 0 ]] || [[ ${#missing_aur[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "${RED}[splitux] Missing dependencies${NC}"
+        echo ""
+
+        if [[ ${#missing_pacman[@]} -gt 0 ]]; then
+            # Remove duplicates
+            local unique_pacman=($(printf '%s\n' "${missing_pacman[@]}" | sort -u))
+            echo "Pacman packages:"
+            echo -e "  ${CYAN}sudo pacman -S ${unique_pacman[*]}${NC}"
+            echo ""
+        fi
+
+        if [[ ${#missing_aur[@]} -gt 0 ]]; then
+            echo "AUR packages:"
+            echo -e "  ${CYAN}yay -S ${missing_aur[*]}${NC}"
+            echo ""
+        fi
+
+        exit 1
     fi
 
     if [[ ${#optional[@]} -gt 0 && "$mode" == "build" ]]; then
-        warn "Optional dependencies not found: ${optional[*]}"
+        warn "Optional: ${optional[*]}"
     fi
 
     info "Dependencies OK"
@@ -68,9 +132,19 @@ init_submodules() {
 build_goldberg() {
     local gbe_src="$SCRIPT_DIR/deps/gbe_fork"
     local gbe_out="$SCRIPT_DIR/res/goldberg"
+    local gbe_old="$SCRIPT_DIR/deps/gbe_fork/release"
 
     if [[ -d "$gbe_out/linux64" ]]; then
-        info "goldberg already built"
+        info "goldberg already available"
+        return 0
+    fi
+
+    # Check if goldberg exists in old location (from previous build.sh downloads)
+    if [[ -d "$gbe_old/linux64" ]]; then
+        step "Copying goldberg from previous download..."
+        mkdir -p "$gbe_out"
+        cp -r "$gbe_old"/{linux32,linux64,win} "$gbe_out/" 2>/dev/null || true
+        info "goldberg copied from deps/gbe_fork/release"
         return 0
     fi
 

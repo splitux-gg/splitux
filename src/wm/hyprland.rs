@@ -21,7 +21,7 @@ pub struct HyprlandManager {
     socket_path: Option<PathBuf>,
     rules_added: bool,
     target_monitor: Option<String>,
-    waybar_hidden: bool,
+    hidden_bars: Vec<String>, // Track which bars we've hidden (waybar, ags, eww, etc.)
 }
 
 impl HyprlandManager {
@@ -30,7 +30,7 @@ impl HyprlandManager {
             socket_path: Self::find_socket(),
             rules_added: false,
             target_monitor: None,
-            waybar_hidden: false,
+            hidden_bars: Vec::new(),
         }
     }
 
@@ -109,30 +109,36 @@ impl HyprlandManager {
     }
 
     /// Add window rules for gamescope windows
+    /// Uses broad regex to catch various gamescope window classes
     fn add_window_rules(&mut self, target_monitor: &str) -> WmResult<()> {
         self.target_monitor = Some(target_monitor.to_string());
 
+        // Use broader regex to catch all gamescope variants
+        // gamescope can report as: gamescope, gamescope-kbm, Gamescope, etc.
+        let class_match = "class:^([Gg]amescope.*)$";
+
         let commands = vec![
             // Float windows so we can position them precisely
-            "keyword windowrulev2 float,class:^(gamescope|gamescope-kbm)$".to_string(),
+            format!("keyword windowrulev2 float,{}", class_match),
             // Remove decorations for clean look
-            "keyword windowrulev2 noborder,class:^(gamescope|gamescope-kbm)$".to_string(),
-            "keyword windowrulev2 noblur,class:^(gamescope|gamescope-kbm)$".to_string(),
-            "keyword windowrulev2 noshadow,class:^(gamescope|gamescope-kbm)$".to_string(),
-            "keyword windowrulev2 noanim,class:^(gamescope|gamescope-kbm)$".to_string(),
-            // Prevent inactive window dimming - keep full opacity even when unfocused
-            "keyword windowrulev2 opaque,class:^(gamescope|gamescope-kbm)$".to_string(),
-            "keyword windowrulev2 nodim,class:^(gamescope|gamescope-kbm)$".to_string(),
+            format!("keyword windowrulev2 noborder,{}", class_match),
+            format!("keyword windowrulev2 noblur,{}", class_match),
+            format!("keyword windowrulev2 noshadow,{}", class_match),
+            format!("keyword windowrulev2 noanim,{}", class_match),
+            // Prevent inactive window dimming - CRITICAL for split-screen
+            format!("keyword windowrulev2 opaque,{}", class_match),
+            format!("keyword windowrulev2 nodim,{}", class_match),
+            // Force RGB (ignore alpha channel) - helps with some rendering issues
+            format!("keyword windowrulev2 forcergbx,{}", class_match),
+            // Pin windows so they appear on all workspaces and above other windows
+            format!("keyword windowrulev2 pin,{}", class_match),
             // Move to target monitor
-            format!(
-                "keyword windowrulev2 monitor {},class:^(gamescope|gamescope-kbm)$",
-                target_monitor
-            ),
+            format!("keyword windowrulev2 monitor {},{}", target_monitor, class_match),
         ];
 
         println!(
-            "[splitux] wm::hyprland - Adding window rules for monitor {}",
-            target_monitor
+            "[splitux] wm::hyprland - Adding window rules for monitor {} (class pattern: {})",
+            target_monitor, class_match
         );
 
         self.hyprctl_batch(&commands)?;
@@ -141,31 +147,57 @@ impl HyprlandManager {
         Ok(())
     }
 
-    /// Get list of gamescope window addresses
-    fn get_gamescope_windows(&self) -> WmResult<Vec<String>> {
+    /// Apply visual properties directly to a window via setprop
+    /// This guarantees the effect regardless of windowrule matching
+    fn apply_window_props(&self, address: &str) -> WmResult<()> {
+        // Use setprop with 'lock' to prevent dynamic rules from overriding
+        let commands = vec![
+            // Force disable blur
+            format!("setprop address:{} forcenoblur 1 lock", address),
+            // Force opaque (no transparency)
+            format!("setprop address:{} forceopaque 1 lock", address),
+            // Force disable animations
+            format!("setprop address:{} forcenoanims 1 lock", address),
+            // Force disable border
+            format!("setprop address:{} forcenoborder 1 lock", address),
+            // Force disable shadow
+            format!("setprop address:{} forcenoshadow 1 lock", address),
+            // Set full alpha (1.0 = fully visible)
+            format!("setprop address:{} alpha 1.0 lock", address),
+            // Set inactive alpha to full as well
+            format!("setprop address:{} alphainactive 1.0 lock", address),
+        ];
+
+        self.hyprctl_batch(&commands)
+    }
+
+    /// Get list of gamescope window addresses with their class names for debugging
+    fn get_gamescope_windows(&self) -> WmResult<Vec<(String, String)>> {
         let response = self.hyprctl("j/clients")?;
         let clients: serde_json::Value = serde_json::from_str(&response)
             .map_err(|e| format!("Failed to parse clients: {}", e))?;
 
-        let mut addresses = Vec::new();
+        let mut windows = Vec::new();
         if let Some(arr) = clients.as_array() {
             for client in arr {
                 let class = client["class"].as_str().unwrap_or("");
-                if class == "gamescope" || class == "gamescope-kbm" || class.starts_with("gamescope")
-                {
+                let class_lower = class.to_lowercase();
+
+                // Match any gamescope variant (case-insensitive)
+                if class_lower.starts_with("gamescope") {
                     if let Some(addr) = client["address"].as_str() {
-                        addresses.push(addr.to_string());
+                        windows.push((addr.to_string(), class.to_string()));
                     }
                 }
             }
         }
-        Ok(addresses)
+        Ok(windows)
     }
 
     /// Calculate and apply window positions on the target monitor
     fn position_windows(&self, ctx: &LayoutContext) -> WmResult<()> {
-        let addresses = self.get_gamescope_windows()?;
-        if addresses.is_empty() {
+        let windows = self.get_gamescope_windows()?;
+        if windows.is_empty() {
             return Err("No gamescope windows found".into());
         }
 
@@ -178,11 +210,20 @@ impl HyprlandManager {
             hypr_mon.name, hypr_mon.width, hypr_mon.height, hypr_mon.x, hypr_mon.y
         );
 
+        // Log detected windows for debugging
+        println!(
+            "[splitux] wm::hyprland - Found {} gamescope windows:",
+            windows.len()
+        );
+        for (addr, class) in &windows {
+            println!("[splitux] wm::hyprland   - {} (class: {})", addr, class);
+        }
+
         // Use full monitor area (windows are pinned so they cover waybar)
-        let player_count = addresses.len().min(4);
+        let player_count = windows.len().min(4);
         let mut commands = Vec::new();
 
-        for (i, addr) in addresses.iter().enumerate() {
+        for (i, (addr, class)) in windows.iter().enumerate() {
             let (x, y, w, h) = self.calculate_slot(
                 player_count,
                 i,
@@ -194,8 +235,8 @@ impl HyprlandManager {
             );
 
             println!(
-                "[splitux] wm::hyprland - Window {} -> {}x{}+{}+{}",
-                addr, w, h, x, y
+                "[splitux] wm::hyprland - Window {} ({}) -> {}x{}+{}+{}",
+                addr, class, w, h, x, y
             );
 
             // Move and resize
@@ -209,7 +250,21 @@ impl HyprlandManager {
             ));
         }
 
-        self.hyprctl_batch(&commands)
+        self.hyprctl_batch(&commands)?;
+
+        // Apply visual properties directly to each window via setprop
+        // This ensures no dimming/blur even if windowrules didn't match
+        println!("[splitux] wm::hyprland - Applying visual properties to windows...");
+        for (addr, _) in &windows {
+            if let Err(e) = self.apply_window_props(addr) {
+                println!(
+                    "[splitux] wm::hyprland - Warning: Failed to apply props to {}: {}",
+                    addr, e
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// Calculate position for a player slot
@@ -294,59 +349,103 @@ impl HyprlandManager {
         Ok(())
     }
 
-    /// Hide waybar by sending SIGUSR1 (toggle signal)
-    /// This is an ephemeral change - waybar will be restored on teardown
-    fn hide_waybar(&mut self) -> WmResult<()> {
-        // Check if waybar is running
-        let waybar_running = Command::new("pgrep")
-            .arg("-x")
-            .arg("waybar")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+    /// Hide status bars that might overlay game windows
+    /// Supports: waybar, ags, eww, polybar, and other common bars
+    /// Uses multiple methods for robustness
+    fn hide_status_bars(&mut self) -> WmResult<()> {
+        // Common status bars and their hide methods
+        // (name, toggle_signal, kill_to_hide)
+        let bars: &[(&str, Option<&str>, bool)] = &[
+            ("waybar", Some("-SIGUSR1"), false),      // SIGUSR1 toggles visibility
+            (".waybar-wrapped", Some("-SIGUSR1"), false), // NixOS wrapped waybar
+            ("ags", Some("-SIGUSR1"), false),         // AGS also uses SIGUSR1
+            ("eww", None, true),                      // eww needs to be killed
+            ("polybar", Some("-SIGUSR1"), false),     // polybar toggle
+        ];
 
-        if !waybar_running {
-            println!("[splitux] wm::hyprland - Waybar not running, skipping hide");
-            return Ok(());
+        for (bar_name, toggle_signal, kill_to_hide) in bars {
+            // Check if this bar is running
+            let is_running = Command::new("pgrep")
+                .arg("-x")
+                .arg(bar_name)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if !is_running {
+                continue;
+            }
+
+            println!("[splitux] wm::hyprland - Found running bar: {}", bar_name);
+
+            if *kill_to_hide {
+                // Some bars need to be killed entirely
+                println!("[splitux] wm::hyprland - Killing {} (will restart on teardown)", bar_name);
+                let _ = Command::new("pkill").arg("-x").arg(bar_name).status();
+                self.hidden_bars.push(format!("kill:{}", bar_name));
+            } else if let Some(signal) = toggle_signal {
+                // Send toggle signal
+                println!("[splitux] wm::hyprland - Sending {} to {}", signal, bar_name);
+                let result = Command::new("pkill")
+                    .args([signal, bar_name])
+                    .status();
+
+                if result.is_ok() {
+                    self.hidden_bars.push(format!("toggle:{}", bar_name));
+                }
+            }
         }
 
-        println!("[splitux] wm::hyprland - Hiding waybar (SIGUSR1 toggle)");
+        // Also apply layer rules to push any remaining layer surfaces below
+        // This catches bars we might have missed
+        self.apply_layer_rules()?;
 
-        // Send SIGUSR1 to toggle waybar visibility
-        let result = Command::new("pkill")
-            .args(["-SIGUSR1", "waybar"])
-            .status();
-
-        match result {
-            Ok(status) if status.success() => {
-                self.waybar_hidden = true;
-                Ok(())
-            }
-            Ok(_) => {
-                println!("[splitux] wm::hyprland - Warning: pkill waybar returned non-zero");
-                Ok(()) // Non-fatal, continue anyway
-            }
-            Err(e) => {
-                println!("[splitux] wm::hyprland - Warning: Failed to hide waybar: {}", e);
-                Ok(()) // Non-fatal, continue anyway
-            }
+        if self.hidden_bars.is_empty() {
+            println!("[splitux] wm::hyprland - No status bars detected");
         }
+
+        Ok(())
     }
 
-    /// Restore waybar by sending SIGUSR1 again (toggle back)
-    fn restore_waybar(&mut self) -> WmResult<()> {
-        if !self.waybar_hidden {
+    /// Apply layer rules to ensure game windows appear above layer surfaces
+    fn apply_layer_rules(&self) -> WmResult<()> {
+        // Try to apply layer rules that might help with z-ordering
+        // Note: Not all of these may work depending on Hyprland version
+        let commands = vec![
+            // Try to set waybar/bar layers to bottom (below normal windows)
+            "keyword layerrule noanim,waybar".to_string(),
+            "keyword layerrule noanim,gtk-layer-shell".to_string(),
+        ];
+
+        // These are best-effort, don't fail if they don't work
+        let _ = self.hyprctl_batch(&commands);
+        Ok(())
+    }
+
+    /// Restore status bars that were hidden
+    fn restore_status_bars(&mut self) -> WmResult<()> {
+        if self.hidden_bars.is_empty() {
             return Ok(());
         }
 
-        println!("[splitux] wm::hyprland - Restoring waybar (SIGUSR1 toggle)");
+        println!("[splitux] wm::hyprland - Restoring {} status bar(s)", self.hidden_bars.len());
 
-        // Send SIGUSR1 to toggle waybar visibility back
-        let _ = Command::new("pkill")
-            .args(["-SIGUSR1", "waybar"])
-            .status();
+        for bar_entry in &self.hidden_bars {
+            if let Some(bar_name) = bar_entry.strip_prefix("toggle:") {
+                // Re-toggle to show
+                println!("[splitux] wm::hyprland - Toggling {} back on", bar_name);
+                let _ = Command::new("pkill")
+                    .args(["-SIGUSR1", bar_name])
+                    .status();
+            } else if let Some(bar_name) = bar_entry.strip_prefix("kill:") {
+                // Restart the bar
+                println!("[splitux] wm::hyprland - Restarting {}", bar_name);
+                let _ = Command::new(bar_name)
+                    .spawn();
+            }
+        }
 
-        self.waybar_hidden = false;
+        self.hidden_bars.clear();
         Ok(())
     }
 }
@@ -369,8 +468,8 @@ impl WindowManager for HyprlandManager {
         let monitor_index = ctx.instances.first().map(|i| i.monitor).unwrap_or(0);
         let hypr_mon = self.get_monitor_by_index(monitor_index)?;
 
-        // Hide waybar so game windows can use full screen
-        self.hide_waybar()?;
+        // Hide status bars so game windows can use full screen
+        self.hide_status_bars()?;
 
         self.add_window_rules(&hypr_mon.name)
     }
@@ -392,6 +491,7 @@ impl WindowManager for HyprlandManager {
                     windows.len(),
                     start.elapsed().as_secs_f32()
                 );
+                // Give windows a moment to fully initialize
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 break;
             }
@@ -405,17 +505,26 @@ impl WindowManager for HyprlandManager {
                 break;
             }
 
+            // Log progress periodically
+            if start.elapsed().as_secs() % 5 == 0 && start.elapsed().as_millis() % 500 < 100 {
+                println!(
+                    "[splitux] wm::hyprland - Still waiting... ({}/{} windows)",
+                    windows.len(),
+                    expected_count
+                );
+            }
+
             std::thread::sleep(poll_interval);
         }
 
-        // Position windows on the target monitor
+        // Position windows on the target monitor and apply visual properties
         self.position_windows(ctx)
     }
 
     fn teardown(&mut self) -> WmResult<()> {
         println!("[splitux] wm::hyprland - Tearing down");
         self.remove_window_rules()?;
-        self.restore_waybar()
+        self.restore_status_bars()
     }
 
     fn is_available() -> bool {
