@@ -1,0 +1,59 @@
+# Splitux Handler Template
+# ========================
+# Copy this file to ~/.local/share/splitux/handlers/<game-name>/handler.yaml
+# and customize it for your game.
+
+# REQUIRED FIELDS
+# ---------------
+# Game display name
+name: My Game
+
+# Executable path (relative to game root folder)
+exec: game.exe
+
+# Handler specification version (do not change)
+spec_ver: 3
+
+# GAME LOCATION (choose one)
+# --------------------------
+# Option 1: Steam game (recommended - auto-detects install location)
+# steam_appid: 123456
+
+# Option 2: Manual path (for non-Steam games)
+# path_gameroot: /path/to/game/folder
+
+# MULTIPLAYER
+# -----------
+# Enable Goldberg Steam Emu for LAN multiplayer (Steam games only)
+# use_goldberg: true
+
+# OPTIONAL METADATA
+# -----------------
+# author: Your Name
+# version: "1.0"
+# info: |
+#   Notes about this handler.
+#   Can be multiple lines.
+
+# ADVANCED OPTIONS
+# ----------------
+# Command line arguments
+# args: -windowed -novid
+
+# Environment variables
+# env: PROTON_LOG=1 SOME_VAR=value
+
+# Linux runtime (for native Linux games): scout, soldier, or leave empty
+# runtime: soldier
+
+# SDL2 override for older native games with controller issues
+# Values: No (default), Srt (Steam Runtime 32-bit), Sys (System)
+# sdl2_override: No
+
+# Delay between starting each instance (seconds)
+# pause_between_starts: 2.0
+
+# Paths inside game folder to redirect to /dev/null (advanced)
+# game_null_paths:
+#   - logs/
+#   - crash_dumps/

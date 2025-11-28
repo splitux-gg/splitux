@@ -21,31 +21,108 @@ macro_rules! cur_handler {
 
 impl PartyApp {
     pub fn display_page_main(&mut self, ui: &mut Ui) {
+        ui.add_space(8.0);
         ui.heading("Welcome to Splitux");
+        ui.add_space(4.0);
+        ui.label("Local co-op split-screen gaming for Linux");
+        ui.add_space(12.0);
         ui.separator();
-        ui.label("Press SELECT/BACK or Tab to unlock gamepad navigation.");
-        ui.label("Splitux is a local co-op split-screen launcher for Linux.");
-        ui.label("For debugging purposes, it's recommended to read terminal output (stdout) for further information on errors.");
+
+        // Quick Start Guide
+        ui.add_space(8.0);
+        ui.label(RichText::new("Getting Started").strong().size(16.0));
+        ui.add_space(8.0);
+
+        egui::Grid::new("quick_start_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("1.").strong());
+                ui.label("Select a game from the sidebar, or add one with the ➕ button");
+                ui.end_row();
+
+                ui.label(RichText::new("2.").strong());
+                ui.label("Click Play to enter the instance setup screen");
+                ui.end_row();
+
+                ui.label(RichText::new("3.").strong());
+                ui.label("Connect controllers and press A/Right-click to create instances");
+                ui.end_row();
+
+                ui.label(RichText::new("4.").strong());
+                ui.label("Press Start when ready to launch");
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
         ui.separator();
+
+        // Controls Reference
+        ui.add_space(8.0);
+        ui.label(RichText::new("Controls").strong().size(16.0));
+        ui.add_space(8.0);
+
+        egui::Grid::new("controls_grid")
+            .num_columns(2)
+            .spacing([24.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Navigate tabs:");
+                ui.label("LB/RB  or  Tab");
+                ui.end_row();
+
+                ui.label("Select/Confirm:");
+                ui.label("A  or  Enter");
+                ui.end_row();
+
+                ui.label("Back:");
+                ui.label("B  or  Escape");
+                ui.end_row();
+
+                ui.label("Navigate UI:");
+                ui.label("D-Pad / Left Stick  or  Arrow Keys");
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(4.0);
+
         ui.horizontal_wrapped(|ui| {
             ui.label("Based on");
             ui.hyperlink_to("PartyDeck", "https://github.com/wunnr/partydeck");
             ui.label("by @wunnr");
         });
-        ui.separator();
     }
 
     pub fn display_page_settings(&mut self, ui: &mut Ui) {
         self.infotext.clear();
+        ui.add_space(8.0);
+        ui.heading("Settings");
+        ui.add_space(4.0);
+        ui.label("Configure Splitux behavior and game launch options");
+        ui.add_space(8.0);
+
+        // Sub-tab buttons
         ui.horizontal(|ui| {
-            ui.heading("Settings");
-            ui.selectable_value(&mut self.settings_page, SettingsPage::General, "General");
-            ui.selectable_value(
-                &mut self.settings_page,
-                SettingsPage::Gamescope,
-                "Gamescope",
+            let general_btn = ui.add(
+                egui::Button::new("General")
+                    .min_size(egui::vec2(100.0, 28.0))
+                    .selected(self.settings_page == SettingsPage::General),
             );
+            if general_btn.clicked() {
+                self.settings_page = SettingsPage::General;
+            }
+
+            let gamescope_btn = ui.add(
+                egui::Button::new("Gamescope")
+                    .min_size(egui::vec2(100.0, 28.0))
+                    .selected(self.settings_page == SettingsPage::Gamescope),
+            );
+            if gamescope_btn.clicked() {
+                self.settings_page = SettingsPage::Gamescope;
+            }
         });
+        ui.add_space(4.0);
         ui.separator();
 
         match self.settings_page {
@@ -70,24 +147,43 @@ impl PartyApp {
     }
 
     pub fn display_page_profiles(&mut self, ui: &mut Ui) {
+        ui.add_space(8.0);
         ui.heading("Profiles");
+        ui.add_space(4.0);
+        ui.label("Manage player profiles for persistent saves, settings, and stats");
+        ui.add_space(8.0);
         ui.separator();
+
+        ui.add_space(8.0);
         egui::ScrollArea::vertical()
-            .max_height(ui.available_height() - 16.0)
+            .max_height(ui.available_height() - 60.0)
             .auto_shrink(false)
             .show(ui, |ui| {
-                for profile in &self.profiles {
-                    if ui.selectable_value(&mut 0, 1, profile).clicked() {
-                        if let Err(_) = std::process::Command::new("xdg-open")
-                            .arg(PATH_PARTY.join("profiles").join(profile))
-                            .status()
-                        {
-                            msg("Error", "Couldn't open profile directory!");
+                if self.profiles.is_empty() {
+                    ui.label("No profiles yet. Create one below to get started.");
+                } else {
+                    for profile in &self.profiles {
+                        if ui.add(
+                            egui::Button::new(format!("👤  {}", profile))
+                                .min_size(egui::vec2(200.0, 28.0))
+                                .frame(false),
+                        ).on_hover_text("Click to open profile folder").clicked() {
+                            if let Err(_) = std::process::Command::new("xdg-open")
+                                .arg(PATH_PARTY.join("profiles").join(profile))
+                                .status()
+                            {
+                                msg("Error", "Couldn't open profile directory!");
+                            }
                         }
-                    };
+                    }
                 }
             });
-        if ui.button("New").clicked() {
+
+        ui.add_space(8.0);
+        if ui.add(
+            egui::Button::new("➕ New Profile")
+                .min_size(egui::vec2(120.0, 32.0)),
+        ).clicked() {
             if let Some(name) = dialog::Input::new("Enter name (must be alphanumeric):")
                 .title("New Profile")
                 .show()
@@ -111,12 +207,15 @@ impl PartyApp {
             }
         };
 
+        ui.add_space(8.0);
         let header = match h.is_saved_handler() {
-            false => "Add Game",
-            true => &format!("Edit Handler: {}", h.display()),
+            false => "Add Game".to_string(),
+            true => format!("Edit Handler: {}", h.display()),
         };
-
-        ui.heading(header);
+        ui.heading(&header);
+        ui.add_space(4.0);
+        ui.label("Configure how this game should be launched for split-screen play");
+        ui.add_space(8.0);
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -250,7 +349,7 @@ impl PartyApp {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
             if ui.button("Save").clicked() {
-                if let Err(e) = h.save_to_json() {
+                if let Err(e) = h.save() {
                     msg("Error saving handler", &format!("{}", e));
                 } else {
                     self.handlers = scan_handlers();
@@ -261,20 +360,26 @@ impl PartyApp {
     }
 
     pub fn display_page_game(&mut self, ui: &mut Ui) {
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.image(cur_handler!(self).icon());
+            ui.add(egui::Image::new(cur_handler!(self).icon()).max_width(32.0).corner_radius(4));
+            ui.add_space(8.0);
             ui.heading(cur_handler!(self).display());
         });
-
+        ui.add_space(8.0);
         ui.separator();
 
         let h = cur_handler!(self);
 
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
-            let playbtn = ui.add(egui::Button::image_and_text(
-                egui::include_image!("../../res/BTN_START.png"),
-                "Play",
-            ));
+            let playbtn = ui.add(
+                egui::Button::image_and_text(
+                    egui::include_image!("../../res/BTN_START.png"),
+                    " Play ",
+                )
+                .min_size(egui::vec2(100.0, 32.0)),
+            );
             if playbtn.clicked() {
                 if h.spec_ver != HANDLER_SPEC_CURRENT_VERSION {
                     let mismatch = match h.spec_ver < HANDLER_SPEC_CURRENT_VERSION {
@@ -345,97 +450,140 @@ impl PartyApp {
     }
 
     pub fn display_page_instances(&mut self, ui: &mut Ui) {
-        ui.heading("Instances");
+        ui.add_space(8.0);
+        ui.heading("Instance Setup");
+        ui.add_space(4.0);
+        ui.label("Connect your controllers and assign them to player instances");
+        ui.add_space(8.0);
         ui.separator();
 
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Image::new(egui::include_image!("../../res/BTN_SOUTH.png")).max_height(12.0),
-            );
-            ui.label("[Z]");
-            ui.add(
-                egui::Image::new(egui::include_image!("../../res/MOUSE_RIGHT.png"))
-                    .max_height(12.0),
-            );
-            let add_text = match self.instance_add_dev {
-                None => "Add New Instance",
-                Some(i) => &format!("Add to Instance {}", i + 1),
-            };
-            ui.label(add_text);
+        // Controls help bar
+        ui.add_space(8.0);
+        egui::Frame::NONE
+            .fill(ui.visuals().extreme_bg_color)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // Add instance control
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_SOUTH.png")).max_height(16.0));
+                    ui.label(" / Z / Right-Click:");
+                    let add_text = match self.instance_add_dev {
+                        None => "Add Instance",
+                        Some(i) => &format!("Add to P{}", i + 1),
+                    };
+                    ui.label(RichText::new(add_text).strong());
 
-            ui.add(egui::Separator::default().vertical());
+                    ui.add_space(16.0);
+                    ui.add(egui::Separator::default().vertical());
+                    ui.add_space(16.0);
 
-            ui.add(
-                egui::Image::new(egui::include_image!("../../res/BTN_EAST.png")).max_height(12.0),
-            );
-            ui.label("[X]");
-            let remove_text = match self.instance_add_dev {
-                None => "Remove",
-                Some(_) => "Cancel",
-            };
-            ui.label(remove_text);
+                    // Remove/Cancel control
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_EAST.png")).max_height(16.0));
+                    ui.label(" / X:");
+                    let remove_text = match self.instance_add_dev {
+                        None => "Remove",
+                        Some(_) => "Cancel",
+                    };
+                    ui.label(RichText::new(remove_text).strong());
 
-            ui.add(egui::Separator::default().vertical());
-        });
+                    ui.add_space(16.0);
+                    ui.add(egui::Separator::default().vertical());
+                    ui.add_space(16.0);
 
+                    // Invite control
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_NORTH.png")).max_height(16.0));
+                    ui.label(" / A:");
+                    ui.label(RichText::new("Invite Device").strong());
+                });
+            });
+        ui.add_space(8.0);
         ui.separator();
+        ui.add_space(4.0);
 
         let mut devices_to_remove: Vec<(usize, usize)> = Vec::new();
+
+        if self.instances.is_empty() {
+            ui.add_space(16.0);
+            ui.label(RichText::new("No instances yet").italics());
+            ui.add_space(4.0);
+            ui.label("Press A or Right-click on a controller to create a player instance");
+        }
+
         for (i, instance) in &mut self.instances.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(format!("{}", i + 1));
+            egui::Frame::NONE
+                .fill(ui.visuals().faint_bg_color)
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("P{}", i + 1)).strong().size(18.0));
+                        ui.add_space(8.0);
 
-                ui.label("👤");
-                egui::ComboBox::from_id_salt(format!("{i}")).show_index(
-                    ui,
-                    &mut instance.profselection,
-                    self.profiles.len(),
-                    |i| self.profiles[i].clone(),
-                );
+                        ui.label("Profile:");
+                        egui::ComboBox::from_id_salt(format!("{i}"))
+                            .width(120.0)
+                            .show_index(
+                                ui,
+                                &mut instance.profselection,
+                                self.profiles.len(),
+                                |i| self.profiles[i].clone(),
+                            );
 
-                if self.options.gamescope_sdl_backend {
-                    ui.label("🖵");
-                    egui::ComboBox::from_id_salt(format!("monitors{i}")).show_index(
-                        ui,
-                        &mut instance.monitor,
-                        self.monitors.len(),
-                        |i| self.monitors[i].name(),
-                    );
-                }
+                        if self.options.gamescope_sdl_backend {
+                            ui.add_space(8.0);
+                            ui.label("Monitor:");
+                            egui::ComboBox::from_id_salt(format!("monitors{i}"))
+                                .width(100.0)
+                                .show_index(
+                                    ui,
+                                    &mut instance.monitor,
+                                    self.monitors.len(),
+                                    |i| self.monitors[i].name(),
+                                );
+                        }
 
-                if self.instance_add_dev == None {
-                    let invitebtn = ui.add(
-                        egui::Button::image_and_text(egui::include_image!("../../res/BTN_NORTH.png"), "[A] Invite New Device")
-                    );
-                    if invitebtn.clicked() {
-                        self.instance_add_dev = Some(i);
-                    }
-                } else if self.instance_add_dev == Some(i) {
-                    ui.label("Adding new device...");
-                    if ui.button("🗙").clicked() {
-                        self.instance_add_dev = None;
-                    }
-                }
-            });
-            for &dev in instance.devices.iter() {
-                let mut dev_text = RichText::new(format!(
-                    "{} {}",
-                    self.input_devices[dev].emoji(),
-                    self.input_devices[dev].fancyname()
-                ));
+                        ui.add_space(8.0);
+                        if self.instance_add_dev == None {
+                            let invitebtn = ui.add(
+                                egui::Button::image_and_text(
+                                    egui::include_image!("../../res/BTN_NORTH.png"),
+                                    " Invite Device",
+                                )
+                                .min_size(egui::vec2(0.0, 26.0)),
+                            );
+                            if invitebtn.clicked() {
+                                self.instance_add_dev = Some(i);
+                            }
+                        } else if self.instance_add_dev == Some(i) {
+                            ui.label(RichText::new("Waiting for input...").italics());
+                            if ui.add(egui::Button::new("✕").min_size(egui::vec2(26.0, 26.0))).clicked() {
+                                self.instance_add_dev = None;
+                            }
+                        }
+                    });
 
-                if self.input_devices[dev].has_button_held() {
-                    dev_text = dev_text.strong();
-                }
+                    // Device list
+                    for &dev in instance.devices.iter() {
+                        let mut dev_text = RichText::new(format!(
+                            "   {} {}",
+                            self.input_devices[dev].emoji(),
+                            self.input_devices[dev].fancyname()
+                        ));
 
-                ui.horizontal(|ui| {
-                    ui.label("    ");
-                    ui.label(dev_text);
-                    if ui.button("🗑").clicked() {
-                        devices_to_remove.push((i, dev));
+                        if self.input_devices[dev].has_button_held() {
+                            dev_text = dev_text.strong();
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label(dev_text);
+                            if ui.add(egui::Button::new("🗑").min_size(egui::vec2(24.0, 24.0))).on_hover_text("Remove device").clicked() {
+                                devices_to_remove.push((i, dev));
+                            }
+                        });
                     }
                 });
-            }
+            ui.add_space(4.0);
         }
 
         for (i, d) in devices_to_remove {
@@ -444,15 +592,18 @@ impl PartyApp {
 
         if self.instances.len() > 0 {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Image::new(egui::include_image!("../../res/BTN_START.png"))
-                            .max_height(16.0),
-                    );
-                    if ui.button("Start").clicked() {
-                        self.prepare_game_launch();
-                    }
-                });
+                ui.add_space(8.0);
+                let start_btn = ui.add(
+                    egui::Button::image_and_text(
+                        egui::include_image!("../../res/BTN_START.png"),
+                        "  Start Game  ",
+                    )
+                    .min_size(egui::vec2(160.0, 40.0)),
+                );
+                if start_btn.clicked() {
+                    self.prepare_game_launch();
+                }
+                ui.add_space(4.0);
                 ui.separator();
             });
         }

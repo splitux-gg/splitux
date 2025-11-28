@@ -21,33 +21,59 @@ pub enum SDL2Override {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Handler {
-    // Members that are determined by context
+    // Members that are determined by context (not serialized)
     #[serde(skip)]
     pub path_handler: PathBuf,
     #[serde(skip)]
     pub img_paths: Vec<PathBuf>,
 
+    // Required fields
     pub name: String,
+    pub exec: String,
+
+    // Optional metadata
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub author: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default_spec_ver")]
     pub spec_ver: u16,
 
+    // Game location (one of these should be set)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steam_appid: Option<u32>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub path_gameroot: String,
+
+    // Launch configuration
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub runtime: String,
-    pub exec: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub args: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub env: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default_sdl2")]
     pub sdl2_override: SDL2Override,
 
+    // Multiplayer settings
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_goldberg: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_between_starts: Option<f64>,
 
-    pub use_goldberg: bool,
-    pub steam_appid: Option<u32>,
-
+    // Advanced
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub game_null_paths: Vec<String>,
+}
+
+fn is_default_spec_ver(v: &u16) -> bool {
+    *v == HANDLER_SPEC_CURRENT_VERSION || *v == 0
+}
+
+fn is_default_sdl2(v: &SDL2Override) -> bool {
+    *v == SDL2Override::No
 }
 
 impl Default for Handler {
@@ -80,21 +106,59 @@ impl Default for Handler {
 }
 
 impl Handler {
-    pub fn from_json(json_path: &PathBuf) -> Result<Self, Box<dyn Error>> {
-        let file = File::open(json_path)?;
-        let mut handler = serde_json::from_reader::<_, Handler>(BufReader::new(file))?;
+    pub fn from_yaml(yaml_path: &PathBuf) -> Result<Self, Box<dyn Error>> {
+        let file = File::open(yaml_path)?;
+        let mut handler: Handler = serde_yaml::from_reader(BufReader::new(file))?;
 
-        handler.path_handler = json_path
+        handler.path_handler = yaml_path
             .parent()
             .ok_or_else(|| "Invalid path")?
             .to_path_buf();
         handler.img_paths = handler.get_imgs();
 
+        // Clean up whitespace from all fields
+        handler.trim_fields();
+
+        // Sanitize paths
         for path in &mut handler.game_null_paths {
             *path = path.sanitize_path();
         }
 
+        // Validate required fields
+        handler.validate()?;
+
         Ok(handler)
+    }
+
+    /// Trim whitespace from all string fields
+    fn trim_fields(&mut self) {
+        self.name = self.name.trim().to_string();
+        self.exec = self.exec.trim().to_string();
+        self.author = self.author.trim().to_string();
+        self.version = self.version.trim().to_string();
+        self.info = self.info.trim().to_string();
+        self.path_gameroot = self.path_gameroot.trim().to_string();
+        self.runtime = self.runtime.trim().to_string();
+        self.args = self.args.trim().to_string();
+        self.env = self.env.trim().to_string();
+
+        // Trim paths in null_paths list
+        for path in &mut self.game_null_paths {
+            *path = path.trim().to_string();
+        }
+        // Remove empty entries
+        self.game_null_paths.retain(|p| !p.is_empty());
+    }
+
+    /// Validate that required fields are present
+    fn validate(&self) -> Result<(), Box<dyn Error>> {
+        if self.name.is_empty() {
+            return Err("Handler 'name' is required".into());
+        }
+        if self.exec.is_empty() {
+            return Err("Handler 'exec' (executable path) is required".into());
+        }
+        Ok(())
     }
 
     pub fn from_cli(path_exec: &str, args: &str) -> Self {
@@ -206,7 +270,7 @@ impl Handler {
         Err("Game root path not found".into())
     }
 
-    pub fn save_to_json(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn save(&mut self) -> Result<(), Box<dyn Error>> {
         // If handler has no path, assume we're saving a newly created handler
         if !self.is_saved_handler() {
             if self.name.is_empty() {
@@ -241,13 +305,13 @@ impl Handler {
             std::fs::create_dir_all(&self.path_handler)?;
         }
 
-        let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(self.path_handler.join("handler.json"), json)?;
+        let yaml = serde_yaml::to_string(self)?;
+        std::fs::write(self.path_handler.join("handler.yaml"), yaml)?;
 
         Ok(())
     }
 
-    pub fn export_pd2(&self) -> Result<(), Box<dyn Error>> {
+    pub fn export(&self) -> Result<(), Box<dyn Error>> {
         if self.name.is_empty() {
             return Err("Name cannot be empty".into());
         }
@@ -255,12 +319,12 @@ impl Handler {
         let mut file = FileDialog::new()
             .set_title("Save file to:")
             .set_directory(&*PATH_HOME)
-            .add_filter("Splitux Handler Package", &["pd2"])
+            .add_filter("Splitux Handler Package", &["spx"])
             .save_file()
             .ok_or_else(|| "File not specified")?;
 
-        if file.extension().is_none() || file.extension() != Some("pd2".as_ref()) {
-            file.set_extension("pd2");
+        if file.extension().is_none() || file.extension() != Some("spx".as_ref()) {
+            file.set_extension("spx");
         }
 
         let tmpdir = PATH_PARTY.join("tmp");
@@ -271,9 +335,9 @@ impl Handler {
         // Clear the rootpath before exporting so that users downloading it can set their own
         let mut handlerclone = self.clone();
         handlerclone.path_gameroot = String::new();
-        // Overwrite the handler.json file with handlerclone
-        let json = serde_json::to_string_pretty(&mut handlerclone)?;
-        std::fs::write(tmpdir.join("handler.json"), json)?;
+        // Overwrite the handler.yaml file with handlerclone
+        let yaml = serde_yaml::to_string(&handlerclone)?;
+        std::fs::write(tmpdir.join("handler.yaml"), yaml)?;
 
         if file.is_file() {
             std::fs::remove_file(&file)?;
@@ -299,9 +363,9 @@ pub fn scan_handlers() -> Vec<Handler> {
             && let Ok(file_type) = entry.file_type()
             && file_type.is_dir()
         {
-            let json_path = entry.path().join("handler.json");
-            if json_path.exists()
-                && let Ok(handler) = Handler::from_json(&json_path)
+            let yaml_path = entry.path().join("handler.yaml");
+            if yaml_path.exists()
+                && let Ok(handler) = Handler::from_yaml(&yaml_path)
             {
                 out.push(handler);
             }
@@ -311,17 +375,17 @@ pub fn scan_handlers() -> Vec<Handler> {
     out
 }
 
-pub fn import_pd2() -> Result<(), Box<dyn Error>> {
+pub fn import_handler() -> Result<(), Box<dyn Error>> {
     let Some(file) = FileDialog::new()
         .set_title("Select File")
         .set_directory(&*PATH_HOME)
-        .add_filter("Splitux Handler Package", &["pd2"])
+        .add_filter("Splitux Handler Package", &["spx"])
         .pick_file()
     else {
         return Ok(());
     };
 
-    if !file.exists() || !file.is_file() || file.extension().unwrap_or_default() != "pd2" {
+    if !file.exists() || !file.is_file() || file.extension().unwrap_or_default() != "spx" {
         return Err("Handler not valid!".into());
     }
 
@@ -334,13 +398,12 @@ pub fn import_pd2() -> Result<(), Box<dyn Error>> {
     let mut archive = zip::ZipArchive::new(File::open(&file)?)?;
     archive.extract(&dir_tmp)?;
 
-    let handler_path = dir_tmp.join("handler.json");
+    let handler_path = dir_tmp.join("handler.yaml");
     if !handler_path.exists() {
         clear_tmp()?;
-        return Err("handler.json not found in archive".into());
+        return Err("handler.yaml not found in archive".into());
     }
 
-    // This is stupid..
     let mut fileclone = file.clone();
     fileclone.set_extension("");
     let name = fileclone

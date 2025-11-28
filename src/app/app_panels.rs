@@ -1,6 +1,6 @@
 use super::app::{MenuPage, PartyApp};
 use crate::Handler;
-use crate::handler::import_pd2;
+use crate::handler::import_handler;
 use crate::handler::scan_handlers;
 use crate::input::*;
 use crate::monitor::get_monitors_sdl;
@@ -20,74 +20,103 @@ macro_rules! cur_handler {
 impl PartyApp {
     pub fn display_panel_top(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
+            // === Main Navigation Tabs ===
             let hometext = match self.is_lite() {
-                true => "▶ Play",
-                false => "ℹ Home",
+                true => " Play  [B]",
+                false => " Home  [B]",
             };
             let homepage = match self.is_lite() {
                 true => MenuPage::Instances,
                 false => MenuPage::Home,
             };
 
+            // Home/Play tab
+            let home_selected = self.cur_page == MenuPage::Home || (self.is_lite() && self.cur_page == MenuPage::Instances);
+            ui.add_space(4.0);
             let homebtn = ui.add(
                 egui::Button::image_and_text(
                     egui::include_image!("../../res/BTN_EAST.png"),
                     hometext,
                 )
-                .selected(self.cur_page == MenuPage::Home),
+                .min_size(egui::vec2(100.0, 28.0))
+                .selected(home_selected),
             );
-
             if homebtn.clicked() {
                 self.cur_page = homepage;
             }
 
-            let settingsbtn = ui.add(
-                egui::Button::image_and_text(egui::include_image!("../../res/BTN_NORTH.png"), "⛭ Settings")
-                    .selected(self.cur_page == MenuPage::Settings),
-            );
-            if settingsbtn.clicked() {
-                self.cur_page = MenuPage::Settings;
-            }
-
+            // Profiles tab
             let profilesbtn = ui.add(
-                egui::Button::image_and_text(egui::include_image!("../../res/BTN_WEST.png"), "👥 Profiles")
-                    .selected(self.cur_page == MenuPage::Profiles),
+                egui::Button::image_and_text(
+                    egui::include_image!("../../res/BTN_WEST.png"),
+                    " Profiles  [X]",
+                )
+                .min_size(egui::vec2(110.0, 28.0))
+                .selected(self.cur_page == MenuPage::Profiles),
             );
             if profilesbtn.clicked() {
                 self.profiles = scan_profiles(false);
                 self.cur_page = MenuPage::Profiles;
             }
 
-            if ui.button("🎮 🔄").clicked() {
+            // Settings tab
+            let settingsbtn = ui.add(
+                egui::Button::image_and_text(
+                    egui::include_image!("../../res/BTN_NORTH.png"),
+                    " Settings  [Y]",
+                )
+                .min_size(egui::vec2(110.0, 28.0))
+                .selected(self.cur_page == MenuPage::Settings),
+            );
+            if settingsbtn.clicked() {
+                self.cur_page = MenuPage::Settings;
+            }
+
+            ui.add(egui::Separator::default().vertical());
+
+            // === Utility Actions ===
+            let refresh_devs = ui.add(
+                egui::Button::new("🎮")
+                    .min_size(egui::vec2(28.0, 28.0)),
+            ).on_hover_text("Refresh Controllers");
+            if refresh_devs.clicked() {
                 self.instances.clear();
                 self.input_devices = scan_input_devices(&self.options.pad_filter_type);
             }
-            
-            if ui.button("🖵 🔄").clicked() {
+
+            let refresh_monitors = ui.add(
+                egui::Button::new("🖵")
+                    .min_size(egui::vec2(28.0, 28.0)),
+            ).on_hover_text("Refresh Monitors");
+            if refresh_monitors.clicked() {
                 self.instances.clear();
                 self.monitors = get_monitors_sdl();
             }
 
+            // === Right Side: Links & Close ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("❌").clicked() {
+                let close_btn = ui.add(
+                    egui::Button::new("✕")
+                        .min_size(egui::vec2(28.0, 28.0)),
+                ).on_hover_text("Close");
+                if close_btn.clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 ui.add(egui::Separator::default().vertical());
                 let version_label = match self.needs_update {
-                    true => format!("v{} (🆕 available)", env!("CARGO_PKG_VERSION")),
+                    true => format!("v{} 🆕", env!("CARGO_PKG_VERSION")),
                     false => format!("v{}", env!("CARGO_PKG_VERSION")),
                 };
-                ui.hyperlink_to(version_label, "https://github.com/gabrielgad/splitux/releases");
+                ui.hyperlink_to(version_label, "https://github.com/gabrielgad/splitux/releases")
+                    .on_hover_text("View Releases");
+
                 ui.add(egui::Separator::default().vertical());
                 ui.hyperlink_to("⮋", "https://drive.proton.me/urls/D9HBKM18YR#zG8XC8yVy9WL")
                     .on_hover_text("Download Game Handlers");
                 ui.hyperlink_to("♥", "https://ko-fi.com/wunner")
-                    .on_hover_text("Support Splitux Development");
-                ui.hyperlink_to(
-                    "🖹",
-                    "https://github.com/gabrielgad/splitux/tree/main?tab=License-2-ov-file",
-                )
-                .on_hover_text("Third-Party Licenses");
+                    .on_hover_text("Support Development");
+                ui.hyperlink_to("📋", "https://github.com/gabrielgad/splitux/tree/main?tab=License-2-ov-file")
+                    .on_hover_text("Licenses");
                 ui.hyperlink_to("", "https://github.com/gabrielgad/splitux")
                     .on_hover_text("GitHub");
             });
@@ -95,30 +124,53 @@ impl PartyApp {
     }
 
     pub fn display_panel_left(&mut self, ui: &mut Ui) {
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.heading("Games");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("➕").clicked() {
+                let add_btn = ui.add(
+                    egui::Button::new("➕")
+                        .min_size(egui::vec2(26.0, 26.0)),
+                ).on_hover_text("Add new game handler");
+                if add_btn.clicked() {
                     self.handler_edit = Some(Handler::default());
                     self.cur_page = MenuPage::EditHandler;
                 }
-                if ui.button("⬇").clicked() {
-                    if let Err(e) = import_pd2() {
-                        msg("Error", &format!("Error importing PD2: {}", e));
+
+                let import_btn = ui.add(
+                    egui::Button::new("⬇")
+                        .min_size(egui::vec2(26.0, 26.0)),
+                ).on_hover_text("Import handler (.spx)");
+                if import_btn.clicked() {
+                    if let Err(e) = import_handler() {
+                        msg("Error", &format!("Error importing handler: {}", e));
                     } else {
                         self.handlers = scan_handlers();
                     }
                 }
-                if ui.button("🔄").clicked() {
+
+                let refresh_btn = ui.add(
+                    egui::Button::new("🔄")
+                        .min_size(egui::vec2(26.0, 26.0)),
+                ).on_hover_text("Refresh handlers");
+                if refresh_btn.clicked() {
                     self.handlers = scan_handlers();
                 }
             });
         });
+        ui.add_space(4.0);
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            self.panel_left_game_list(ui);
-        });
+        ui.add_space(4.0);
+
+        if self.handlers.is_empty() {
+            ui.label(RichText::new("No games yet").italics().weak());
+            ui.add_space(4.0);
+            ui.label(RichText::new("Click ➕ to add a game").small().weak());
+        } else {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.panel_left_game_list(ui);
+            });
+        }
     }
 
     pub fn display_panel_bottom(&mut self, ctx: &egui::Context) {
@@ -148,44 +200,67 @@ impl PartyApp {
     }
 
     pub fn display_panel_right(&mut self, ui: &mut Ui, ctx: &egui::Context) {
-        ui.add_space(6.0);
-
+        ui.add_space(8.0);
         ui.heading("Devices");
+        ui.add_space(4.0);
         ui.separator();
+        ui.add_space(4.0);
 
-        for pad in self.input_devices.iter() {
-            let mut dev_text = RichText::new(format!(
-                "{} {} ({})",
-                pad.emoji(),
-                pad.fancyname(),
-                pad.path().trim_start_matches("/dev/input/event")
-            ))
-            .small();
+        let enabled_count = self.input_devices.iter().filter(|d| d.enabled()).count();
+        if enabled_count == 0 {
+            ui.label(RichText::new("No devices detected").italics().weak());
+            ui.add_space(4.0);
+            ui.label(RichText::new("Connect a controller").small().weak());
+        } else {
+            ui.label(RichText::new(format!("{} device(s) ready", enabled_count)).small());
+            ui.add_space(8.0);
 
-            if !pad.enabled() {
-                dev_text = dev_text.weak();
-            } else if pad.has_button_held() {
-                dev_text = dev_text.strong();
-            }
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height() - 80.0)
+                .show(ui, |ui| {
+                    for pad in self.input_devices.iter() {
+                        let event_num = pad.path().trim_start_matches("/dev/input/event");
+                        let mut dev_text = RichText::new(format!(
+                            "{} {}",
+                            pad.emoji(),
+                            pad.fancyname(),
+                        ));
 
-            ui.label(dev_text);
+                        if !pad.enabled() {
+                            dev_text = dev_text.weak();
+                        } else if pad.has_button_held() {
+                            dev_text = dev_text.strong();
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label(dev_text);
+                            ui.label(RichText::new(format!("({})", event_num)).small().weak());
+                        });
+                    }
+                });
         }
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-            ui.link("ℹ Incorrect/missing controller mappings in-game?").on_hover_ui(|ui| {
-                ui.label("Some native Linux games run using an older version of SDL2 that doesn't support newer controllers; you can edit the handler and change the SDL2 Override setting to \"Steam Runtime\" for older 32-bit games, or \"System Installation\" for 64-bit games.\n\nWindows Unity-based games may not recognize input from PlayStation controllers; the current workaround for this is to use them through Steam Input, and change Splitux controller filter setting to \"Only Steam Input\".");
-            });
-            ui.link("ℹ Devices not being detected?").on_hover_ui(|ui| {
-                ui.style_mut().interaction.selectable_labels = true;
-                ui.label("Try adding your user to the `input` group.");
-                ui.label("In a terminal, enter the following command:");
+            ui.add_space(4.0);
+            ui.add(
+                egui::Label::new(RichText::new("ℹ Controller issues?").small())
+                    .selectable(false)
+                    .sense(egui::Sense::click()),
+            ).on_hover_ui(|ui| {
+                ui.set_max_width(250.0);
+                ui.label(RichText::new("Incorrect mappings?").strong());
+                ui.label("Edit the handler and change SDL2 Override to \"Steam Runtime\" (32-bit) or \"System Installation\" (64-bit).");
+                ui.add_space(8.0);
+                ui.label(RichText::new("Devices not detected?").strong());
+                ui.label("Add your user to the input group:");
                 ui.horizontal(|ui| {
                     ui.code("sudo usermod -aG input $USER");
-                    if ui.button("📎").clicked() {
+                    if ui.add(egui::Button::new("📋").min_size(egui::vec2(24.0, 24.0))).on_hover_text("Copy").clicked() {
                         ctx.copy_text("sudo usermod -aG input $USER".to_string());
                     }
                 });
             });
+            ui.separator();
         });
     }
 
@@ -259,7 +334,7 @@ impl PartyApp {
         }
 
         if ui.button("Export").clicked() {
-            if let Err(err) = self.handlers[i].export_pd2() {
+            if let Err(err) = self.handlers[i].export() {
                 println!("[splitux] Failed to export handler: {}", err);
                 msg("Error", &format!("Failed to export handler: {}", err));
             }
