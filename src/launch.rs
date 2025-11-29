@@ -213,7 +213,7 @@ pub fn launch_cmds(
 
         // 3. Add gamescope arguments
         gamescope::add_args(&mut cmd, instance, cfg);
-        gamescope::add_kbm_args(&mut cmd, instance, input_devices, cfg);
+        gamescope::add_input_holding_args(&mut cmd, instance, input_devices, cfg);
         gamescope::add_separator(&mut cmd);
 
         // 4. Add bwrap container

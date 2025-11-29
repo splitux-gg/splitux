@@ -44,7 +44,8 @@ pub struct PartyConfig {
     pub gamescope_fix_lowres: bool,
     pub gamescope_sdl_backend: bool,
     pub gamescope_force_grab_cursor: bool,
-    pub kbm_support: bool,
+    #[serde(alias = "kbm_support")]  // backwards compatibility
+    pub input_holding: bool,
     pub proton_version: String,
     pub proton_separate_pfxs: bool,
     #[serde(default)]
@@ -70,7 +71,7 @@ impl Default for PartyConfig {
             gamescope_fix_lowres: true,
             gamescope_sdl_backend: true,
             gamescope_force_grab_cursor: false,
-            kbm_support: true,
+            input_holding: true,
             proton_version: "".to_string(),
             proton_separate_pfxs: true,
             vertical_two_player: false,

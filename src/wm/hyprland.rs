@@ -114,7 +114,7 @@ impl HyprlandManager {
     fn add_window_rules(&mut self, target_monitor: &str) -> WmResult<()> {
         self.target_monitor = Some(target_monitor.to_string());
 
-        // Match all gamescope variants (gamescope, gamescope-kbm, Gamescope, etc.)
+        // Match all gamescope variants (gamescope, gamescope-splitux, Gamescope, etc.)
         let class_match = "class:^([Gg]amescope.*)$";
 
         let commands = vec![
@@ -249,7 +249,7 @@ impl HyprlandManager {
 
         println!("[splitux] wm::hyprland - Removing window rules");
         let commands = vec![
-            "keyword windowrulev2 unset,class:^(gamescope|gamescope-kbm)$".to_string()
+            "keyword windowrulev2 unset,class:^([Gg]amescope.*)$".to_string()
         ];
         self.hyprctl_batch(&commands)?;
         self.rules_added = false;

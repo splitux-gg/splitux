@@ -35,10 +35,8 @@ function getGamescopeClients() {
   var gamescopeClients = [];
 
   for (var i = 0; i < allClients.length; i++) {
-    if (
-      allClients[i].resourceClass == "gamescope" ||
-      allClients[i].resourceClass == "gamescope-kbm"
-    ) {
+    // Match all gamescope variants (gamescope, gamescope-splitux, etc.)
+    if (allClients[i].resourceClass.toLowerCase().startsWith("gamescope")) {
       gamescopeClients.push(allClients[i]);
     }
   }
@@ -59,10 +57,8 @@ function numGamescopeClientsInOutput(output) {
 function gamescopeAboveBelow() {
   var gamescopeClients = getGamescopeClients();
   for (var i = 0; i < gamescopeClients.length; i++) {
-    if (
-      workspace.activeWindow.resourceClass == "gamescope" ||
-      workspace.activeWindow.resourceClass == "gamescope-kbm"
-    ) {
+    // Match all gamescope variants
+    if (workspace.activeWindow.resourceClass.toLowerCase().startsWith("gamescope")) {
       gamescopeClients[i].keepAbove = true;
     } else {
       gamescopeClients[i].keepAbove = false;

@@ -230,7 +230,7 @@ check_deps() {
     step "Detected: $DISTRO ($PKG_MGR)${IMMUTABLE:+ [immutable]}"
 
     # Runtime dependencies (always needed)
-    # Note: gamescope-kbm is built from source, not a package
+    # Note: gamescope-splitux is built from source, not a package
     local runtime_deps=(fuse-overlayfs bubblewrap)
     for dep in "${runtime_deps[@]}"; do
         local cmd="$dep"
@@ -357,42 +357,51 @@ get_target_dir() {
 
 download_goldberg() {
     local gbe_out="$SCRIPT_DIR/res/goldberg"
-    # Use splitux fork with steamnetworkingsockets support
     local gbe_repo="gabrielgad/gbe_fork-splitux"
-    local gbe_release="nightly"  # Use "latest" for stable releases
+    local gbe_release="nightly"
 
+    # Check if already available
     if [[ -f "$gbe_out/linux64/libsteam_api.so" ]] && [[ -f "$gbe_out/win/steam_api64.dll" ]]; then
         info "Goldberg already available"
         copy_steam_client_libs
         return 0
     fi
 
-    step "Downloading Goldberg Steam emulator (splitux fork)..."
+    step "Downloading Goldberg Steam emulator..."
     local tmp_dir=$(mktemp -d)
-    trap "rm -rf '$tmp_dir'" EXIT
+    local base_url="https://github.com/$gbe_repo/releases/download/$gbe_release"
 
-    # Linux binaries
-    curl -fsSL "https://github.com/$gbe_repo/releases/download/$gbe_release/emu-linux-release.tar.bz2" \
-        -o "$tmp_dir/goldberg-linux.tar.bz2" || { warn "Failed to download Goldberg (linux)"; return 1; }
+    # Download Linux and Windows in parallel
+    curl -fsSL "$base_url/emu-linux-release.tar.bz2" -o "$tmp_dir/linux.tar.bz2" &
+    local linux_pid=$!
+    curl -fsSL "$base_url/emu-win-release.7z" -o "$tmp_dir/win.7z" &
+    local win_pid=$!
 
-    tar -xjf "$tmp_dir/goldberg-linux.tar.bz2" -C "$tmp_dir"
-    mkdir -p "$gbe_out/linux64" "$gbe_out/linux32"
+    # Wait for downloads
+    if ! wait $linux_pid; then
+        warn "Failed to download Goldberg (linux)"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+    if ! wait $win_pid; then
+        warn "Failed to download Goldberg (windows)"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Extract (sequential - both write to release/)
+    mkdir -p "$gbe_out"/{linux64,linux32,win,steamnetworkingsockets/{x64,x32}}
+
+    tar -xjf "$tmp_dir/linux.tar.bz2" -C "$tmp_dir"
     cp -f "$tmp_dir"/release/regular/x64/*.so "$gbe_out/linux64/" 2>/dev/null || true
     cp -f "$tmp_dir"/release/regular/x32/*.so "$gbe_out/linux32/" 2>/dev/null || true
 
-    # Windows binaries (for Proton games)
-    curl -fsSL "https://github.com/$gbe_repo/releases/download/$gbe_release/emu-win-release.7z" \
-        -o "$tmp_dir/goldberg-win.7z" || { warn "Failed to download Goldberg (windows)"; return 1; }
-
-    7z x -o"$tmp_dir" "$tmp_dir/goldberg-win.7z" >/dev/null
-    mkdir -p "$gbe_out/win" "$gbe_out/steamnetworkingsockets/x64" "$gbe_out/steamnetworkingsockets/x32"
+    7z x -y -o"$tmp_dir" "$tmp_dir/win.7z" >/dev/null
     cp -f "$tmp_dir"/release/regular/x64/*.dll "$gbe_out/win/" 2>/dev/null || true
     cp -f "$tmp_dir"/release/regular/x32/*.dll "$gbe_out/win/" 2>/dev/null || true
-    # Copy steamnetworkingsockets library (for games like The Riftbreaker)
     cp -f "$tmp_dir"/release/steamnetworkingsockets/x64/*.dll "$gbe_out/steamnetworkingsockets/x64/" 2>/dev/null || true
     cp -f "$tmp_dir"/release/steamnetworkingsockets/x32/*.dll "$gbe_out/steamnetworkingsockets/x32/" 2>/dev/null || true
 
-    trap - EXIT
     rm -rf "$tmp_dir"
     info "Goldberg downloaded"
     copy_steam_client_libs
@@ -416,7 +425,7 @@ copy_steam_client_libs() {
             info "Copied steamclient.so (32-bit)"
     fi
     [[ -f "$steam_dir/linux32/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux32/crashhandler.so" ]] && \
-        cp -f "$steam_dir/linux32/crashhandler.so" "$gbe_out/linux32/" 2>/dev/null
+        cp -f "$steam_dir/linux32/crashhandler.so" "$gbe_out/linux32/" 2>/dev/null || true
 }
 
 download_bepinex() {
@@ -424,7 +433,6 @@ download_bepinex() {
     local need_mono=false
     local need_il2cpp=false
 
-    # Check what we need to download
     [[ ! -d "$bepinex_out/mono/core" ]] && need_mono=true
     [[ ! -d "$bepinex_out/il2cpp/core" ]] && need_il2cpp=true
 
@@ -435,58 +443,64 @@ download_bepinex() {
 
     step "Downloading BepInEx..."
     local tmp_dir=$(mktemp -d)
-    trap "rm -rf '$tmp_dir'" EXIT
 
-    # BepInEx 5.x for Mono games
+    # Download needed files in parallel
     if [[ "$need_mono" == true ]]; then
-        info "Downloading BepInEx 5 (Mono)..."
         curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.4/BepInEx_win_x64_5.4.23.4.zip" \
-            -o "$tmp_dir/bepinex-mono.zip" || { warn "Failed to download BepInEx (mono)"; }
+            -o "$tmp_dir/mono.zip" &
+        local mono_pid=$!
+    fi
+    if [[ "$need_il2cpp" == true ]]; then
+        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
+            -o "$tmp_dir/il2cpp.zip" &
+        local il2cpp_pid=$!
+    fi
 
-        if [[ -f "$tmp_dir/bepinex-mono.zip" ]]; then
-            unzip -q "$tmp_dir/bepinex-mono.zip" -d "$tmp_dir/mono"
+    # Wait and extract
+    if [[ "$need_mono" == true ]]; then
+        if wait $mono_pid && [[ -f "$tmp_dir/mono.zip" ]]; then
+            unzip -q "$tmp_dir/mono.zip" -d "$tmp_dir/mono"
             chmod -R u+rwX "$tmp_dir/mono"
             mkdir -p "$bepinex_out/mono"
             cp -r "$tmp_dir/mono/BepInEx/core" "$bepinex_out/mono/"
             cp -f "$tmp_dir/mono/winhttp.dll" "$bepinex_out/mono/" 2>/dev/null || true
             cp -f "$tmp_dir/mono/doorstop_config.ini" "$bepinex_out/mono/" 2>/dev/null || true
             info "BepInEx 5 (Mono) downloaded"
+        else
+            warn "Failed to download BepInEx (mono)"
         fi
     fi
 
-    # BepInEx 6.x for IL2CPP games
     if [[ "$need_il2cpp" == true ]]; then
-        info "Downloading BepInEx 6 (IL2CPP)..."
-        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
-            -o "$tmp_dir/bepinex-il2cpp.zip" || { warn "Failed to download BepInEx (il2cpp)"; }
-
-        if [[ -f "$tmp_dir/bepinex-il2cpp.zip" ]]; then
-            unzip -q "$tmp_dir/bepinex-il2cpp.zip" -d "$tmp_dir/il2cpp"
+        if wait $il2cpp_pid && [[ -f "$tmp_dir/il2cpp.zip" ]]; then
+            unzip -q "$tmp_dir/il2cpp.zip" -d "$tmp_dir/il2cpp"
             chmod -R u+rwX "$tmp_dir/il2cpp"
             mkdir -p "$bepinex_out/il2cpp"
             cp -r "$tmp_dir/il2cpp/BepInEx/core" "$bepinex_out/il2cpp/"
             cp -f "$tmp_dir/il2cpp/winhttp.dll" "$bepinex_out/il2cpp/" 2>/dev/null || true
             cp -f "$tmp_dir/il2cpp/doorstop_config.ini" "$bepinex_out/il2cpp/" 2>/dev/null || true
             info "BepInEx 6 (IL2CPP) downloaded"
+        else
+            warn "Failed to download BepInEx (il2cpp)"
         fi
     fi
 
-    trap - EXIT
     rm -rf "$tmp_dir"
+    return 0
 }
 
 # =============================================================================
 # Build
 # =============================================================================
 
-build_gamescope_kbm() {
+build_gamescope_splitux() {
     local gsc_dir="$SCRIPT_DIR/deps/gamescope"
     local gsc_build="$gsc_dir/build"
-    local gsc_bin="$gsc_build/gamescope"
+    local gsc_bin="$gsc_build/src/gamescope"
 
     # Check if already built
     if [[ -f "$gsc_bin" ]]; then
-        info "gamescope-kbm already built"
+        info "gamescope-splitux already built"
         return 0
     fi
 
@@ -494,7 +508,7 @@ build_gamescope_kbm() {
         error "gamescope submodule not found. Run: git submodule update --init"
     fi
 
-    step "Building gamescope-kbm (this may take a while)..."
+    step "Building gamescope-splitux (this may take a while)..."
     cd "$gsc_dir"
 
     # Init gamescope's own submodules (some may have broken refs, init individually)
@@ -524,7 +538,7 @@ build_gamescope_kbm() {
     ninja -C build/ -j"$(nproc)" || error "Gamescope build failed"
 
     [[ ! -f "$gsc_bin" ]] && error "gamescope binary not found after build"
-    info "gamescope-kbm built"
+    info "gamescope-splitux built"
     cd "$SCRIPT_DIR"
 }
 
@@ -548,15 +562,21 @@ do_build() {
     download_bepinex &
     local bep_pid=$!
 
-    # Build gamescope-kbm first (takes longest)
-    build_gamescope_kbm
+    # Build gamescope-splitux first (takes longest)
+    build_gamescope_splitux
 
     # Build splitux
     build_splitux
 
-    # Wait for downloads
-    wait $gbe_pid || warn "Goldberg download failed"
-    wait $bep_pid || warn "BepInEx download failed"
+    # Wait for downloads (disable errexit for wait)
+    set +e
+    wait $gbe_pid
+    local gbe_status=$?
+    wait $bep_pid
+    local bep_status=$?
+    set -e
+    [[ $gbe_status -ne 0 ]] && warn "Goldberg download failed"
+    [[ $bep_status -ne 0 ]] && warn "BepInEx download failed"
 
     # Setup build directory
     step "Setting up build directory..."
@@ -568,13 +588,13 @@ do_build() {
     cp "$SCRIPT_DIR/LICENSE" "$BUILD_DIR/" 2>/dev/null || true
     cp -r "$SCRIPT_DIR/res/"* "$BUILD_DIR/res/" 2>/dev/null || true
 
-    # Copy gamescope-kbm
-    if [[ -f "$SCRIPT_DIR/deps/gamescope/build/gamescope" ]]; then
-        cp "$SCRIPT_DIR/deps/gamescope/build/gamescope" "$BUILD_DIR/bin/gamescope-kbm"
-        chmod +x "$BUILD_DIR/bin/gamescope-kbm"
-        info "gamescope-kbm installed to build/bin/"
+    # Copy gamescope-splitux
+    if [[ -f "$SCRIPT_DIR/deps/gamescope/build/src/gamescope" ]]; then
+        cp "$SCRIPT_DIR/deps/gamescope/build/src/gamescope" "$BUILD_DIR/bin/gamescope-splitux"
+        chmod +x "$BUILD_DIR/bin/gamescope-splitux"
+        info "gamescope-splitux installed to build/bin/"
     else
-        warn "gamescope-kbm not found - KBM support will be unavailable"
+        warn "gamescope-splitux not found - input holding support will be unavailable"
     fi
 
     info "Build complete: $BUILD_DIR/"

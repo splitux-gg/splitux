@@ -236,9 +236,9 @@ impl PartyApp {
         );
         let gamescope_sdl_backend_check =
             ui.checkbox(&mut self.options.gamescope_sdl_backend, "Use SDL backend");
-        let kbm_support_check = ui.checkbox(
-            &mut self.options.kbm_support,
-            "Enable keyboard and mouse support through custom Gamescope",
+        let input_holding_check = ui.checkbox(
+            &mut self.options.input_holding,
+            "Enable input holding (gamescope-splitux)",
         );
         let gamescope_force_grab_cursor_check = ui.checkbox(
             &mut self.options.gamescope_force_grab_cursor,
@@ -251,8 +251,8 @@ impl PartyApp {
         if gamescope_sdl_backend_check.hovered() {
             self.infotext = "Runs gamescope sessions using the SDL backend. This is required for multi-monitor support. If unsure, leave this checked. If gamescope sessions only show a black screen or give an error (especially on Nvidia + Wayland), try disabling this.".to_string();
         }
-        if kbm_support_check.hovered() {
-            self.infotext = "Runs a custom Gamescope build with support for holding keyboards and mice. If you want to use your own Gamescope installation, uncheck this.".to_string();
+        if input_holding_check.hovered() {
+            self.infotext = "Uses gamescope-splitux with input device holding support. This allows assigning keyboards and mice to specific players. Uncheck to use system gamescope instead.".to_string();
         }
         if gamescope_force_grab_cursor_check.hovered() {
             self.infotext = "Sets the \"--force-grab-cursor\" flag in Gamescope. This keeps the cursor within the Gamescope window. If unsure, leave this unchecked.".to_string();

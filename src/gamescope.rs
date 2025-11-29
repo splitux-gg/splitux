@@ -9,14 +9,14 @@ use crate::app::PartyConfig;
 use crate::input::DeviceInfo;
 use crate::input::DeviceType;
 use crate::instance::Instance;
-use crate::paths::BIN_GSC_KBM;
+use crate::paths::BIN_GSC_SPLITUX;
 
 /// Create the base gamescope command
 ///
-/// Returns a Command for either gamescope or gamescope-kbm based on config
+/// Returns a Command for either gamescope or gamescope-splitux based on config
 pub fn create_command(cfg: &PartyConfig) -> Command {
-    let gamescope = match cfg.kbm_support {
-        true => BIN_GSC_KBM.as_path(),
+    let gamescope = match cfg.input_holding {
+        true => BIN_GSC_SPLITUX.as_path(),
         false => std::path::Path::new("gamescope"),
     };
     Command::new(gamescope)
@@ -63,48 +63,53 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &PartyConfig) {
 
 /// Add input device holding arguments for gamescope-splitux
 ///
-/// This configures gamescope to hold (ignore) device types not assigned to this instance.
-/// Devices are held by TYPE, not by specific device path - this prevents input crosstalk
-/// between split-screen instances.
-pub fn add_kbm_args(
+/// This configures gamescope to hold specific input devices and disable backend input
+/// for device types that this instance should use directly.
+pub fn add_input_holding_args(
     cmd: &mut Command,
     instance: &Instance,
     input_devices: &[DeviceInfo],
     cfg: &PartyConfig,
 ) {
-    if !cfg.kbm_support {
+    if !cfg.input_holding {
         return;
     }
 
-    // Determine which device types this instance has assigned
     let mut has_keyboard = false;
     let mut has_mouse = false;
-    let mut has_gamepad = false;
+    let mut held_devices = String::new();
 
     for &d in &instance.devices {
         let dev = &input_devices[d];
         match dev.device_type {
-            DeviceType::Keyboard => has_keyboard = true,
-            DeviceType::Mouse => has_mouse = true,
-            DeviceType::Gamepad => has_gamepad = true,
-            DeviceType::Other => {}
+            DeviceType::Keyboard => {
+                has_keyboard = true;
+                held_devices.push_str(&format!("{},", &dev.path));
+            }
+            DeviceType::Mouse => {
+                has_mouse = true;
+                held_devices.push_str(&format!("{},", &dev.path));
+            }
+            _ => {}
         }
     }
 
-    // Hold device types NOT assigned to this instance
-    // This prevents gamescope from processing input from devices meant for other players
-    if !has_keyboard {
-        cmd.arg("--input-hold-keyboards");
+    // When we have keyboard/mouse assigned, disable backend's default handling
+    // so our libinput-held devices get exclusive input
+    if has_keyboard {
+        cmd.arg("--backend-disable-keyboard");
     }
-    if !has_mouse {
-        cmd.arg("--input-hold-mice");
-    }
-    if !has_gamepad {
-        cmd.arg("--input-hold-gamepads");
+    if has_mouse {
+        cmd.arg("--backend-disable-mouse");
     }
 
-    // Always hold touchscreens for now (not typically used in split-screen)
-    cmd.arg("--input-hold-touchscreens");
+    // Pass specific device paths to hold for libinput processing
+    if !held_devices.is_empty() {
+        cmd.arg(format!(
+            "--libinput-hold-dev={}",
+            held_devices.trim_end_matches(',')
+        ));
+    }
 }
 
 /// Add the separator between gamescope args and the inner command

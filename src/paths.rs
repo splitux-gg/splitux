@@ -54,16 +54,16 @@ pub static BIN_UMU_RUN: LazyLock<PathBuf> = LazyLock::new(|| {
     bin.join("umu-run")
 });
 
-pub static BIN_GSC_KBM: LazyLock<PathBuf> = LazyLock::new(|| {
+pub static BIN_GSC_SPLITUX: LazyLock<PathBuf> = LazyLock::new(|| {
     let bin_candidates = [PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")];
 
     for candidate in &bin_candidates {
-        let bin = candidate.join("gamescope-kbm");
+        let bin = candidate.join("gamescope-splitux");
         if bin.exists() {
             return bin;
         }
     }
 
     let bin = env::current_exe().unwrap().parent().unwrap().join("bin");
-    bin.join("gamescope-kbm")
+    bin.join("gamescope-splitux")
 });

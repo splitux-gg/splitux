@@ -299,7 +299,7 @@ impl PartyApp {
             match self.input_devices[i].poll() {
                 Some(PadButton::ABtn) | Some(PadButton::ZKey) | Some(PadButton::RightClick) => {
                     if self.input_devices[i].device_type() != DeviceType::Gamepad
-                        && !self.options.kbm_support
+                        && !self.options.input_holding
                     {
                         continue;
                     }

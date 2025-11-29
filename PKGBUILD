@@ -42,8 +42,8 @@ package() {
     # Install binary
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
 
-    # Install keyboard/mouse gamescope
-    install -Dm755 "deps/gamescope/build/src/gamescope" "$pkgdir/usr/bin/gamescope-kbm"
+    # Install gamescope-splitux (our fork with input holding support)
+    install -Dm755 "deps/gamescope/build/src/gamescope" "$pkgdir/usr/bin/gamescope-splitux"
 
     # Install resources
     install -Dm644 "res/splitscreen_kwin.js" "$pkgdir/usr/share/$pkgname/splitscreen_kwin.js"
