@@ -2,15 +2,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::app::{PartyConfig, PadFilterType, WindowManagerType};
+use crate::backend::{self, MultiplayerBackend};
 use crate::bwrap;
 use crate::gamescope;
-use crate::goldberg::{self, GoldbergConfig};
 use crate::handler::*;
 use crate::input::*;
 use crate::instance::*;
 use crate::monitor::Monitor;
 use crate::paths::*;
-use crate::profiles::{create_profile, create_profile_gamesave, generate_steam_id};
+use crate::photon;
+use crate::profiles::{create_profile, create_profile_gamesave};
 use crate::proton;
 use crate::util::*;
 use crate::wm::{LayoutContext, LayoutOrientation, WindowManager, WindowManagerBackend};
@@ -130,54 +131,21 @@ pub fn launch_cmds(
         return Err(format!("Steam Runtime {runtime} not found!").into());
     }
 
-    // Create Goldberg overlays if needed (before mounting game dirs)
-    let goldberg_overlays = if h.use_goldberg && h.is_saved_handler() {
-        let game_root = PathBuf::from(h.get_game_rootpath()?);
-        let dlls = goldberg::find_steam_api_dlls(&game_root)?;
-
-        if dlls.is_empty() {
-            println!("[splitux] Warning: use_goldberg enabled but no Steam API DLLs found");
-            vec![]
-        } else {
-            // Generate unique ports for each instance using instance index
-            // This guarantees no port collisions even if profile names hash to the same value
-            const BASE_PORT: u16 = 47584;
-            let instance_ports: Vec<u16> = (0..instances.len())
-                .map(|i| BASE_PORT + i as u16)
-                .collect();
-
-            // Build configs for each instance
-            let configs: Vec<GoldbergConfig> = instances
-                .iter()
-                .enumerate()
-                .map(|(i, instance)| {
-                    // Broadcast ports = all other instances' ports
-                    let broadcast_ports: Vec<u16> = instance_ports
-                        .iter()
-                        .enumerate()
-                        .filter(|(j, _)| *j != i)
-                        .map(|(_, &port)| port)
-                        .collect();
-
-                    GoldbergConfig {
-                        app_id: h.steam_appid.unwrap_or(480),
-                        steam_id: generate_steam_id(&instance.profname),
-                        account_name: instance.profname.clone(),
-                        listen_port: instance_ports[i],
-                        broadcast_ports,
-                    }
-                })
-                .collect();
-
-            goldberg::create_all_overlays(&dlls, &configs, win)?
-        }
+    // Create backend overlays if needed (before mounting game dirs)
+    let backend_overlays = if h.is_saved_handler() && h.backend != MultiplayerBackend::None {
+        backend::create_backend_overlays(h, instances, win)?
     } else {
         vec![]
     };
 
+    // Generate Photon configs at launch time (needs instance count)
+    if h.backend == MultiplayerBackend::Photon && h.is_saved_handler() {
+        photon::generate_all_configs(h, instances)?;
+    }
+
     // Mount game directories with overlays
     if h.is_saved_handler() && !cfg.disable_mount_gamedirs {
-        fuse_overlayfs_mount_gamedirs(h, instances, &goldberg_overlays)?;
+        fuse_overlayfs_mount_gamedirs(h, instances, &backend_overlays)?;
     }
 
     let mut cmds: Vec<Command> = Vec::new();
@@ -385,14 +353,14 @@ fn print_launch_cmds(cmds: &Vec<Command>) {
 /// Mount game directories with fuse-overlayfs
 ///
 /// Creates overlay mounts for each instance with:
-/// 1. Goldberg overlay (if enabled) - replaces Steam API DLLs
+/// 1. Backend overlay (if enabled) - Goldberg DLLs or BepInEx files
 /// 2. Handler overlay (if exists) - custom handler files
 /// 3. Base game directory - read-only game files
 /// 4. Upper dir - per-profile save data (read-write)
 pub fn fuse_overlayfs_mount_gamedirs(
     h: &Handler,
     instances: &Vec<Instance>,
-    goldberg_overlays: &[PathBuf],
+    backend_overlays: &[PathBuf],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_dir = PATH_PARTY.join("tmp");
     let game_root = h.get_game_rootpath()?;
@@ -402,8 +370,8 @@ pub fn fuse_overlayfs_mount_gamedirs(
         // Build lowerdir stack (leftmost has highest priority)
         let mut lowerdir_parts: Vec<String> = Vec::new();
 
-        // 1. Goldberg overlay first (highest priority)
-        if let Some(overlay) = goldberg_overlays.get(i) {
+        // 1. Backend overlay first (highest priority)
+        if let Some(overlay) = backend_overlays.get(i) {
             lowerdir_parts.push(overlay.display().to_string());
         }
 

@@ -1,15 +1,36 @@
+use crate::backend::MultiplayerBackend;
 use crate::paths::*;
 use crate::util::*;
 
 use eframe::egui::{self, ImageSource};
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 pub const HANDLER_SPEC_CURRENT_VERSION: u16 = 3;
+
+/// Photon-specific settings for BepInEx/LocalMultiplayer
+#[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct PhotonSettings {
+    /// Path pattern for LocalMultiplayer config file within profile's windata
+    /// Example: "AppData/LocalLow/CompanyName/GameName/LocalMultiplayer/global.cfg"
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub config_path: String,
+}
+
+impl PhotonSettings {
+    pub fn is_empty(&self) -> bool {
+        self.config_path.is_empty()
+    }
+}
+
+fn is_default_backend(b: &MultiplayerBackend) -> bool {
+    *b == MultiplayerBackend::None
+}
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum SDL2Override {
@@ -56,12 +77,28 @@ pub struct Handler {
     pub env: String,
     #[serde(default, skip_serializing_if = "is_default_sdl2")]
     pub sdl2_override: SDL2Override,
+    /// Path to Proton installation. If set, uses direct Proton instead of umu-run.
+    /// Example: "Proton - Experimental" or full path like "/path/to/proton"
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proton_path: String,
 
     // Multiplayer settings
+    /// Multiplayer backend to use (none, goldberg, photon)
+    #[serde(default, skip_serializing_if = "is_default_backend")]
+    pub backend: MultiplayerBackend,
+    /// DEPRECATED: Use `backend: goldberg` instead. Kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_goldberg: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_between_starts: Option<f64>,
+    /// Game-specific Goldberg settings files.
+    /// Keys are filenames (e.g., "force_lobby_type.txt", "invite_all.txt")
+    /// Values are file contents (use empty string for empty files)
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub goldberg_settings: HashMap<String, String>,
+    /// Photon-specific settings (only used when backend = photon)
+    #[serde(default, skip_serializing_if = "PhotonSettings::is_empty")]
+    pub photon_settings: PhotonSettings,
 
     // Advanced
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -94,11 +131,15 @@ impl Default for Handler {
             args: String::new(),
             env: String::new(),
             sdl2_override: SDL2Override::No,
+            proton_path: String::new(),
 
             pause_between_starts: None,
 
+            backend: MultiplayerBackend::None,
             use_goldberg: false,
             steam_appid: None,
+            goldberg_settings: std::collections::HashMap::new(),
+            photon_settings: PhotonSettings::default(),
 
             game_null_paths: Vec::new(),
         }
@@ -124,6 +165,12 @@ impl Handler {
             *path = path.sanitize_path();
         }
 
+        // Migrate deprecated use_goldberg to backend field
+        if handler.use_goldberg && handler.backend == MultiplayerBackend::None {
+            handler.backend = MultiplayerBackend::Goldberg;
+            handler.use_goldberg = false; // Clear deprecated field
+        }
+
         // Validate required fields
         handler.validate()?;
 
@@ -141,6 +188,7 @@ impl Handler {
         self.runtime = self.runtime.trim().to_string();
         self.args = self.args.trim().to_string();
         self.env = self.env.trim().to_string();
+        self.proton_path = self.proton_path.trim().to_string();
 
         // Trim paths in null_paths list
         for path in &mut self.game_null_paths {

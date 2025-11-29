@@ -285,9 +285,23 @@ impl PartyApp {
         for event in monitor.poll_events() {
             match event {
                 DeviceEvent::Added(path) => {
-                    // Check if device already exists
-                    if self.input_devices.iter().any(|d| d.path() == path) {
-                        continue;
+                    println!("[splitux] udev: Add event for {}", path);
+                    // Remove any stale entry with the same path first
+                    if let Some(idx) = self.input_devices.iter().position(|d| d.path() == path) {
+                        println!("[splitux] udev: Removing stale entry for {}", path);
+                        // Clean up instances referencing this device
+                        for instance in &mut self.instances {
+                            instance.devices.retain(|&d| d != idx);
+                        }
+                        self.instances.retain(|i| !i.devices.is_empty());
+                        for instance in &mut self.instances {
+                            for dev_idx in &mut instance.devices {
+                                if *dev_idx > idx {
+                                    *dev_idx -= 1;
+                                }
+                            }
+                        }
+                        self.input_devices.remove(idx);
                     }
                     // Try to open the device
                     if let Some(device) = open_device(&path, &self.options.pad_filter_type) {

@@ -113,6 +113,74 @@ pub fn get_installed_steamapps() -> Vec<Option<steamlocate::App>> {
     return games;
 }
 
+/// Get Steam's compatdata path for a given app ID
+/// Returns the path to the compatdata folder (e.g., /mnt/games/SteamLibrary/steamapps/compatdata/361420)
+pub fn get_steam_compat_data_path(appid: u32) -> Option<std::path::PathBuf> {
+    if let Ok(steam_dir) = steamlocate::SteamDir::locate()
+        && let Ok(libraries) = steam_dir.libraries()
+    {
+        for library in libraries.flatten() {
+            let compat_path = library.path().join("steamapps/compatdata").join(appid.to_string());
+            if compat_path.exists() {
+                return Some(compat_path);
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a Proton path from a name (e.g., "Proton - Experimental") or full path
+/// Returns the full path to the proton executable if found
+pub fn resolve_proton_path(proton_name: &str) -> Option<PathBuf> {
+    use crate::paths::PATH_STEAM;
+
+    // If it's already a full path, use it directly
+    let as_path = std::path::Path::new(proton_name);
+    if as_path.is_absolute() {
+        let proton_bin = as_path.join("proton");
+        if proton_bin.exists() {
+            return Some(proton_bin);
+        }
+        // Maybe they specified the proton binary directly
+        if as_path.exists() && as_path.file_name().map(|n| n == "proton").unwrap_or(false) {
+            return Some(as_path.to_path_buf());
+        }
+        return None;
+    }
+
+    // Search in Steam's common folder for a matching Proton installation
+    let common_path = PATH_STEAM.join("steamapps/common");
+    if let Ok(entries) = std::fs::read_dir(&common_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str == proton_name || name_str.to_lowercase() == proton_name.to_lowercase() {
+                let proton_bin = entry.path().join("proton");
+                if proton_bin.exists() {
+                    return Some(proton_bin);
+                }
+            }
+        }
+    }
+
+    // Also check Steam's compatibilitytools.d for custom Proton versions
+    let compat_path = PATH_STEAM.join("compatibilitytools.d");
+    if let Ok(entries) = std::fs::read_dir(&compat_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str == proton_name || name_str.to_lowercase() == proton_name.to_lowercase() {
+                let proton_bin = entry.path().join("proton");
+                if proton_bin.exists() {
+                    return Some(proton_bin);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn is_mount_point(dir: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
     if let Ok(status) = Command::new("mountpoint").arg(dir).status()
         && status.success()

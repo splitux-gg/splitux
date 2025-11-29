@@ -22,6 +22,18 @@ pub enum WindowManagerType {
     GamescopeOnly,
 }
 
+/// Photon App IDs for LocalMultiplayer mod
+/// Get free App IDs from https://dashboard.photonengine.com
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct PhotonAppIds {
+    /// Photon PUN App ID (required for Photon games)
+    #[serde(default)]
+    pub pun_app_id: String,
+    /// Photon Voice App ID (optional, for voice chat)
+    #[serde(default)]
+    pub voice_app_id: String,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PartyConfig {
     #[serde(default)]
@@ -41,6 +53,9 @@ pub struct PartyConfig {
     #[serde(default)]
     pub allow_multiple_instances_on_same_device: bool,
     pub disable_mount_gamedirs: bool,
+    /// Photon App IDs for games using Photon networking
+    #[serde(default)]
+    pub photon_app_ids: PhotonAppIds,
 }
 
 fn default_enable_kwin_script() -> bool {
@@ -62,8 +77,14 @@ impl Default for PartyConfig {
             pad_filter_type: PadFilterType::NoSteamInput,
             allow_multiple_instances_on_same_device: false,
             disable_mount_gamedirs: false,
+            photon_app_ids: PhotonAppIds::default(),
         }
     }
+}
+
+/// Load Photon App IDs from config (convenience function)
+pub fn load_photon_ids() -> PhotonAppIds {
+    load_cfg().photon_app_ids
 }
 
 pub fn load_cfg() -> PartyConfig {

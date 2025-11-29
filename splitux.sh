@@ -31,7 +31,6 @@ check_deps() {
     local mode="${1:-runtime}"
     local missing_pacman=()
     local missing_aur=()
-    local optional=()
 
     step "Checking dependencies..."
 
@@ -86,36 +85,69 @@ check_deps() {
         fi
     fi
 
-    # Optional but recommended
-    command -v gamescope >/dev/null 2>&1 || optional+=("gamescope")
+    # umu-launcher for Windows games
     command -v umu-run >/dev/null 2>&1 || missing_aur+=("umu-launcher")
-    command -v premake5 >/dev/null 2>&1 || optional+=("premake5 (for goldberg/Steam LAN)")
 
-    # Report missing dependencies
+    # Prompt to install missing dependencies
     if [[ ${#missing_pacman[@]} -gt 0 ]] || [[ ${#missing_aur[@]} -gt 0 ]]; then
         echo ""
-        echo -e "${RED}[splitux] Missing dependencies${NC}"
+        warn "Missing dependencies detected"
         echo ""
 
-        if [[ ${#missing_pacman[@]} -gt 0 ]]; then
-            # Remove duplicates
-            local unique_pacman=($(printf '%s\n' "${missing_pacman[@]}" | sort -u))
-            echo "Pacman packages:"
-            echo -e "  ${CYAN}sudo pacman -S ${unique_pacman[*]}${NC}"
-            echo ""
+        # Remove duplicates
+        local unique_pacman=($(printf '%s\n' "${missing_pacman[@]}" | sort -u))
+        local unique_aur=($(printf '%s\n' "${missing_aur[@]}" | sort -u))
+
+        if [[ ${#unique_pacman[@]} -gt 0 ]]; then
+            echo -e "  ${CYAN}Pacman packages:${NC} ${unique_pacman[*]}"
         fi
-
-        if [[ ${#missing_aur[@]} -gt 0 ]]; then
-            echo "AUR packages:"
-            echo -e "  ${CYAN}yay -S ${missing_aur[*]}${NC}"
-            echo ""
+        if [[ ${#unique_aur[@]} -gt 0 ]]; then
+            echo -e "  ${CYAN}AUR packages:${NC} ${unique_aur[*]}"
         fi
+        echo ""
 
-        exit 1
-    fi
+        read -p "  Would you like to install missing dependencies now? [Y/n] " -n 1 -r
+        echo ""
 
-    if [[ ${#optional[@]} -gt 0 && "$mode" == "build" ]]; then
-        warn "Optional: ${optional[*]}"
+        if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+            # Install pacman packages
+            if [[ ${#unique_pacman[@]} -gt 0 ]]; then
+                step "Installing pacman packages..."
+                sudo pacman -S --needed "${unique_pacman[@]}" || {
+                    error "Failed to install pacman packages"
+                }
+            fi
+
+            # Install AUR packages
+            if [[ ${#unique_aur[@]} -gt 0 ]]; then
+                step "Installing AUR packages..."
+                if command -v yay >/dev/null 2>&1; then
+                    yay -S --needed "${unique_aur[@]}" || {
+                        error "Failed to install AUR packages"
+                    }
+                elif command -v paru >/dev/null 2>&1; then
+                    paru -S --needed "${unique_aur[@]}" || {
+                        error "Failed to install AUR packages"
+                    }
+                else
+                    echo ""
+                    error "No AUR helper found. Install yay or paru, then run: yay -S ${unique_aur[*]}"
+                fi
+            fi
+
+            info "Dependencies installed successfully"
+        else
+            echo ""
+            echo -e "  ${YELLOW}To install manually:${NC}"
+            if [[ ${#unique_pacman[@]} -gt 0 ]]; then
+                echo -e "    ${GREEN}sudo pacman -S ${unique_pacman[*]}${NC}"
+            fi
+            if [[ ${#unique_aur[@]} -gt 0 ]]; then
+                echo -e "    ${GREEN}yay -S ${unique_aur[*]}${NC}"
+            fi
+            echo ""
+            exit 1
+        fi
     fi
 
     info "Dependencies OK"
@@ -129,49 +161,132 @@ init_submodules() {
     fi
 }
 
-build_goldberg() {
-    local gbe_src="$SCRIPT_DIR/deps/gbe_fork"
+copy_steam_client_libs() {
+    # Copy Steam's steamclient.so to Goldberg directories
+    # Games need both libsteam_api.so (from Goldberg) AND steamclient.so (from Steam)
     local gbe_out="$SCRIPT_DIR/res/goldberg"
-    local gbe_old="$SCRIPT_DIR/deps/gbe_fork/release"
+    local steam_dir="$HOME/.local/share/Steam"
 
-    if [[ -d "$gbe_out/linux64" ]]; then
-        info "goldberg already available"
+    # Copy 64-bit libraries
+    if [[ -f "$steam_dir/linux64/steamclient.so" ]] && [[ ! -f "$gbe_out/linux64/steamclient.so" ]]; then
+        cp -f "$steam_dir/linux64/steamclient.so" "$gbe_out/linux64/" 2>/dev/null && \
+            info "Copied steamclient.so (64-bit) to goldberg"
+    fi
+    if [[ -f "$steam_dir/linux64/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux64/crashhandler.so" ]]; then
+        cp -f "$steam_dir/linux64/crashhandler.so" "$gbe_out/linux64/" 2>/dev/null
+    fi
+
+    # Copy 32-bit libraries
+    if [[ -f "$steam_dir/linux32/steamclient.so" ]] && [[ ! -f "$gbe_out/linux32/steamclient.so" ]]; then
+        cp -f "$steam_dir/linux32/steamclient.so" "$gbe_out/linux32/" 2>/dev/null && \
+            info "Copied steamclient.so (32-bit) to goldberg"
+    fi
+    if [[ -f "$steam_dir/linux32/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux32/crashhandler.so" ]]; then
+        cp -f "$steam_dir/linux32/crashhandler.so" "$gbe_out/linux32/" 2>/dev/null
+    fi
+
+    # Create sdk32/sdk64 symlinks if they don't exist (needed by splitux)
+    if [[ ! -L "$steam_dir/sdk32" ]]; then
+        ln -sf linux32 "$steam_dir/sdk32" 2>/dev/null
+    fi
+    if [[ ! -L "$steam_dir/sdk64" ]]; then
+        ln -sf linux64 "$steam_dir/sdk64" 2>/dev/null
+    fi
+}
+
+build_bepinex() {
+    local bepinex_out="$SCRIPT_DIR/res/bepinex"
+
+    if [[ -d "$bepinex_out/core" ]] && [[ -f "$bepinex_out/winhttp.dll" ]]; then
+        info "BepInEx already available"
         return 0
     fi
 
-    # Check if goldberg exists in old location (from previous build.sh downloads)
-    if [[ -d "$gbe_old/linux64" ]]; then
-        step "Copying goldberg from previous download..."
-        mkdir -p "$gbe_out"
-        cp -r "$gbe_old"/{linux32,linux64,win} "$gbe_out/" 2>/dev/null || true
-        info "goldberg copied from deps/gbe_fork/release"
-        return 0
-    fi
+    step "Downloading BepInEx (Unity IL2CPP)..."
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
 
-    # Init submodule if needed
-    if [[ ! -f "$gbe_src/premake5.lua" ]]; then
-        step "Initializing gbe_fork submodule..."
-        cd "$SCRIPT_DIR"
-        git submodule update --init deps/gbe_fork
-    fi
-
-    # Check for premake5
-    if ! command -v premake5 >/dev/null 2>&1; then
-        warn "premake5 not installed - goldberg (Steam LAN emulator) will not be built"
-        warn "Install premake5 or disable 'Emulate Steam Client' in game settings"
+    # Download BepInEx for Unity IL2CPP (Windows x64)
+    # This is the most common Unity build type for modern games
+    curl -L "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
+        -o "$tmp_dir/bepinex.zip" || {
+        warn "Failed to download BepInEx"
+        rm -rf "$tmp_dir"
         return 1
+    }
+
+    unzip -q "$tmp_dir/bepinex.zip" -d "$tmp_dir/bepinex" || {
+        warn "Failed to extract BepInEx"
+        rm -rf "$tmp_dir"
+        return 1
+    }
+
+    # Fix restrictive permissions from the zip archive
+    chmod -R u+rwX "$tmp_dir/bepinex"
+
+    mkdir -p "$bepinex_out"
+    cp -r "$tmp_dir/bepinex/BepInEx/core" "$bepinex_out/"
+    cp -f "$tmp_dir/bepinex/winhttp.dll" "$bepinex_out/" 2>/dev/null || true
+    cp -f "$tmp_dir/bepinex/doorstop_config.ini" "$bepinex_out/" 2>/dev/null || true
+    cp -f "$tmp_dir/bepinex/.doorstop_version" "$bepinex_out/" 2>/dev/null || true
+
+    rm -rf "$tmp_dir"
+    info "BepInEx downloaded"
+}
+
+build_goldberg() {
+    local gbe_out="$SCRIPT_DIR/res/goldberg"
+
+    if [[ -d "$gbe_out/linux64" ]] && [[ -d "$gbe_out/win" ]]; then
+        info "goldberg already available"
+        copy_steam_client_libs
+        return 0
     fi
 
-    step "Building goldberg Steam emulator..."
-    cd "$gbe_src"
-    ./build_linux_premake.sh || { warn "goldberg build failed"; return 1; }
+    step "Downloading goldberg Steam emulator..."
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
 
-    # Copy built libraries
-    mkdir -p "$gbe_out/linux32" "$gbe_out/linux64"
-    cp -f build/linux/x32/release/*.so "$gbe_out/linux32/" 2>/dev/null || true
-    cp -f build/linux/x64/release/*.so "$gbe_out/linux64/" 2>/dev/null || true
+    # Download Linux binaries
+    curl -L "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-linux-release.tar.bz2" \
+        -o "$tmp_dir/goldberg-linux.tar.bz2" || {
+        warn "Failed to download goldberg (linux)"
+        rm -rf "$tmp_dir"
+        return 1
+    }
 
-    info "goldberg built"
+    tar -xjf "$tmp_dir/goldberg-linux.tar.bz2" -C "$tmp_dir" || {
+        warn "Failed to extract goldberg (linux)"
+        rm -rf "$tmp_dir"
+        return 1
+    }
+
+    mkdir -p "$gbe_out/linux64" "$gbe_out/linux32"
+    cp -f "$tmp_dir"/release/regular/x64/*.so "$gbe_out/linux64/" 2>/dev/null || true
+    cp -f "$tmp_dir"/release/regular/x32/*.so "$gbe_out/linux32/" 2>/dev/null || true
+    rm -rf "$tmp_dir/release"
+
+    # Download Windows binaries (needed for Proton/Wine games)
+    curl -L "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-win-release.7z" \
+        -o "$tmp_dir/goldberg-win.7z" || {
+        warn "Failed to download goldberg (windows)"
+        rm -rf "$tmp_dir"
+        return 1
+    }
+
+    7z x -o"$tmp_dir" "$tmp_dir/goldberg-win.7z" >/dev/null || {
+        warn "Failed to extract goldberg (windows)"
+        rm -rf "$tmp_dir"
+        return 1
+    }
+
+    mkdir -p "$gbe_out/win"
+    cp -f "$tmp_dir"/release/regular/x64/*.dll "$gbe_out/win/" 2>/dev/null || true
+    cp -f "$tmp_dir"/release/regular/x32/*.dll "$gbe_out/win/" 2>/dev/null || true
+
+    rm -rf "$tmp_dir"
+    info "goldberg downloaded"
+    copy_steam_client_libs
 }
 
 build_gamescope() {
@@ -238,12 +353,15 @@ do_build() {
     local gsc_pid=$!
     build_goldberg &
     local gbe_pid=$!
+    build_bepinex &
+    local bep_pid=$!
     build_splitux &
     local spx_pid=$!
 
     # Wait for all
     wait $gsc_pid || warn "gamescope build failed"
     wait $gbe_pid || warn "goldberg build failed"
+    wait $bep_pid || warn "BepInEx download failed"
     wait $spx_pid || error "splitux build failed"
 
     # Setup build directory

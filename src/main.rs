@@ -1,4 +1,5 @@
 mod app;
+mod backend;
 mod bwrap;
 mod gamescope;
 mod goldberg;
@@ -8,6 +9,7 @@ mod instance;
 mod launch;
 mod monitor;
 mod paths;
+mod photon;
 mod profiles;
 mod proton;
 mod util;

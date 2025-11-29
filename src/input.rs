@@ -338,9 +338,22 @@ impl DeviceMonitor {
 
 /// Try to open a single device by path and create an InputDevice
 pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
-    let dev = match Device::open(path) {
-        Ok(d) => d,
-        Err(_) => return None,
+    // Retry a few times - udev events can arrive before device is ready
+    let dev = {
+        let mut attempts = 0;
+        loop {
+            match Device::open(path) {
+                Ok(d) => break d,
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= 5 {
+                        println!("[splitux] evdev: Failed to open {} after {} attempts: {}", path, attempts, e);
+                        return None;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
     };
 
     let enabled = match filter {
@@ -365,6 +378,7 @@ pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
     {
         DeviceType::Keyboard
     } else {
+        println!("[splitux] evdev: Skipping {} - not a gamepad/keyboard/mouse", path);
         return None; // Not an input device we care about
     };
 

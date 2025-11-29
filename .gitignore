@@ -4,3 +4,9 @@
 res/gamescope
 gen_release.sh
 handler.json
+
+# Downloaded dependencies (fetched by splitux.sh build)
+res/goldberg/linux32/
+res/goldberg/linux64/
+res/goldberg/win/
+res/bepinex/

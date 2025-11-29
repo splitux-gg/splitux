@@ -23,15 +23,20 @@ pub static PATH_PARTY: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 pub static PATH_STEAM: LazyLock<PathBuf> = LazyLock::new(|| {
-    if PATH_HOME.join(".steam").exists() {
-        PATH_HOME.join(".steam")
+    // Check for native Steam installation first
+    if PATH_LOCAL_SHARE.join("Steam").exists() {
+        PATH_LOCAL_SHARE.join("Steam")
+    } else if PATH_HOME.join(".steam/steam").exists() {
+        // Follow the symlink at ~/.steam/steam
+        PATH_HOME.join(".steam/steam")
     } else if PATH_HOME
-        .join(".var/app/com.valvesoftware.Steam/.steam/steam")
+        .join(".var/app/com.valvesoftware.Steam/.local/share/Steam")
         .exists()
     {
-        PATH_HOME.join(".var/app/com.valvesoftware.Steam/.steam/steam")
+        // Flatpak Steam
+        PATH_HOME.join(".var/app/com.valvesoftware.Steam/.local/share/Steam")
     } else {
-        PATH_HOME.join(".steam")
+        PATH_LOCAL_SHARE.join("Steam")
     }
 });
 

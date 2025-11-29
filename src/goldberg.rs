@@ -3,6 +3,7 @@
 //! This module handles finding Steam API DLLs in game directories and creating
 //! per-instance overlays with Goldberg's replacement DLLs and configuration.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -92,6 +93,7 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
 fn write_steam_settings(
     dir: &Path,
     config: &GoldbergConfig,
+    handler_settings: &HashMap<String, String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // steam_appid.txt
     fs::write(dir.join("steam_appid.txt"), config.app_id.to_string())?;
@@ -139,6 +141,16 @@ share_leaderboards_over_network=0
     fs::write(dir.join("auto_accept_invite.txt"), "")?;
     fs::write(dir.join("auto_send_invite.txt"), "")?;
 
+    // Write handler-specific Goldberg settings files
+    for (filename, content) in handler_settings {
+        fs::write(dir.join(filename), content)?;
+        println!(
+            "[splitux] Goldberg custom setting: {} = {:?}",
+            filename,
+            if content.is_empty() { "(empty)" } else { content.as_str() }
+        );
+    }
+
     Ok(())
 }
 
@@ -152,6 +164,7 @@ pub fn create_instance_overlay(
     dlls: &[SteamApiDll],
     config: &GoldbergConfig,
     is_windows: bool,
+    handler_settings: &HashMap<String, String>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let overlay_dir = PATH_PARTY
         .join("tmp")
@@ -199,7 +212,7 @@ pub fn create_instance_overlay(
         // Create steam_settings next to DLL
         let settings_dir = target_dir.join("steam_settings");
         fs::create_dir_all(&settings_dir)?;
-        write_steam_settings(&settings_dir, config)?;
+        write_steam_settings(&settings_dir, config, handler_settings)?;
     }
 
     println!(
@@ -217,11 +230,12 @@ pub fn create_all_overlays(
     dlls: &[SteamApiDll],
     configs: &[GoldbergConfig],
     is_windows: bool,
+    handler_settings: &HashMap<String, String>,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let mut overlays = Vec::new();
 
     for (i, config) in configs.iter().enumerate() {
-        let overlay = create_instance_overlay(i, dlls, config, is_windows)?;
+        let overlay = create_instance_overlay(i, dlls, config, is_windows, handler_settings)?;
         overlays.push(overlay);
     }
 
