@@ -1,6 +1,7 @@
 use crate::app::PadFilterType;
 
 use evdev::*;
+use std::os::unix::io::AsRawFd;
 
 #[derive(Clone, PartialEq, Copy, Debug)]
 pub enum DeviceType {
@@ -23,6 +24,8 @@ pub enum PadButton {
     SelectBtn,
     LB, // Left bumper (BTN_TL)
     RB, // Right bumper (BTN_TR)
+    LT, // Left trigger (BTN_TL2 or ABS_Z)
+    RT, // Right trigger (BTN_TR2 or ABS_RZ)
 
     AKey,
     RKey,
@@ -37,6 +40,7 @@ pub struct DeviceInfo {
     pub path: String,
     pub enabled: bool,
     pub device_type: DeviceType,
+    pub uniq: String, // Unique identifier (Bluetooth MAC or USB serial)
 }
 
 pub struct InputDevice {
@@ -50,6 +54,8 @@ pub struct InputDevice {
     // Axis range info (center and threshold for stick navigation)
     stick_center: i32,
     stick_threshold: i32,
+    // Unique identifier (Bluetooth MAC or USB serial) for distinguishing identical controllers
+    uniq: String,
 }
 impl InputDevice {
     pub fn name(&self) -> &str {
@@ -84,11 +90,15 @@ impl InputDevice {
     pub fn has_button_held(&self) -> bool {
         self.has_button_held
     }
+    pub fn uniq(&self) -> &str {
+        &self.uniq
+    }
     pub fn info(&self) -> DeviceInfo {
         DeviceInfo {
             path: self.path().to_string(),
             enabled: self.enabled(),
             device_type: self.device_type(),
+            uniq: self.uniq.clone(),
         }
     }
     pub fn poll(&mut self) -> Option<PadButton> {
@@ -120,6 +130,8 @@ impl InputDevice {
                     EventSummary::Key(_, KeyCode::BTN_SELECT, 1) => Some(PadButton::SelectBtn),
                     EventSummary::Key(_, KeyCode::BTN_TL, 1) => Some(PadButton::LB),
                     EventSummary::Key(_, KeyCode::BTN_TR, 1) => Some(PadButton::RB),
+                    EventSummary::Key(_, KeyCode::BTN_TL2, 1) => Some(PadButton::LT),
+                    EventSummary::Key(_, KeyCode::BTN_TR2, 1) => Some(PadButton::RT),
                     // D-pad
                     EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0X, -1) => {
                         Some(PadButton::Left)
@@ -141,13 +153,9 @@ impl InputDevice {
 
                         if self.stick_nav_cooldown.elapsed().as_millis() > STICK_NAV_COOLDOWN_MS {
                             if is_left {
-                                println!("[input] ABS_X={} (center={}, thresh={}) -> Left",
-                                    val, self.stick_center, self.stick_threshold);
                                 self.stick_nav_cooldown = std::time::Instant::now();
                                 Some(PadButton::Left)
                             } else if is_right {
-                                println!("[input] ABS_X={} (center={}, thresh={}) -> Right",
-                                    val, self.stick_center, self.stick_threshold);
                                 self.stick_nav_cooldown = std::time::Instant::now();
                                 Some(PadButton::Right)
                             } else {
@@ -163,13 +171,9 @@ impl InputDevice {
 
                         if self.stick_nav_cooldown.elapsed().as_millis() > STICK_NAV_COOLDOWN_MS {
                             if is_up {
-                                println!("[input] ABS_Y={} (center={}, thresh={}) -> Up",
-                                    val, self.stick_center, self.stick_threshold);
                                 self.stick_nav_cooldown = std::time::Instant::now();
                                 Some(PadButton::Up)
                             } else if is_down {
-                                println!("[input] ABS_Y={} (center={}, thresh={}) -> Down",
-                                    val, self.stick_center, self.stick_threshold);
                                 self.stick_nav_cooldown = std::time::Instant::now();
                                 Some(PadButton::Down)
                             } else {
@@ -255,6 +259,9 @@ pub fn scan_input_devices(filter: &PadFilterType) -> Vec<InputDevice> {
                 (0, 8000)
             };
 
+            // Get the unique identifier (Bluetooth MAC or USB serial)
+            let uniq = dev.1.unique_name().unwrap_or("").to_string();
+
             pads.push(InputDevice {
                 path: dev.0.to_str().unwrap().to_string(),
                 dev: dev.1,
@@ -264,9 +271,139 @@ pub fn scan_input_devices(filter: &PadFilterType) -> Vec<InputDevice> {
                 stick_nav_cooldown: std::time::Instant::now(),
                 stick_center,
                 stick_threshold,
+                uniq,
             });
         }
     }
     pads.sort_by_key(|pad| pad.path().to_string());
     pads
+}
+
+/// Event types for device hotplug
+#[derive(Debug, Clone)]
+pub enum DeviceEvent {
+    Added(String),   // Device path added (e.g., "/dev/input/event5")
+    Removed(String), // Device path removed
+}
+
+/// Monitors for input device connect/disconnect events via udev
+pub struct DeviceMonitor {
+    socket: udev::MonitorSocket,
+}
+
+impl DeviceMonitor {
+    /// Create a new device monitor watching for input device events
+    pub fn new() -> Result<Self, std::io::Error> {
+        let socket = udev::MonitorBuilder::new()?
+            .match_subsystem("input")?
+            .listen()?;
+
+        // Set non-blocking mode using libc
+        unsafe {
+            let fd = socket.as_raw_fd();
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+
+        Ok(Self { socket })
+    }
+
+    /// Poll for device events (non-blocking)
+    /// Returns a list of events that occurred since last poll
+    pub fn poll_events(&mut self) -> Vec<DeviceEvent> {
+        let mut events = Vec::new();
+
+        // Use iter() which returns events non-blockingly
+        for event in self.socket.iter() {
+            // Only care about "event" devices (not js*, mouse*, etc.)
+            if let Some(devnode) = event.devnode() {
+                let path = devnode.to_string_lossy().to_string();
+                if path.contains("/dev/input/event") {
+                    match event.event_type() {
+                        udev::EventType::Add => {
+                            events.push(DeviceEvent::Added(path));
+                        }
+                        udev::EventType::Remove => {
+                            events.push(DeviceEvent::Removed(path));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        events
+    }
+}
+
+/// Try to open a single device by path and create an InputDevice
+pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
+    let dev = match Device::open(path) {
+        Ok(d) => d,
+        Err(_) => return None,
+    };
+
+    let enabled = match filter {
+        PadFilterType::All => true,
+        PadFilterType::NoSteamInput => dev.input_id().vendor() != 0x28de,
+        PadFilterType::OnlySteamInput => dev.input_id().vendor() == 0x28de,
+    };
+
+    let device_type = if dev
+        .supported_keys()
+        .map_or(false, |keys| keys.contains(KeyCode::BTN_SOUTH))
+    {
+        DeviceType::Gamepad
+    } else if dev
+        .supported_keys()
+        .map_or(false, |keys| keys.contains(KeyCode::BTN_LEFT))
+    {
+        DeviceType::Mouse
+    } else if dev
+        .supported_keys()
+        .map_or(false, |keys| keys.contains(KeyCode::KEY_SPACE))
+    {
+        DeviceType::Keyboard
+    } else {
+        return None; // Not an input device we care about
+    };
+
+    if dev.set_nonblocking(true).is_err() {
+        println!("[splitux] evdev: Failed to set non-blocking mode for {}", path);
+        return None;
+    }
+
+    // Detect stick axis range from device info
+    let (stick_center, stick_threshold) = if let Ok(abs_info) = dev.get_abs_state() {
+        if let Some(x_info) = abs_info.get(AbsoluteAxisCode::ABS_X.0 as usize) {
+            let min = x_info.minimum;
+            let max = x_info.maximum;
+            let center = (min + max) / 2;
+            let range = max - min;
+            let threshold = range / 4;
+            println!(
+                "[splitux] evdev: {} stick range: {}-{}, center={}, threshold={}",
+                path, min, max, center, threshold
+            );
+            (center, threshold)
+        } else {
+            (0, 8000)
+        }
+    } else {
+        (0, 8000)
+    };
+
+    let uniq = dev.unique_name().unwrap_or("").to_string();
+
+    Some(InputDevice {
+        path: path.to_string(),
+        dev,
+        enabled,
+        device_type,
+        has_button_held: false,
+        stick_nav_cooldown: std::time::Instant::now(),
+        stick_center,
+        stick_threshold,
+        uniq,
+    })
 }

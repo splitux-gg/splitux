@@ -1,99 +1,48 @@
-use super::app::{MenuPage, PartyApp};
+use super::app::{FocusPane, MenuPage, PartyApp};
 use crate::Handler;
-use crate::handler::import_handler;
-use crate::handler::scan_handlers;
-use crate::input::*;
-use crate::monitor::get_monitors_sdl;
-use crate::profiles::scan_profiles;
+use crate::handler::{import_handler, scan_handlers};
 use crate::util::*;
 
 use eframe::egui::Popup;
 use eframe::egui::RichText;
 use eframe::egui::{self, Ui};
 
-macro_rules! cur_handler {
-    ($self:expr) => {
-        &$self.handlers[$self.selected_handler]
-    };
-}
-
 impl PartyApp {
     pub fn display_panel_top(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            // === Main Navigation Tabs ===
-            let hometext = match self.is_lite() {
-                true => " Play  [B]",
-                false => " Home  [B]",
+            // === Main Navigation Tabs (2 tabs: Games, Settings) ===
+            let games_text = match self.is_lite() {
+                true => "Play",
+                false => "Games",
             };
-            let homepage = match self.is_lite() {
+            let games_page = match self.is_lite() {
                 true => MenuPage::Instances,
-                false => MenuPage::Home,
+                false => MenuPage::Games,
             };
 
-            // Home/Play tab
-            let home_selected = self.cur_page == MenuPage::Home || (self.is_lite() && self.cur_page == MenuPage::Instances);
+            // Games/Play tab
+            let games_selected = self.cur_page == MenuPage::Games || (self.is_lite() && self.cur_page == MenuPage::Instances);
             ui.add_space(4.0);
-            let homebtn = ui.add(
-                egui::Button::image_and_text(
-                    egui::include_image!("../../res/BTN_EAST.png"),
-                    hometext,
-                )
-                .min_size(egui::vec2(100.0, 28.0))
-                .selected(home_selected),
+            let games_btn = ui.add(
+                egui::Button::new(games_text)
+                    .min_size(egui::vec2(70.0, 28.0))
+                    .selected(games_selected),
             );
-            if homebtn.clicked() {
-                self.cur_page = homepage;
-            }
-
-            // Profiles tab
-            let profilesbtn = ui.add(
-                egui::Button::image_and_text(
-                    egui::include_image!("../../res/BTN_WEST.png"),
-                    " Profiles  [X]",
-                )
-                .min_size(egui::vec2(110.0, 28.0))
-                .selected(self.cur_page == MenuPage::Profiles),
-            );
-            if profilesbtn.clicked() {
-                self.profiles = scan_profiles(false);
-                self.cur_page = MenuPage::Profiles;
+            if games_btn.clicked() {
+                self.cur_page = games_page;
             }
 
             // Settings tab
-            let settingsbtn = ui.add(
-                egui::Button::image_and_text(
-                    egui::include_image!("../../res/BTN_NORTH.png"),
-                    " Settings  [Y]",
-                )
-                .min_size(egui::vec2(110.0, 28.0))
-                .selected(self.cur_page == MenuPage::Settings),
+            let settings_btn = ui.add(
+                egui::Button::new("Settings")
+                    .min_size(egui::vec2(70.0, 28.0))
+                    .selected(self.cur_page == MenuPage::Settings),
             );
-            if settingsbtn.clicked() {
+            if settings_btn.clicked() {
                 self.cur_page = MenuPage::Settings;
             }
 
-            ui.add(egui::Separator::default().vertical());
-
-            // === Utility Actions ===
-            let refresh_devs = ui.add(
-                egui::Button::new("🎮")
-                    .min_size(egui::vec2(28.0, 28.0)),
-            ).on_hover_text("Refresh Controllers");
-            if refresh_devs.clicked() {
-                self.instances.clear();
-                self.input_devices = scan_input_devices(&self.options.pad_filter_type);
-            }
-
-            let refresh_monitors = ui.add(
-                egui::Button::new("🖵")
-                    .min_size(egui::vec2(28.0, 28.0)),
-            ).on_hover_text("Refresh Monitors");
-            if refresh_monitors.clicked() {
-                self.instances.clear();
-                self.monitors = get_monitors_sdl();
-            }
-
-            // === Right Side: Links & Close ===
+            // === Right Side: Version & Close ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let close_btn = ui.add(
                     egui::Button::new("✕")
@@ -102,101 +51,56 @@ impl PartyApp {
                 if close_btn.clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                ui.add(egui::Separator::default().vertical());
+
+                ui.add_space(8.0);
                 let version_label = match self.needs_update {
-                    true => format!("v{} 🆕", env!("CARGO_PKG_VERSION")),
+                    true => format!("v{} (update available)", env!("CARGO_PKG_VERSION")),
                     false => format!("v{}", env!("CARGO_PKG_VERSION")),
                 };
-                ui.hyperlink_to(version_label, "https://github.com/gabrielgad/splitux/releases")
-                    .on_hover_text("View Releases");
-
-                ui.add(egui::Separator::default().vertical());
-                ui.hyperlink_to("⮋", "https://drive.proton.me/urls/D9HBKM18YR#zG8XC8yVy9WL")
-                    .on_hover_text("Download Game Handlers");
-                ui.hyperlink_to("♥", "https://ko-fi.com/wunner")
-                    .on_hover_text("Support Development");
-                ui.hyperlink_to("📋", "https://github.com/gabrielgad/splitux/tree/main?tab=License-2-ov-file")
-                    .on_hover_text("Licenses");
-                ui.hyperlink_to("", "https://github.com/gabrielgad/splitux")
-                    .on_hover_text("GitHub");
+                ui.label(RichText::new(version_label).small().weak());
             });
         });
     }
 
     pub fn display_panel_left(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.heading("Games");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let add_btn = ui.add(
-                    egui::Button::new("➕")
-                        .min_size(egui::vec2(26.0, 26.0)),
-                ).on_hover_text("Add new game handler");
-                if add_btn.clicked() {
-                    self.handler_edit = Some(Handler::default());
-                    self.cur_page = MenuPage::EditHandler;
-                }
-
-                let import_btn = ui.add(
-                    egui::Button::new("⬇")
-                        .min_size(egui::vec2(26.0, 26.0)),
-                ).on_hover_text("Import handler (.spx)");
-                if import_btn.clicked() {
-                    if let Err(e) = import_handler() {
-                        msg("Error", &format!("Error importing handler: {}", e));
-                    } else {
-                        self.handlers = scan_handlers();
-                    }
-                }
-
-                let refresh_btn = ui.add(
-                    egui::Button::new("🔄")
-                        .min_size(egui::vec2(26.0, 26.0)),
-                ).on_hover_text("Refresh handlers");
-                if refresh_btn.clicked() {
-                    self.handlers = scan_handlers();
-                }
-            });
-        });
+        ui.heading("Games");
         ui.add_space(4.0);
         ui.separator();
         ui.add_space(4.0);
 
-        if self.handlers.is_empty() {
-            ui.label(RichText::new("No games yet").italics().weak());
-            ui.add_space(4.0);
-            ui.label(RichText::new("Click ➕ to add a game").small().weak());
-        } else {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                self.panel_left_game_list(ui);
-            });
-        }
-    }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            // Game list
+            self.panel_left_game_list(ui);
 
-    pub fn display_panel_bottom(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("info_panel")
-            .exact_height(100.0)
-            .show(ctx, |ui| {
-                if self.task.is_some() {
-                    ui.disable();
+            // Add Game option at the bottom of the list
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            let add_btn = ui.add(
+                egui::Button::new("➕ Add Game")
+                    .min_size(egui::vec2(ui.available_width(), 28.0))
+                    .frame(false),
+            );
+            if add_btn.clicked() {
+                self.handler_edit = Some(Handler::default());
+                self.show_edit_modal = true;
+            }
+
+            let import_btn = ui.add(
+                egui::Button::new("⬇ Import Handler")
+                    .min_size(egui::vec2(ui.available_width(), 28.0))
+                    .frame(false),
+            );
+            if import_btn.clicked() {
+                if let Err(e) = import_handler() {
+                    msg("Error", &format!("Error importing handler: {}", e));
+                } else {
+                    self.handlers = scan_handlers();
                 }
-                match self.cur_page {
-                    MenuPage::Game => {
-                        self.infotext = cur_handler!(self).info.to_owned();
-                    }
-                    MenuPage::Profiles => {
-                        self.infotext = "Create profiles to persistently store game save data, settings, and stats.".to_string();
-                    }
-                    _ => {}
-                }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.cur_page == MenuPage::EditHandler && let Some(handler) = &mut self.handler_edit {
-                        ui.add(egui::TextEdit::multiline(&mut handler.info).hint_text("Put game info/instructions here"));
-                    } else {
-                        ui.label(&self.infotext);
-                    }
-                });
-            });
+            }
+        });
     }
 
     pub fn display_panel_right(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -265,11 +169,23 @@ impl PartyApp {
     }
 
     pub fn panel_left_game_list(&mut self, ui: &mut Ui) {
+        if self.handlers.is_empty() {
+            ui.label(RichText::new("No games yet").italics().weak());
+            ui.add_space(4.0);
+            ui.label(RichText::new("Add a game below to get started").small().weak());
+            return;
+        }
+
+        let is_game_list_focused = self.focus_pane == FocusPane::GameList;
+
         for i in 0..self.handlers.len() {
             // Skip if index is out of bounds to catch for removing/rescanning handlers
             if i >= self.handlers.len() {
                 return;
             }
+
+            let is_selected = self.selected_handler == i;
+            let show_focus = is_selected && is_game_list_focused;
 
             ui.horizontal(|ui| {
                 ui.add(
@@ -278,19 +194,34 @@ impl PartyApp {
                         .corner_radius(2),
                 );
 
-                let btn = ui.selectable_value(
-                    &mut self.selected_handler,
-                    i,
-                    self.handlers[i].display_clamp(),
-                );
-                if btn.has_focus() {
-                    btn.scroll_to_me(None);
+                // Wrap in focus frame if this is the focused game
+                if show_focus {
+                    egui::Frame::NONE
+                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255)))
+                        .corner_radius(4.0)
+                        .inner_margin(egui::Margin::symmetric(2, 0))
+                        .show(ui, |ui| {
+                            let btn = ui.selectable_value(
+                                &mut self.selected_handler,
+                                i,
+                                self.handlers[i].display_clamp(),
+                            );
+                            if btn.has_focus() {
+                                btn.scroll_to_me(None);
+                            }
+                            Popup::context_menu(&btn).show(|ui| self.handler_ctx_menu(ui, i));
+                        });
+                } else {
+                    let btn = ui.selectable_value(
+                        &mut self.selected_handler,
+                        i,
+                        self.handlers[i].display_clamp(),
+                    );
+                    if btn.has_focus() || is_selected {
+                        btn.scroll_to_me(None);
+                    }
+                    Popup::context_menu(&btn).show(|ui| self.handler_ctx_menu(ui, i));
                 }
-                if btn.clicked() {
-                    self.cur_page = MenuPage::Game;
-                };
-
-                Popup::context_menu(&btn).show(|ui| self.handler_ctx_menu(ui, i));
             });
         }
     }
@@ -298,7 +229,7 @@ impl PartyApp {
     pub fn handler_ctx_menu(&mut self, ui: &mut Ui, i: usize) {
         if ui.button("Edit").clicked() {
             self.handler_edit = Some(self.handlers[i].clone());
-            self.cur_page = MenuPage::EditHandler;
+            self.show_edit_modal = true;
         }
 
         if ui.button("Open Folder").clicked() {
@@ -325,7 +256,7 @@ impl PartyApp {
 
                 self.handlers = scan_handlers();
                 if self.handlers.is_empty() {
-                    self.cur_page = MenuPage::Home;
+                    self.cur_page = MenuPage::Games;
                 }
                 if i >= self.handlers.len() {
                     self.selected_handler = 0;

@@ -1,30 +1,29 @@
-use std::thread::sleep;
+// Core app structure and main update loop
+
+use std::collections::HashMap;
 
 use super::config::*;
+use super::focus::FocusManager;
 use crate::handler::*;
 use crate::input::*;
 use crate::instance::*;
-use crate::launch::*;
 use crate::monitor::Monitor;
 use crate::profiles::*;
 use crate::util::*;
 
-use eframe::egui::{self, Key};
+use eframe::egui;
+
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+pub enum FocusPane {
+    GameList,   // Left panel - game selection
+    ActionBar,  // Center panel - Play, Profile, Edit buttons
+}
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum MenuPage {
-    Home,
+    Games,     // Combined home + profiles view
     Settings,
-    Profiles,
-    EditHandler,
-    Game,
-    Instances,
-}
-
-#[derive(Eq, PartialEq)]
-pub enum SettingsPage {
-    General,
-    Gamescope,
+    Instances, // Controller assignment screen (enters when "Play" pressed)
 }
 
 pub struct PartyApp {
@@ -32,30 +31,39 @@ pub struct PartyApp {
     pub needs_update: bool,
     pub options: PartyConfig,
     pub cur_page: MenuPage,
-    pub settings_page: SettingsPage,
     pub infotext: String,
 
     pub monitors: Vec<Monitor>,
     pub input_devices: Vec<InputDevice>,
+    pub device_monitor: Option<DeviceMonitor>,
     pub instances: Vec<Instance>,
     pub instance_add_dev: Option<usize>,
     pub profiles: Vec<String>,
+    pub game_profiles: HashMap<String, usize>, // Maps handler path -> selected profile index
 
     pub handlers: Vec<Handler>,
     pub selected_handler: usize,
     pub handler_edit: Option<Handler>,
     pub handler_lite: Option<Handler>,
+    pub show_edit_modal: bool,
+
+    // Focus management for spatial controller navigation
+    pub focus_manager: FocusManager,
+    pub activate_focused: bool, // Set to true when A button pressed
+
+    // Pane-based focus for Games page (simpler than grid-based FocusManager)
+    pub focus_pane: FocusPane,
+    pub action_bar_index: usize, // 0=Play, 1=Profile, 2=Edit
+
+    // Profile dropdown state (opened with Y button)
+    pub profile_dropdown_open: bool,
+    pub profile_dropdown_selection: usize, // Temporary selection while dropdown is open
+    pub show_new_profile_dialog: bool,
 
     pub loading_msg: Option<String>,
     pub loading_since: Option<std::time::Instant>,
     #[allow(dead_code)]
     pub task: Option<std::thread::JoinHandle<()>>,
-}
-
-macro_rules! cur_handler {
-    ($self:expr) => {
-        &$self.handlers[$self.selected_handler]
-    };
 }
 
 impl PartyApp {
@@ -68,25 +76,47 @@ impl PartyApp {
         };
         let cur_page = match handler_lite {
             Some(_) => MenuPage::Instances,
-            None => MenuPage::Home,
+            None => MenuPage::Games,
         };
 
+        // Initialize device hotplug monitor
+        let device_monitor = match DeviceMonitor::new() {
+            Ok(m) => {
+                println!("[splitux] udev: Device hotplug monitor initialized");
+                Some(m)
+            }
+            Err(e) => {
+                eprintln!("[splitux] udev: Failed to initialize device monitor: {}", e);
+                None
+            }
+        };
+
+        let profiles = scan_profiles(false);
         let mut app = Self {
             installed_steamapps: get_installed_steamapps(),
             needs_update: false,
             options,
             cur_page,
-            settings_page: SettingsPage::General,
             infotext: String::new(),
             monitors,
             input_devices,
+            device_monitor,
             instances: Vec::new(),
             instance_add_dev: None,
+            profiles,
+            game_profiles: HashMap::new(),
             handlers,
             selected_handler: 0,
             handler_edit: None,
             handler_lite,
-            profiles: scan_profiles(false),
+            show_edit_modal: false,
+            focus_manager: FocusManager::new(),
+            activate_focused: false,
+            focus_pane: FocusPane::GameList,
+            action_bar_index: 0,
+            profile_dropdown_open: false,
+            profile_dropdown_selection: 0,
+            show_new_profile_dialog: false,
             loading_msg: None,
             loading_since: None,
             task: None,
@@ -112,6 +142,12 @@ impl eframe::App for PartyApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll for device hotplug events
+        self.poll_device_events();
+
+        // Reset focus state at start of frame
+        self.focus_manager.begin_frame();
+
         // Enhance focus visuals for controller navigation
         ctx.style_mut(|style| {
             // Make focus stroke more visible (bright cyan outline)
@@ -119,6 +155,14 @@ impl eframe::App for PartyApp {
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
             style.visuals.selection.stroke =
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
+            // Improve keyboard focus visuals
+            style.visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255));
+        });
+
+        // Enable keyboard focus navigation
+        ctx.options_mut(|opt| {
+            opt.input_options.line_scroll_speed = 40.0;
         });
 
         egui::TopBottomPanel::top("menu_nav_panel").show(ctx, |ui| {
@@ -152,23 +196,31 @@ impl eframe::App for PartyApp {
                 });
         }
 
-        if (self.cur_page != MenuPage::Home) && (self.cur_page != MenuPage::Instances) {
-            self.display_panel_bottom(ctx);
-        }
-
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.task.is_some() {
                 ui.disable();
             }
             match self.cur_page {
-                MenuPage::Home => self.display_page_main(ui),
+                MenuPage::Games => self.display_page_games(ui),
                 MenuPage::Settings => self.display_page_settings(ui),
-                MenuPage::Profiles => self.display_page_profiles(ui),
-                MenuPage::EditHandler => self.display_page_edit_handler(ui),
-                MenuPage::Game => self.display_page_game(ui),
                 MenuPage::Instances => self.display_page_instances(ui),
             }
         });
+
+        // Edit handler modal
+        if self.show_edit_modal {
+            self.display_edit_handler_modal(ctx);
+        }
+
+        // Profile dropdown overlay
+        if self.profile_dropdown_open {
+            self.display_profile_dropdown(ctx);
+        }
+
+        // New profile dialog
+        if self.show_new_profile_dialog {
+            self.display_new_profile_dialog(ctx);
+        }
 
         if let Some(handle) = self.task.take() {
             if handle.is_finished() {
@@ -223,294 +275,60 @@ impl PartyApp {
         self.handler_lite.is_some()
     }
 
-    fn handle_gamepad_gui(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        let mut key: Option<egui::Key> = None;
-        let mut page_changed = false;
-
-        for pad in &mut self.input_devices {
-            if !pad.enabled() {
-                continue;
-            }
-            match pad.poll() {
-                Some(PadButton::ABtn) => key = Some(Key::Enter),
-                Some(PadButton::BBtn) => {
-                    if self.handler_lite.is_some() {
-                        self.cur_page = MenuPage::Instances;
-                    } else {
-                        self.cur_page = MenuPage::Home;
-                    }
-                    page_changed = true;
-                }
-                Some(PadButton::XBtn) => {
-                    self.profiles = scan_profiles(false);
-                    self.cur_page = MenuPage::Profiles;
-                    page_changed = true;
-                }
-                Some(PadButton::YBtn) => {
-                    self.cur_page = MenuPage::Settings;
-                    page_changed = true;
-                }
-                Some(PadButton::SelectBtn) => key = Some(Key::Tab),
-                Some(PadButton::StartBtn) => {
-                    if self.cur_page == MenuPage::Game {
-                        self.instances.clear();
-                        self.profiles = scan_profiles(true);
-                        self.instance_add_dev = None;
-                        self.cur_page = MenuPage::Instances;
-                        page_changed = true;
-                    }
-                }
-                Some(PadButton::Up) => key = Some(Key::ArrowUp),
-                Some(PadButton::Down) => key = Some(Key::ArrowDown),
-                Some(PadButton::Left) => key = Some(Key::ArrowLeft),
-                Some(PadButton::Right) => key = Some(Key::ArrowRight),
-                Some(PadButton::LB) => {
-                    // Cycle to previous page: Home -> Settings -> Profiles -> Home
-                    match self.cur_page {
-                        MenuPage::Home => {
-                            self.cur_page = MenuPage::Settings;
-                            page_changed = true;
-                        }
-                        MenuPage::Profiles => {
-                            self.cur_page = MenuPage::Home;
-                            page_changed = true;
-                        }
-                        MenuPage::Settings => {
-                            self.cur_page = MenuPage::Profiles;
-                            page_changed = true;
-                        }
-                        _ => {} // Don't cycle from special pages
-                    }
-                }
-                Some(PadButton::RB) => {
-                    // Cycle to next page: Home -> Profiles -> Settings -> Home
-                    match self.cur_page {
-                        MenuPage::Home => {
-                            self.cur_page = MenuPage::Profiles;
-                            page_changed = true;
-                        }
-                        MenuPage::Profiles => {
-                            self.cur_page = MenuPage::Settings;
-                            page_changed = true;
-                        }
-                        MenuPage::Settings => {
-                            self.cur_page = MenuPage::Home;
-                            page_changed = true;
-                        }
-                        _ => {} // Don't cycle from special pages
-                    }
-                }
-                Some(_) => {}
-                None => {}
-            }
-        }
-
-        if let Some(key) = key {
-            raw_input.events.push(egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::default(),
-            });
-        }
-
-        // When page changes, clear focus so sidebar doesn't stay highlighted
-        if page_changed {
-            ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::NULL));
-        }
-    }
-
-    fn handle_devices_instance_menu(&mut self) {
-        let mut i = 0;
-        while i < self.input_devices.len() {
-            if !self.input_devices[i].enabled() {
-                i += 1;
-                continue;
-            }
-            match self.input_devices[i].poll() {
-                Some(PadButton::ABtn) | Some(PadButton::ZKey) | Some(PadButton::RightClick) => {
-                    if self.input_devices[i].device_type() != DeviceType::Gamepad
-                        && !self.options.kbm_support
-                    {
-                        continue;
-                    }
-                    if !self.options.allow_multiple_instances_on_same_device
-                        && self.is_device_in_any_instance(i)
-                    {
-                        continue;
-                    }
-                    // Prevent same keyboard/mouse device in multiple instances due to current custom gamescope limitations
-                    // TODO: Remove this when custom gamescope supports the same keyboard/mouse device for multiple instances
-                    if self.input_devices[i].device_type() != DeviceType::Gamepad
-                        && self.is_device_in_any_instance(i)
-                    {
-                        continue;
-                    }
-
-                    match self.instance_add_dev {
-                        Some(inst) => {
-                            // Add the device in the instance only if it's not already there
-                            if !self.is_device_in_instance(inst, i) {
-                                self.instance_add_dev = None;
-                                self.instances[inst].devices.push(i);
-                            } else {
-                                continue;
-                            }
-                        }
-                        None => {
-                            self.instances.push(Instance {
-                                devices: vec![i],
-                                profname: String::new(),
-                                profselection: 0,
-                                monitor: 0,
-                                width: 0,
-                                height: 0,
-                            });
-                        }
-                    }
-                }
-                Some(PadButton::BBtn) | Some(PadButton::XKey) => {
-                    if self.instance_add_dev != None {
-                        self.instance_add_dev = None;
-                    } else if self.is_device_in_any_instance(i) {
-                        self.remove_device(i);
-                    } else if self.instances.len() < 1 {
-                        self.cur_page = MenuPage::Game;
-                    }
-                }
-                Some(PadButton::YBtn) | Some(PadButton::AKey) => {
-                    if self.instance_add_dev == None {
-                        if let Some((instance, _)) = self.find_device_in_instance(i) {
-                            self.instance_add_dev = Some(instance);
-                        }
-                    }
-                }
-                Some(PadButton::StartBtn) => {
-                    if self.instances.len() > 0 && self.is_device_in_any_instance(i) {
-                        self.prepare_game_launch();
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-    }
-
-    fn is_device_in_any_instance(&self, dev: usize) -> bool {
-        for instance in &self.instances {
-            if instance.devices.contains(&dev) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn is_device_in_instance(&self, instance_index: usize, dev: usize) -> bool {
-        if self.instances[instance_index].devices.contains(&dev) {
-            return true;
-        }
-        false
-    }
-
-    fn find_device_in_instance(&mut self, dev: usize) -> Option<(usize, usize)> {
-        for (i, instance) in self.instances.iter().enumerate() {
-            for (d, device) in instance.devices.iter().enumerate() {
-                if device == &dev {
-                    return Some((i, d));
-                }
-            }
-        }
-        None
-    }
-
-    fn find_device_in_instance_from_end(&mut self, dev: usize) -> Option<(usize, usize)> {
-        for (i, instance) in self.instances.iter().enumerate().rev() {
-            for (d, device) in instance.devices.iter().enumerate() {
-                if device == &dev {
-                    return Some((i, d));
-                }
-            }
-        }
-        None
-    }
-
-    pub fn remove_device(&mut self, dev: usize) {
-        if let Some((instance_index, device_index)) = self.find_device_in_instance_from_end(dev) {
-            self.instances[instance_index].devices.remove(device_index);
-            if self.instances[instance_index].devices.is_empty() {
-                self.instances.remove(instance_index);
-            }
-        }
-    }
-
-    pub fn remove_device_instance(&mut self, instance_index: usize, dev: usize) {
-        let device_index = self.instances[instance_index]
-            .devices
-            .iter()
-            .position(|device| device == &dev);
-
-        if let Some(d) = device_index {
-            self.instances[instance_index].devices.remove(d);
-
-            if self.instances[instance_index].devices.is_empty() {
-                self.instances.remove(instance_index);
-            }
-        }
-    }
-
-    pub fn prepare_game_launch(&mut self) {
-        if self.options.gamescope_sdl_backend {
-            set_instance_resolutions_multimonitor(
-                &mut self.instances,
-                &self.monitors,
-                &self.options,
-            );
-        } else {
-            set_instance_resolutions(&mut self.instances, &self.monitors[0], &self.options);
-        }
-        set_instance_names(&mut self.instances, &self.profiles);
-
-        let handler = if let Some(h) = self.handler_lite.clone() {
-            h
-        } else {
-            cur_handler!(self).to_owned()
+    /// Poll for device hotplug events and update input_devices list
+    fn poll_device_events(&mut self) {
+        let monitor = match &mut self.device_monitor {
+            Some(m) => m,
+            None => return,
         };
 
-        let instances = self.instances.clone();
-        let monitors = self.monitors.clone();
-        let dev_infos: Vec<DeviceInfo> = self.input_devices.iter().map(|p| p.info()).collect();
+        for event in monitor.poll_events() {
+            match event {
+                DeviceEvent::Added(path) => {
+                    // Check if device already exists
+                    if self.input_devices.iter().any(|d| d.path() == path) {
+                        continue;
+                    }
+                    // Try to open the device
+                    if let Some(device) = open_device(&path, &self.options.pad_filter_type) {
+                        println!(
+                            "[splitux] udev: Device connected: {} ({})",
+                            device.fancyname(),
+                            path
+                        );
+                        self.input_devices.push(device);
+                        self.input_devices.sort_by_key(|d| d.path().to_string());
+                    }
+                }
+                DeviceEvent::Removed(path) => {
+                    // Find and remove the device
+                    if let Some(idx) = self.input_devices.iter().position(|d| d.path() == path) {
+                        let device = &self.input_devices[idx];
+                        println!(
+                            "[splitux] udev: Device disconnected: {} ({})",
+                            device.fancyname(),
+                            path
+                        );
 
-        let cfg = self.options.clone();
-        let _ = save_cfg(&cfg);
+                        // Also remove from any instances
+                        for instance in &mut self.instances {
+                            instance.devices.retain(|&d| d != idx);
+                        }
+                        // Remove empty instances
+                        self.instances.retain(|i| !i.devices.is_empty());
+                        // Update device indices in instances (since we're removing one)
+                        for instance in &mut self.instances {
+                            for dev_idx in &mut instance.devices {
+                                if *dev_idx > idx {
+                                    *dev_idx -= 1;
+                                }
+                            }
+                        }
 
-        self.cur_page = MenuPage::Home;
-        self.spawn_task(
-            "Launching...\n\nDon't press any buttons or move any analog sticks or mice.",
-            move || {
-                sleep(std::time::Duration::from_secs_f32(1.5));
-
-                if let Err(err) = setup_profiles(&handler, &instances) {
-                    println!("[splitux] Error setting up profiles: {}", err);
-                    msg("Failed setting up profiles", &format!("{err}"));
-                    return;
+                        self.input_devices.remove(idx);
+                    }
                 }
-                // Note: fuse_overlayfs_mount_gamedirs is now called inside launch_cmds
-                // with proper Goldberg overlay support
-                if let Err(err) = launch_game(&handler, &dev_infos, &instances, &monitors, &cfg) {
-                    println!("[splitux] Error launching instances: {}", err);
-                    msg("Launch Error", &format!("{err}"));
-                }
-                // WM teardown is now handled inside launch_game
-                if let Err(err) = remove_guest_profiles() {
-                    println!("[splitux] Error removing guest profiles: {}", err);
-                    msg("Failed removing guest profiles", &format!("{err}"));
-                }
-                if let Err(err) = clear_tmp() {
-                    println!("[splitux] Error removing tmp directory: {}", err);
-                    msg("Failed removing tmp directory", &format!("{err}"));
-                }
-            },
-        );
+            }
+        }
     }
 }
