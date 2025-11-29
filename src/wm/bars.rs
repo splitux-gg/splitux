@@ -104,6 +104,7 @@ impl StatusBarManager {
     }
 
     /// Check if any bars are currently hidden
+    #[allow(dead_code)] // API for WM to check if cleanup needed
     pub fn has_hidden_bars(&self) -> bool {
         !self.hidden_bars.is_empty()
     }

@@ -114,6 +114,7 @@ pub fn calculate_geometry(
 }
 
 /// Calculate all window geometries for a set of instances
+#[allow(dead_code)] // Exported for future WM backends that need centralized layout
 pub fn calculate_all_geometries(
     instances: &[Instance],
     monitors: &[Monitor],

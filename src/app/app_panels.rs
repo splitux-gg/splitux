@@ -1,4 +1,5 @@
 use super::app::{FocusPane, MenuPage, PartyApp};
+use super::theme;
 use crate::Handler;
 use crate::handler::{import_handler, scan_handlers};
 use crate::util::*;
@@ -170,9 +171,9 @@ impl PartyApp {
 
     pub fn panel_left_game_list(&mut self, ui: &mut Ui) {
         if self.handlers.is_empty() {
-            ui.label(RichText::new("No games yet").italics().weak());
+            ui.label(RichText::new("No games yet").italics().color(theme::colors::TEXT_MUTED));
             ui.add_space(4.0);
-            ui.label(RichText::new("Add a game below to get started").small().weak());
+            ui.label(RichText::new("Add a game below to get started").small().color(theme::colors::TEXT_MUTED));
             return;
         }
 
@@ -187,31 +188,33 @@ impl PartyApp {
             let is_selected = self.selected_handler == i;
             let show_focus = is_selected && is_game_list_focused;
 
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::Image::new(self.handlers[i].icon())
-                        .max_width(16.0)
-                        .corner_radius(2),
-                );
+            // Use card styling for each game entry
+            let frame = if is_selected {
+                egui::Frame::NONE
+                    .fill(theme::colors::SELECTION_BG)
+                    .corner_radius(6)
+                    .inner_margin(egui::Margin::symmetric(6, 4))
+                    .stroke(if show_focus {
+                        theme::focus_stroke()
+                    } else {
+                        egui::Stroke::new(1.0, theme::colors::ACCENT_DIM)
+                    })
+            } else {
+                egui::Frame::NONE
+                    .fill(egui::Color32::TRANSPARENT)
+                    .corner_radius(6)
+                    .inner_margin(egui::Margin::symmetric(6, 4))
+            };
 
-                // Wrap in focus frame if this is the focused game
-                if show_focus {
-                    egui::Frame::NONE
-                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255)))
-                        .corner_radius(4.0)
-                        .inner_margin(egui::Margin::symmetric(2, 0))
-                        .show(ui, |ui| {
-                            let btn = ui.selectable_value(
-                                &mut self.selected_handler,
-                                i,
-                                self.handlers[i].display_clamp(),
-                            );
-                            if btn.has_focus() {
-                                btn.scroll_to_me(None);
-                            }
-                            Popup::context_menu(&btn).show(|ui| self.handler_ctx_menu(ui, i));
-                        });
-                } else {
+            frame.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Image::new(self.handlers[i].icon())
+                            .max_width(18.0)
+                            .corner_radius(3),
+                    );
+                    ui.add_space(4.0);
+
                     let btn = ui.selectable_value(
                         &mut self.selected_handler,
                         i,
@@ -221,8 +224,9 @@ impl PartyApp {
                         btn.scroll_to_me(None);
                     }
                     Popup::context_menu(&btn).show(|ui| self.handler_ctx_menu(ui, i));
-                }
+                });
             });
+            ui.add_space(2.0);
         }
     }
 

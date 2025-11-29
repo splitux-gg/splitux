@@ -395,9 +395,15 @@ copy_steam_client_libs() {
 
 download_bepinex() {
     local bepinex_out="$SCRIPT_DIR/res/bepinex"
+    local need_mono=false
+    local need_il2cpp=false
 
-    if [[ -d "$bepinex_out/core" ]] && [[ -f "$bepinex_out/winhttp.dll" ]]; then
-        info "BepInEx already available"
+    # Check what we need to download
+    [[ ! -d "$bepinex_out/mono/core" ]] && need_mono=true
+    [[ ! -d "$bepinex_out/il2cpp/core" ]] && need_il2cpp=true
+
+    if [[ "$need_mono" == false ]] && [[ "$need_il2cpp" == false ]]; then
+        info "BepInEx already available (mono + il2cpp)"
         return 0
     fi
 
@@ -405,21 +411,42 @@ download_bepinex() {
     local tmp_dir=$(mktemp -d)
     trap "rm -rf '$tmp_dir'" EXIT
 
-    curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
-        -o "$tmp_dir/bepinex.zip" || { warn "Failed to download BepInEx"; return 1; }
+    # BepInEx 5.x for Mono games
+    if [[ "$need_mono" == true ]]; then
+        info "Downloading BepInEx 5 (Mono)..."
+        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.4/BepInEx_win_x64_5.4.23.4.zip" \
+            -o "$tmp_dir/bepinex-mono.zip" || { warn "Failed to download BepInEx (mono)"; }
 
-    unzip -q "$tmp_dir/bepinex.zip" -d "$tmp_dir/bepinex"
-    chmod -R u+rwX "$tmp_dir/bepinex"
+        if [[ -f "$tmp_dir/bepinex-mono.zip" ]]; then
+            unzip -q "$tmp_dir/bepinex-mono.zip" -d "$tmp_dir/mono"
+            chmod -R u+rwX "$tmp_dir/mono"
+            mkdir -p "$bepinex_out/mono"
+            cp -r "$tmp_dir/mono/BepInEx/core" "$bepinex_out/mono/"
+            cp -f "$tmp_dir/mono/winhttp.dll" "$bepinex_out/mono/" 2>/dev/null || true
+            cp -f "$tmp_dir/mono/doorstop_config.ini" "$bepinex_out/mono/" 2>/dev/null || true
+            info "BepInEx 5 (Mono) downloaded"
+        fi
+    fi
 
-    mkdir -p "$bepinex_out"
-    cp -r "$tmp_dir/bepinex/BepInEx/core" "$bepinex_out/"
-    cp -f "$tmp_dir/bepinex/winhttp.dll" "$bepinex_out/" 2>/dev/null || true
-    cp -f "$tmp_dir/bepinex/doorstop_config.ini" "$bepinex_out/" 2>/dev/null || true
-    cp -f "$tmp_dir/bepinex/.doorstop_version" "$bepinex_out/" 2>/dev/null || true
+    # BepInEx 6.x for IL2CPP games
+    if [[ "$need_il2cpp" == true ]]; then
+        info "Downloading BepInEx 6 (IL2CPP)..."
+        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
+            -o "$tmp_dir/bepinex-il2cpp.zip" || { warn "Failed to download BepInEx (il2cpp)"; }
+
+        if [[ -f "$tmp_dir/bepinex-il2cpp.zip" ]]; then
+            unzip -q "$tmp_dir/bepinex-il2cpp.zip" -d "$tmp_dir/il2cpp"
+            chmod -R u+rwX "$tmp_dir/il2cpp"
+            mkdir -p "$bepinex_out/il2cpp"
+            cp -r "$tmp_dir/il2cpp/BepInEx/core" "$bepinex_out/il2cpp/"
+            cp -f "$tmp_dir/il2cpp/winhttp.dll" "$bepinex_out/il2cpp/" 2>/dev/null || true
+            cp -f "$tmp_dir/il2cpp/doorstop_config.ini" "$bepinex_out/il2cpp/" 2>/dev/null || true
+            info "BepInEx 6 (IL2CPP) downloaded"
+        fi
+    fi
 
     trap - EXIT
     rm -rf "$tmp_dir"
-    info "BepInEx downloaded"
 }
 
 # =============================================================================

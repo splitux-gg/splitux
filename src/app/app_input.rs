@@ -3,7 +3,7 @@
 use super::app::{FocusPane, MenuPage, PartyApp};
 use crate::input::*;
 
-use eframe::egui::{self, Key};
+use eframe::egui::{self, Key, Vec2};
 
 impl PartyApp {
     pub(super) fn handle_gamepad_gui(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -15,6 +15,7 @@ impl PartyApp {
         self.activate_focused = false;
 
         let mut key: Option<egui::Key> = None;
+        let mut scroll_delta: Option<Vec2> = None;
         let mut page_changed = false;
         let mut start_pressed = false;
         let mut confirm_profile_selection = false;
@@ -51,7 +52,7 @@ impl PartyApp {
                                 // A on game list = start game immediately
                                 start_pressed = true;
                             }
-                            FocusPane::ActionBar => {
+                            FocusPane::ActionBar | FocusPane::InfoPane => {
                                 // Activate focused action button
                                 self.activate_focused = true;
                             }
@@ -123,6 +124,12 @@ impl PartyApp {
                             FocusPane::ActionBar => {
                                 // No vertical nav in action bar (all in one row)
                             }
+                            FocusPane::InfoPane => {
+                                // Navigate up in info pane (between interactive elements)
+                                if self.info_pane_index > 0 {
+                                    self.info_pane_index -= 1;
+                                }
+                            }
                         }
                     } else {
                         key = Some(Key::ArrowUp);
@@ -143,6 +150,10 @@ impl PartyApp {
                             }
                             FocusPane::ActionBar => {
                                 // No vertical nav in action bar (all in one row)
+                            }
+                            FocusPane::InfoPane => {
+                                // Navigate down in info pane (limit set in pages_games)
+                                self.info_pane_index += 1;
                             }
                         }
                     } else {
@@ -166,6 +177,10 @@ impl PartyApp {
                                     self.focus_pane = FocusPane::GameList;
                                 }
                             }
+                            FocusPane::InfoPane => {
+                                // Move back to action bar
+                                self.focus_pane = FocusPane::ActionBar;
+                            }
                         }
                     } else {
                         key = Some(Key::ArrowLeft);
@@ -185,7 +200,13 @@ impl PartyApp {
                                 // Navigate right in action bar (Play -> Profile -> Edit)
                                 if self.action_bar_index < 2 {
                                     self.action_bar_index += 1;
+                                } else {
+                                    // Move to info pane
+                                    self.focus_pane = FocusPane::InfoPane;
                                 }
+                            }
+                            FocusPane::InfoPane => {
+                                // Already at rightmost - do nothing
                             }
                         }
                     } else {
@@ -209,6 +230,16 @@ impl PartyApp {
                 Some(PadButton::LT) | Some(PadButton::RT) => {
                     // Reserved for future use (not used for navigation)
                 }
+                Some(PadButton::ScrollUp) => {
+                    // Store scroll for the info pane scroll area
+                    self.info_pane_scroll -= 60.0;
+                    scroll_delta = Some(Vec2::new(0.0, 60.0));
+                }
+                Some(PadButton::ScrollDown) => {
+                    // Store scroll for the info pane scroll area
+                    self.info_pane_scroll += 60.0;
+                    scroll_delta = Some(Vec2::new(0.0, -60.0));
+                }
                 Some(_) => {}
                 None => {}
             }
@@ -220,6 +251,14 @@ impl PartyApp {
                 physical_key: None,
                 pressed: true,
                 repeat: false,
+                modifiers: egui::Modifiers::default(),
+            });
+        }
+
+        if let Some(delta) = scroll_delta {
+            raw_input.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta,
                 modifiers: egui::Modifiers::default(),
             });
         }
@@ -243,6 +282,8 @@ impl PartyApp {
         if page_changed {
             self.focus_pane = FocusPane::GameList;
             self.action_bar_index = 0;
+            self.info_pane_index = 0;
+            self.info_pane_scroll = 0.0;
             self.focus_manager.focus_first();
             ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::NULL));
         }

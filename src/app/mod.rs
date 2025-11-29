@@ -10,6 +10,7 @@ mod pages_edit_handler;
 mod pages_games;
 mod pages_instances;
 mod pages_settings;
+pub mod theme;
 
 pub use app::PartyApp;
-pub use config::{load_photon_ids, PadFilterType, PartyConfig, PhotonAppIds, WindowManagerType};
+pub use config::{load_photon_ids, PadFilterType, PartyConfig, WindowManagerType};

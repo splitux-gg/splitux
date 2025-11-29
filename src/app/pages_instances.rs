@@ -1,6 +1,7 @@
 // Instance setup page display functions
 
 use super::app::PartyApp;
+use super::theme;
 use eframe::egui::{self, RichText, Ui};
 
 impl PartyApp {
@@ -14,10 +15,8 @@ impl PartyApp {
 
         // Controls help bar
         ui.add_space(8.0);
-        egui::Frame::NONE
-            .fill(ui.visuals().extreme_bg_color)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::symmetric(12, 8))
+        theme::card_frame()
+            .fill(theme::colors::BG_DARK)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     // Add instance control
@@ -65,14 +64,22 @@ impl PartyApp {
             ui.label("Press A or Right-click on a controller to create a player instance");
         }
 
+        // Player colors for visual distinction
+        let player_colors = [
+            egui::Color32::from_rgb(80, 180, 255),  // P1: Blue
+            egui::Color32::from_rgb(255, 100, 100), // P2: Red
+            egui::Color32::from_rgb(100, 220, 100), // P3: Green
+            egui::Color32::from_rgb(255, 200, 80),  // P4: Yellow
+        ];
+
         for (i, instance) in &mut self.instances.iter_mut().enumerate() {
-            egui::Frame::NONE
-                .fill(ui.visuals().faint_bg_color)
-                .corner_radius(4.0)
-                .inner_margin(egui::Margin::symmetric(8, 6))
+            let player_color = player_colors.get(i).copied().unwrap_or(theme::colors::ACCENT);
+
+            theme::card_frame()
+                .stroke(egui::Stroke::new(2.0, player_color))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("P{}", i + 1)).strong().size(18.0));
+                        ui.label(RichText::new(format!("P{}", i + 1)).strong().size(18.0).color(player_color));
                         ui.add_space(8.0);
 
                         ui.label("Profile:");
@@ -147,18 +154,20 @@ impl PartyApp {
 
         if self.instances.len() > 0 {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
+                ui.add_space(12.0);
                 let start_btn = ui.add(
                     egui::Button::image_and_text(
                         egui::include_image!("../../res/BTN_START.png"),
                         "  Start Game  ",
                     )
-                    .min_size(egui::vec2(160.0, 40.0)),
+                    .min_size(egui::vec2(180.0, 48.0))
+                    .corner_radius(10)
+                    .fill(theme::colors::ACCENT_DIM),
                 );
                 if start_btn.clicked() {
                     self.prepare_game_launch();
                 }
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 ui.separator();
             });
         }

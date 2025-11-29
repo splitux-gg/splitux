@@ -27,6 +27,9 @@ pub enum PadButton {
     LT, // Left trigger (BTN_TL2 or ABS_Z)
     RT, // Right trigger (BTN_TR2 or ABS_RZ)
 
+    ScrollUp,   // Right stick up
+    ScrollDown, // Right stick down
+
     AKey,
     RKey,
     XKey,
@@ -35,9 +38,11 @@ pub enum PadButton {
     RightClick,
 }
 
+/// Snapshot of device state for passing to launch functions
 #[derive(Clone)]
 pub struct DeviceInfo {
     pub path: String,
+    #[allow(dead_code)] // Used by bwrap for device filtering
     pub enabled: bool,
     pub device_type: DeviceType,
     pub uniq: String, // Unique identifier (Bluetooth MAC or USB serial)
@@ -90,6 +95,7 @@ impl InputDevice {
     pub fn has_button_held(&self) -> bool {
         self.has_button_held
     }
+    #[allow(dead_code)] // API for future device matching
     pub fn uniq(&self) -> &str {
         &self.uniq
     }
@@ -176,6 +182,25 @@ impl InputDevice {
                             } else if is_down {
                                 self.stick_nav_cooldown = std::time::Instant::now();
                                 Some(PadButton::Down)
+                            } else {
+                                btn
+                            }
+                        } else {
+                            btn
+                        }
+                    }
+                    // Right analog stick Y-axis for scrolling
+                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_RY, val) => {
+                        let is_up = val < self.stick_center - self.stick_threshold;
+                        let is_down = val > self.stick_center + self.stick_threshold;
+
+                        if self.stick_nav_cooldown.elapsed().as_millis() > STICK_NAV_COOLDOWN_MS {
+                            if is_up {
+                                self.stick_nav_cooldown = std::time::Instant::now();
+                                Some(PadButton::ScrollUp)
+                            } else if is_down {
+                                self.stick_nav_cooldown = std::time::Instant::now();
+                                Some(PadButton::ScrollDown)
                             } else {
                                 btn
                             }

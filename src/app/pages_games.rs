@@ -1,9 +1,12 @@
 // Games page display functions
 
 use super::app::{FocusPane, PartyApp};
+use super::theme;
 use crate::handler::HANDLER_SPEC_CURRENT_VERSION;
+use crate::paths::PATH_HOME;
 use crate::util::msg;
 use eframe::egui::{self, RichText, Ui};
+use rfd::FileDialog;
 
 macro_rules! cur_handler {
     ($self:expr) => {
@@ -125,7 +128,7 @@ impl PartyApp {
         // Pane-based focus for action bar
         let is_action_bar_focused = self.focus_pane == FocusPane::ActionBar;
         let activate = self.activate_focused && is_action_bar_focused;
-        let focus_color = egui::Color32::from_rgb(100, 200, 255);
+        let focus_stroke = theme::focus_stroke();
 
         ui.horizontal(|ui| {
             // Play button (action_bar_index = 0)
@@ -135,9 +138,10 @@ impl PartyApp {
                     egui::include_image!("../../res/BTN_START.png"),
                     " Play ",
                 )
-                .min_size(egui::vec2(100.0, 32.0))
+                .min_size(egui::vec2(100.0, 36.0))
+                .corner_radius(8)
                 .stroke(if play_focused {
-                    egui::Stroke::new(2.0, focus_color)
+                    focus_stroke
                 } else {
                     egui::Stroke::NONE
                 }),
@@ -163,9 +167,10 @@ impl PartyApp {
             let profile_focused = is_action_bar_focused && self.action_bar_index == 1;
             let profile_btn = ui.add(
                 egui::Button::new(format!("  {}  ", profile_text))
-                    .min_size(egui::vec2(100.0, 28.0))
+                    .min_size(egui::vec2(100.0, 32.0))
+                    .corner_radius(6)
                     .stroke(if self.profile_dropdown_open || profile_focused {
-                        egui::Stroke::new(2.0, focus_color)
+                        focus_stroke
                     } else {
                         egui::Stroke::NONE
                     }),
@@ -185,9 +190,10 @@ impl PartyApp {
                     egui::include_image!("../../res/BTN_WEST.png"),
                     " Edit ",
                 )
-                .min_size(egui::vec2(80.0, 32.0))
+                .min_size(egui::vec2(80.0, 36.0))
+                .corner_radius(8)
                 .stroke(if edit_focused {
-                    egui::Stroke::new(2.0, focus_color)
+                    focus_stroke
                 } else {
                     egui::Stroke::NONE
                 }),
@@ -221,6 +227,121 @@ impl PartyApp {
             self.show_edit_modal = true;
         }
 
+        // Required mods section (only shown if handler has required_mods)
+        let required_mods = self.handlers[self.selected_handler].required_mods.clone();
+        let handler_path = self.handlers[self.selected_handler].path_handler.clone();
+
+        // Track interactive elements for d-pad navigation
+        let is_info_pane_focused = self.focus_pane == FocusPane::InfoPane;
+        let activate = self.activate_focused && is_info_pane_focused;
+        let mut info_element_idx = 0usize;
+        let mut total_info_elements = 0usize;
+
+        // Count total interactive elements first
+        for rm in &required_mods {
+            total_info_elements += 1; // Install button
+            if !rm.url.is_empty() {
+                total_info_elements += 1; // Download link
+            }
+        }
+
+        // Clamp info_pane_index
+        if total_info_elements > 0 && self.info_pane_index >= total_info_elements {
+            self.info_pane_index = total_info_elements - 1;
+        }
+
+        if !required_mods.is_empty() {
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Required Mods").strong());
+
+                // Check if all mods are installed
+                let all_installed = required_mods.iter().all(|m| m.is_installed(&handler_path));
+                if all_installed {
+                    ui.label(RichText::new(" (all installed)").weak().small());
+                } else {
+                    ui.label(RichText::new(" (setup required)").weak().small().color(theme::colors::WARNING));
+                }
+            });
+
+            ui.add_space(4.0);
+
+            for required_mod in &required_mods {
+                let is_installed = required_mod.is_installed(&handler_path);
+
+                ui.horizontal(|ui| {
+                    // Status indicator
+                    if is_installed {
+                        ui.label(RichText::new("✓").color(theme::colors::SUCCESS));
+                    } else {
+                        ui.label(RichText::new("✗").color(theme::colors::ERROR));
+                    }
+
+                    // Mod name
+                    ui.label(&required_mod.name);
+
+                    // Install/Reinstall button with focus highlight
+                    let button_text = if is_installed { "Reinstall..." } else { "Install..." };
+                    let install_focused = is_info_pane_focused && self.info_pane_index == info_element_idx;
+                    let install_btn = ui.add(
+                        egui::Button::new(button_text)
+                            .small()
+                            .stroke(if install_focused { focus_stroke } else { egui::Stroke::NONE })
+                    );
+                    if install_btn.clicked() || (install_focused && activate) {
+                        // Open file picker
+                        let dest_path = required_mod.dest_full_path(&handler_path);
+                        if let Some(file) = FileDialog::new()
+                            .set_title(&format!("Select {} file", required_mod.name))
+                            .set_directory(&*PATH_HOME)
+                            .add_filter("DLL files", &["dll"])
+                            .add_filter("All files", &["*"])
+                            .pick_file()
+                        {
+                            // Create destination directory if needed
+                            if let Err(e) = std::fs::create_dir_all(&dest_path) {
+                                msg("Error", &format!("Failed to create directory: {}", e));
+                            } else {
+                                // Copy file to destination
+                                let dest_file = dest_path.join(file.file_name().unwrap_or_default());
+                                if let Err(e) = std::fs::copy(&file, &dest_file) {
+                                    msg("Error", &format!("Failed to copy file: {}", e));
+                                } else {
+                                    msg("Success", &format!("{} installed successfully!", required_mod.name));
+                                }
+                            }
+                        }
+                    }
+                    info_element_idx += 1;
+
+                    // Download link if provided (with focus highlight)
+                    if !required_mod.url.is_empty() {
+                        let download_focused = is_info_pane_focused && self.info_pane_index == info_element_idx;
+                        if download_focused {
+                            egui::Frame::NONE
+                                .stroke(focus_stroke)
+                                .corner_radius(3)
+                                .inner_margin(egui::Margin::symmetric(2, 0))
+                                .show(ui, |ui| {
+                                    ui.hyperlink_to("Download", &required_mod.url);
+                                });
+                        } else {
+                            ui.hyperlink_to("Download", &required_mod.url);
+                        }
+                        info_element_idx += 1;
+                    }
+                });
+
+                // Description
+                if !required_mod.description.is_empty() {
+                    ui.label(RichText::new(format!("  {}", required_mod.description)).weak().small());
+                }
+            }
+        }
+
         // Game images
         if !img_paths.is_empty() {
             ui.add_space(8.0);
@@ -252,10 +373,16 @@ impl PartyApp {
             ui.separator();
             ui.add_space(4.0);
 
-            egui::ScrollArea::vertical()
+            // Use scroll offset from right stick
+            let scroll_offset = self.info_pane_scroll.max(0.0);
+
+            let scroll_area = egui::ScrollArea::vertical()
+                .id_salt("game_info_scroll")
                 .max_height(ui.available_height() - 20.0)
                 .auto_shrink(false)
-                .show(ui, |ui| {
+                .vertical_scroll_offset(scroll_offset);
+
+            scroll_area.show(ui, |ui| {
                     // Show README if available (takes priority)
                     if let Some(readme) = &readme_content {
                         // Simple markdown-ish rendering
@@ -274,7 +401,7 @@ impl PartyApp {
                                 ui.add_space(1.0);
                             } else if line.starts_with("- ") {
                                 ui.horizontal(|ui| {
-                                    ui.label("  *");
+                                    ui.label("  •");
                                     ui.label(&line[2..]);
                                 });
                             } else if line.starts_with("```") {

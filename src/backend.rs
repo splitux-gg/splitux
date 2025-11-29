@@ -39,6 +39,7 @@ impl MultiplayerBackend {
     }
 
     /// Get all available backend types for UI dropdowns
+    #[allow(dead_code)]
     pub fn all() -> &'static [MultiplayerBackend] {
         &[
             MultiplayerBackend::None,
@@ -116,10 +117,13 @@ fn create_photon_overlays(
     instances: &[Instance],
     is_windows: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
-    photon::create_all_overlays(handler, instances, is_windows)
+    let game_root = PathBuf::from(handler.get_game_rootpath()?);
+    photon::create_all_overlays(handler, instances, is_windows, &game_root)
 }
 
 /// Get environment variables for the backend
+/// TODO: Integrate into launch process for Photon games
+#[allow(dead_code)]
 pub fn get_backend_env(
     handler: &Handler,
     _instance_idx: usize,
@@ -127,6 +131,14 @@ pub fn get_backend_env(
     match handler.backend {
         MultiplayerBackend::None => HashMap::new(),
         MultiplayerBackend::Goldberg => HashMap::new(), // Goldberg uses file-based config
-        MultiplayerBackend::Photon => HashMap::new(),   // Photon uses file-based config
+        MultiplayerBackend::Photon => {
+            // BepInEx requires winhttp.dll override to load the doorstop
+            let mut env = HashMap::new();
+            env.insert(
+                "WINEDLLOVERRIDES".to_string(),
+                "winhttp=n,b".to_string(),
+            );
+            env
+        }
     }
 }

@@ -17,6 +17,7 @@ use eframe::egui;
 pub enum FocusPane {
     GameList,   // Left panel - game selection
     ActionBar,  // Center panel - Play, Profile, Edit buttons
+    InfoPane,   // Right side - scrollable info area with buttons
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -54,6 +55,8 @@ pub struct PartyApp {
     // Pane-based focus for Games page (simpler than grid-based FocusManager)
     pub focus_pane: FocusPane,
     pub action_bar_index: usize, // 0=Play, 1=Profile, 2=Edit
+    pub info_pane_index: usize,  // Index of focused element in info pane
+    pub info_pane_scroll: f32,   // Scroll offset for info pane
 
     // Profile dropdown state (opened with Y button)
     pub profile_dropdown_open: bool,
@@ -114,6 +117,8 @@ impl PartyApp {
             activate_focused: false,
             focus_pane: FocusPane::GameList,
             action_bar_index: 0,
+            info_pane_index: 0,
+            info_pane_scroll: 0.0,
             profile_dropdown_open: false,
             profile_dropdown_selection: 0,
             show_new_profile_dialog: false,
@@ -148,17 +153,6 @@ impl eframe::App for PartyApp {
         // Reset focus state at start of frame
         self.focus_manager.begin_frame();
 
-        // Enhance focus visuals for controller navigation
-        ctx.style_mut(|style| {
-            // Make focus stroke more visible (bright cyan outline)
-            style.visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
-            style.visuals.selection.stroke =
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
-            // Improve keyboard focus visuals
-            style.visuals.widgets.active.bg_stroke =
-                egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 200, 255));
-        });
 
         // Enable keyboard focus navigation
         ctx.options_mut(|opt| {
@@ -176,6 +170,10 @@ impl eframe::App for PartyApp {
             egui::SidePanel::left("games_panel")
                 .resizable(false)
                 .exact_width(200.0)
+                .frame(egui::Frame::NONE
+                    .fill(super::theme::colors::BG_MID)
+                    .inner_margin(egui::Margin::same(8))
+                    .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
@@ -188,6 +186,10 @@ impl eframe::App for PartyApp {
             egui::SidePanel::right("devices_panel")
                 .resizable(false)
                 .exact_width(180.0)
+                .frame(egui::Frame::NONE
+                    .fill(super::theme::colors::BG_MID)
+                    .inner_margin(egui::Margin::same(8))
+                    .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
