@@ -71,7 +71,6 @@ detect_distro() {
 
 # Maps generic names to distro-specific package names
 declare -A PKG_ARCH=(
-    [gamescope]="gamescope"
     [fuse-overlayfs]="fuse-overlayfs"
     [bubblewrap]="bubblewrap"
     [rust]="rust"
@@ -81,6 +80,26 @@ declare -A PKG_ARCH=(
     [unzip]="unzip"
     [sdl2]="sdl2"
     [libudev]="systemd-libs"
+    [meson]="meson"
+    [ninja]="ninja"
+    # gamescope build deps
+    [libxkbcommon]="libxkbcommon"
+    [libinput]="libinput"
+    [libdrm]="libdrm"
+    [vulkan-headers]="vulkan-headers"
+    [wayland]="wayland"
+    [wayland-protocols]="wayland-protocols"
+    [libcap]="libcap"
+    [libx11]="libx11"
+    [libxres]="libxres"
+    [libxcomposite]="libxcomposite"
+    [libxtst]="libxtst"
+    [libxdamage]="libxdamage"
+    [pixman]="pixman"
+    [benchmark]="benchmark"
+    [glslang]="glslang"
+    [stb]="stb"
+    [hwdata]="hwdata"
 )
 
 declare -A PKG_FEDORA=(
@@ -211,7 +230,8 @@ check_deps() {
     step "Detected: $DISTRO ($PKG_MGR)${IMMUTABLE:+ [immutable]}"
 
     # Runtime dependencies (always needed)
-    local runtime_deps=(gamescope fuse-overlayfs bubblewrap)
+    # Note: gamescope-kbm is built from source, not a package
+    local runtime_deps=(fuse-overlayfs bubblewrap)
     for dep in "${runtime_deps[@]}"; do
         local cmd="$dep"
         [[ "$dep" == "bubblewrap" ]] && cmd="bwrap"
@@ -337,6 +357,9 @@ get_target_dir() {
 
 download_goldberg() {
     local gbe_out="$SCRIPT_DIR/res/goldberg"
+    # Use splitux fork with steamnetworkingsockets support
+    local gbe_repo="gabrielgad/gbe_fork-splitux"
+    local gbe_release="nightly"  # Use "latest" for stable releases
 
     if [[ -f "$gbe_out/linux64/libsteam_api.so" ]] && [[ -f "$gbe_out/win/steam_api64.dll" ]]; then
         info "Goldberg already available"
@@ -344,12 +367,12 @@ download_goldberg() {
         return 0
     fi
 
-    step "Downloading Goldberg Steam emulator..."
+    step "Downloading Goldberg Steam emulator (splitux fork)..."
     local tmp_dir=$(mktemp -d)
     trap "rm -rf '$tmp_dir'" EXIT
 
     # Linux binaries
-    curl -fsSL "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-linux-release.tar.bz2" \
+    curl -fsSL "https://github.com/$gbe_repo/releases/download/$gbe_release/emu-linux-release.tar.bz2" \
         -o "$tmp_dir/goldberg-linux.tar.bz2" || { warn "Failed to download Goldberg (linux)"; return 1; }
 
     tar -xjf "$tmp_dir/goldberg-linux.tar.bz2" -C "$tmp_dir"
@@ -358,13 +381,16 @@ download_goldberg() {
     cp -f "$tmp_dir"/release/regular/x32/*.so "$gbe_out/linux32/" 2>/dev/null || true
 
     # Windows binaries (for Proton games)
-    curl -fsSL "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-win-release.7z" \
+    curl -fsSL "https://github.com/$gbe_repo/releases/download/$gbe_release/emu-win-release.7z" \
         -o "$tmp_dir/goldberg-win.7z" || { warn "Failed to download Goldberg (windows)"; return 1; }
 
     7z x -o"$tmp_dir" "$tmp_dir/goldberg-win.7z" >/dev/null
-    mkdir -p "$gbe_out/win"
+    mkdir -p "$gbe_out/win" "$gbe_out/steamnetworkingsockets/x64" "$gbe_out/steamnetworkingsockets/x32"
     cp -f "$tmp_dir"/release/regular/x64/*.dll "$gbe_out/win/" 2>/dev/null || true
     cp -f "$tmp_dir"/release/regular/x32/*.dll "$gbe_out/win/" 2>/dev/null || true
+    # Copy steamnetworkingsockets library (for games like The Riftbreaker)
+    cp -f "$tmp_dir"/release/steamnetworkingsockets/x64/*.dll "$gbe_out/steamnetworkingsockets/x64/" 2>/dev/null || true
+    cp -f "$tmp_dir"/release/steamnetworkingsockets/x32/*.dll "$gbe_out/steamnetworkingsockets/x32/" 2>/dev/null || true
 
     trap - EXIT
     rm -rf "$tmp_dir"
@@ -453,6 +479,55 @@ download_bepinex() {
 # Build
 # =============================================================================
 
+build_gamescope_kbm() {
+    local gsc_dir="$SCRIPT_DIR/deps/gamescope"
+    local gsc_build="$gsc_dir/build"
+    local gsc_bin="$gsc_build/gamescope"
+
+    # Check if already built
+    if [[ -f "$gsc_bin" ]]; then
+        info "gamescope-kbm already built"
+        return 0
+    fi
+
+    if [[ ! -d "$gsc_dir" ]]; then
+        error "gamescope submodule not found. Run: git submodule update --init"
+    fi
+
+    step "Building gamescope-kbm (this may take a while)..."
+    cd "$gsc_dir"
+
+    # Init gamescope's own submodules (some may have broken refs, init individually)
+    step "Initializing gamescope submodules..."
+    git submodule update --init src/reshade 2>/dev/null || true
+    git submodule update --init thirdparty/SPIRV-Headers 2>/dev/null || true
+    git submodule update --init subprojects/wlroots 2>/dev/null || true
+    git submodule update --init subprojects/vkroots 2>/dev/null || true
+    git submodule update --init subprojects/libliftoff 2>/dev/null || true
+    git submodule update --init subprojects/libdisplay-info 2>/dev/null || true
+    # Remove broken glm submodule dir if exists (meson will use wrap file)
+    [[ -d "subprojects/glm" ]] && rm -rf "subprojects/glm"
+
+    # Configure with meson
+    if [[ ! -d "$gsc_build" ]]; then
+        meson setup build/ \
+            --buildtype=release \
+            -Dpipewire=disabled \
+            -Ddrm_backend=disabled \
+            -Dsdl2_backend=enabled \
+            -Denable_openvr_support=false \
+            -Dinput_emulation=disabled \
+            || error "Meson setup failed"
+    fi
+
+    # Build
+    ninja -C build/ -j"$(nproc)" || error "Gamescope build failed"
+
+    [[ ! -f "$gsc_bin" ]] && error "gamescope binary not found after build"
+    info "gamescope-kbm built"
+    cd "$SCRIPT_DIR"
+}
+
 build_splitux() {
     step "Building splitux..."
     cd "$SCRIPT_DIR"
@@ -473,6 +548,9 @@ do_build() {
     download_bepinex &
     local bep_pid=$!
 
+    # Build gamescope-kbm first (takes longest)
+    build_gamescope_kbm
+
     # Build splitux
     build_splitux
 
@@ -483,12 +561,21 @@ do_build() {
     # Setup build directory
     step "Setting up build directory..."
     rm -rf "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR/res"
+    mkdir -p "$BUILD_DIR/res" "$BUILD_DIR/bin"
 
     local target_dir=$(get_target_dir)
     cp "$target_dir/release/splitux" "$BUILD_DIR/"
     cp "$SCRIPT_DIR/LICENSE" "$BUILD_DIR/" 2>/dev/null || true
     cp -r "$SCRIPT_DIR/res/"* "$BUILD_DIR/res/" 2>/dev/null || true
+
+    # Copy gamescope-kbm
+    if [[ -f "$SCRIPT_DIR/deps/gamescope/build/gamescope" ]]; then
+        cp "$SCRIPT_DIR/deps/gamescope/build/gamescope" "$BUILD_DIR/bin/gamescope-kbm"
+        chmod +x "$BUILD_DIR/bin/gamescope-kbm"
+        info "gamescope-kbm installed to build/bin/"
+    else
+        warn "gamescope-kbm not found - KBM support will be unavailable"
+    fi
 
     info "Build complete: $BUILD_DIR/"
 }
@@ -542,6 +629,7 @@ do_clean() {
     rm -rf "$BUILD_DIR"
     rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
     rm -rf "$SCRIPT_DIR/res/bepinex"
+    rm -rf "$SCRIPT_DIR/deps/gamescope/build"
     cargo clean 2>/dev/null || true
     info "Clean complete"
 }

@@ -17,6 +17,17 @@ pub struct SteamApiDll {
     pub rel_path: PathBuf,
     /// True for 64-bit, false for 32-bit
     pub is_64bit: bool,
+    /// Type of DLL (steam_api or steamnetworkingsockets)
+    pub dll_type: SteamDllType,
+}
+
+/// Type of Steam-related DLL
+#[derive(Debug, Clone, PartialEq)]
+pub enum SteamDllType {
+    /// Standard Steam API (steam_api.dll, steam_api64.dll, libsteam_api.so)
+    SteamApi,
+    /// GameNetworkingSockets (GameNetworkingSockets.dll)
+    NetworkingSockets,
 }
 
 /// Configuration for a Goldberg instance
@@ -56,7 +67,8 @@ fn detect_bitness(path: &Path, filename: &str) -> bool {
 
 /// Find all Steam API DLLs in the game directory
 ///
-/// Searches recursively for steam_api.dll, steam_api64.dll, and libsteam_api.so
+/// Searches recursively for steam_api.dll, steam_api64.dll, libsteam_api.so,
+/// and GameNetworkingSockets.dll
 /// Returns relative paths from the game root along with bitness information
 pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn std::error::Error>> {
     let mut dlls = Vec::new();
@@ -66,6 +78,7 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
         if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
             let filename_lower = filename.to_lowercase();
 
+            // Standard Steam API DLLs
             if filename_lower == "steam_api.dll"
                 || filename_lower == "steam_api64.dll"
                 || filename_lower == "libsteam_api.so"
@@ -75,9 +88,26 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
                     dlls.push(SteamApiDll {
                         rel_path: rel_path.to_path_buf(),
                         is_64bit,
+                        dll_type: SteamDllType::SteamApi,
                     });
                     println!(
                         "[splitux] Found Steam API: {} ({})",
+                        rel_path.display(),
+                        if is_64bit { "64-bit" } else { "32-bit" }
+                    );
+                }
+            }
+            // GameNetworkingSockets.dll (used by games like The Riftbreaker)
+            else if filename_lower == "gamenetworkingsockets.dll" {
+                if let Ok(rel_path) = path.strip_prefix(game_dir) {
+                    let is_64bit = detect_bitness(path, &filename_lower);
+                    dlls.push(SteamApiDll {
+                        rel_path: rel_path.to_path_buf(),
+                        is_64bit,
+                        dll_type: SteamDllType::NetworkingSockets,
+                    });
+                    println!(
+                        "[splitux] Found GameNetworkingSockets: {} ({})",
                         rel_path.display(),
                         if is_64bit { "64-bit" } else { "32-bit" }
                     );
@@ -180,18 +210,32 @@ pub fn create_instance_overlay(
         let target_dir = overlay_dir.join(dll_dir);
         fs::create_dir_all(&target_dir)?;
 
-        // Select correct Goldberg source based on platform and bitness
-        let goldberg_src = if is_windows {
-            PATH_RES.join("goldberg/win")
-        } else if dll.is_64bit {
-            PATH_RES.join("goldberg/linux64")
-        } else {
-            PATH_RES.join("goldberg/linux32")
+        // Original DLL name (what the game expects)
+        let dll_name = dll.rel_path.file_name().unwrap();
+
+        // Determine source path based on DLL type, platform, and bitness
+        let src_path = match dll.dll_type {
+            SteamDllType::SteamApi => {
+                // Standard Steam API: use dll_name directly from goldberg/{platform}
+                let goldberg_src = if is_windows {
+                    PATH_RES.join("goldberg/win")
+                } else if dll.is_64bit {
+                    PATH_RES.join("goldberg/linux64")
+                } else {
+                    PATH_RES.join("goldberg/linux32")
+                };
+                goldberg_src.join(dll_name)
+            }
+            SteamDllType::NetworkingSockets => {
+                // GameNetworkingSockets.dll -> libsteamnetworkingsockets.dll
+                let arch = if dll.is_64bit { "x64" } else { "x32" };
+                PATH_RES.join(format!(
+                    "goldberg/steamnetworkingsockets/{}/libsteamnetworkingsockets.dll",
+                    arch
+                ))
+            }
         };
 
-        // Copy Goldberg DLL (preserving original filename)
-        let dll_name = dll.rel_path.file_name().unwrap();
-        let src_path = goldberg_src.join(dll_name);
         let dest_path = target_dir.join(dll_name);
 
         if src_path.exists() {

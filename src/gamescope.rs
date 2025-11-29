@@ -61,9 +61,11 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &PartyConfig) {
     }
 }
 
-/// Add keyboard/mouse device arguments for gamescope-kbm
+/// Add input device holding arguments for gamescope-splitux
 ///
-/// This configures gamescope-kbm's libinput-hold-dev to capture specific input devices
+/// This configures gamescope to hold (ignore) device types not assigned to this instance.
+/// Devices are held by TYPE, not by specific device path - this prevents input crosstalk
+/// between split-screen instances.
 pub fn add_kbm_args(
     cmd: &mut Command,
     instance: &Instance,
@@ -74,33 +76,35 @@ pub fn add_kbm_args(
         return;
     }
 
-    let mut instance_has_keyboard = false;
-    let mut instance_has_mouse = false;
-    let mut kbm_devices = String::new();
+    // Determine which device types this instance has assigned
+    let mut has_keyboard = false;
+    let mut has_mouse = false;
+    let mut has_gamepad = false;
 
     for &d in &instance.devices {
         let dev = &input_devices[d];
-        if dev.device_type == DeviceType::Keyboard {
-            instance_has_keyboard = true;
-            kbm_devices.push_str(&format!("{},", &dev.path));
-        } else if dev.device_type == DeviceType::Mouse {
-            instance_has_mouse = true;
-            kbm_devices.push_str(&format!("{},", &dev.path));
+        match dev.device_type {
+            DeviceType::Keyboard => has_keyboard = true,
+            DeviceType::Mouse => has_mouse = true,
+            DeviceType::Gamepad => has_gamepad = true,
+            DeviceType::Other => {}
         }
     }
 
-    if instance_has_keyboard {
-        cmd.arg("--backend-disable-keyboard");
+    // Hold device types NOT assigned to this instance
+    // This prevents gamescope from processing input from devices meant for other players
+    if !has_keyboard {
+        cmd.arg("--input-hold-keyboards");
     }
-    if instance_has_mouse {
-        cmd.arg("--backend-disable-mouse");
+    if !has_mouse {
+        cmd.arg("--input-hold-mice");
     }
-    if !kbm_devices.is_empty() {
-        cmd.arg(format!(
-            "--libinput-hold-dev={}",
-            kbm_devices.trim_end_matches(',')
-        ));
+    if !has_gamepad {
+        cmd.arg("--input-hold-gamepads");
     }
+
+    // Always hold touchscreens for now (not typically used in split-screen)
+    cmd.arg("--input-hold-touchscreens");
 }
 
 /// Add the separator between gamescope args and the inner command
