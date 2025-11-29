@@ -207,7 +207,7 @@ impl PartyApp {
             };
 
             frame.show(ui, |ui| {
-                ui.horizontal(|ui| {
+                let response = ui.horizontal(|ui| {
                     ui.add(
                         egui::Image::new(self.handlers[i].icon())
                             .max_width(18.0)
@@ -215,16 +215,21 @@ impl PartyApp {
                     );
                     ui.add_space(4.0);
 
-                    let btn = ui.selectable_value(
-                        &mut self.selected_handler,
-                        i,
-                        self.handlers[i].display_clamp(),
+                    let label = ui.add(
+                        egui::Label::new(self.handlers[i].display_clamp())
+                            .selectable(false)
+                            .sense(egui::Sense::click()),
                     );
-                    if btn.has_focus() || is_selected {
-                        btn.scroll_to_me(None);
-                    }
-                    Popup::context_menu(&btn).show(|ui| self.handler_ctx_menu(ui, i));
-                });
+                    label
+                }).inner;
+
+                if response.clicked() {
+                    self.selected_handler = i;
+                }
+                if response.has_focus() || is_selected {
+                    response.scroll_to_me(None);
+                }
+                Popup::context_menu(&response).show(|ui| self.handler_ctx_menu(ui, i));
             });
             ui.add_space(2.0);
         }

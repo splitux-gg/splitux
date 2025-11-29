@@ -198,7 +198,11 @@ impl eframe::App for PartyApp {
                 });
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE
+                .fill(super::theme::colors::BG_DARK)
+                .inner_margin(egui::Margin::same(0)))
+            .show(ctx, |ui| {
             if self.task.is_some() {
                 ui.disable();
             }
