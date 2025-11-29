@@ -16,7 +16,311 @@ warn() { echo -e "${YELLOW}[splitux]${NC} $1"; }
 error() { echo -e "${RED}[splitux]${NC} $1"; exit 1; }
 step() { echo -e "${CYAN}[splitux]${NC} $1"; }
 
-# Get cargo target directory
+# =============================================================================
+# Distro Detection
+# =============================================================================
+
+detect_distro() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        case "$ID" in
+            arch|cachyos|manjaro|endeavouros|garuda)
+                DISTRO="arch"
+                PKG_MGR="pacman"
+                ;;
+            fedora|nobara|bazzite|ultramarine)
+                DISTRO="fedora"
+                PKG_MGR="dnf"
+                ;;
+            ubuntu|pop|linuxmint|elementary|zorin)
+                DISTRO="ubuntu"
+                PKG_MGR="apt"
+                ;;
+            debian|kali|parrot)
+                DISTRO="debian"
+                PKG_MGR="apt"
+                ;;
+            opensuse*|suse)
+                DISTRO="opensuse"
+                PKG_MGR="zypper"
+                ;;
+            steamos)
+                DISTRO="steamos"
+                PKG_MGR="flatpak"
+                ;;
+            *)
+                DISTRO="unknown"
+                PKG_MGR="unknown"
+                ;;
+        esac
+    else
+        DISTRO="unknown"
+        PKG_MGR="unknown"
+    fi
+
+    # Detect immutable distros
+    IMMUTABLE=false
+    if [[ -f /run/ostree-booted ]] || [[ "$ID" == "bazzite" ]] || [[ "$ID" == "steamos" ]]; then
+        IMMUTABLE=true
+    fi
+}
+
+# =============================================================================
+# Package Maps (distro -> package names)
+# =============================================================================
+
+# Maps generic names to distro-specific package names
+declare -A PKG_ARCH=(
+    [gamescope]="gamescope"
+    [fuse-overlayfs]="fuse-overlayfs"
+    [bubblewrap]="bubblewrap"
+    [rust]="rust"
+    [git]="git"
+    [curl]="curl"
+    [p7zip]="p7zip"
+    [unzip]="unzip"
+    [sdl2]="sdl2"
+    [libudev]="systemd-libs"
+)
+
+declare -A PKG_FEDORA=(
+    [gamescope]="gamescope"
+    [fuse-overlayfs]="fuse-overlayfs"
+    [bubblewrap]="bubblewrap"
+    [rust]="rust cargo"
+    [git]="git"
+    [curl]="curl"
+    [p7zip]="p7zip p7zip-plugins"
+    [unzip]="unzip"
+    [sdl2]="SDL2-devel"
+    [libudev]="systemd-devel"
+)
+
+declare -A PKG_UBUNTU=(
+    [gamescope]="gamescope"
+    [fuse-overlayfs]="fuse-overlayfs"
+    [bubblewrap]="bubblewrap"
+    [rust]="rustc cargo"
+    [git]="git"
+    [curl]="curl"
+    [p7zip]="p7zip-full"
+    [unzip]="unzip"
+    [sdl2]="libsdl2-dev"
+    [libudev]="libudev-dev"
+)
+
+declare -A PKG_OPENSUSE=(
+    [gamescope]="gamescope"
+    [fuse-overlayfs]="fuse-overlayfs"
+    [bubblewrap]="bubblewrap"
+    [rust]="rust cargo"
+    [git]="git"
+    [curl]="curl"
+    [p7zip]="p7zip"
+    [unzip]="unzip"
+    [sdl2]="libSDL2-devel"
+    [libudev]="libudev-devel"
+)
+
+# AUR/COPR/PPA packages (extras not in main repos)
+declare -A EXTRA_ARCH=(
+    [umu-launcher]="umu-launcher"
+)
+
+declare -A EXTRA_FEDORA=(
+    [umu-launcher]="umu-launcher"  # Available in COPR or Bazzite repos
+)
+
+# =============================================================================
+# Package Installation
+# =============================================================================
+
+get_pkg_name() {
+    local generic="$1"
+    case "$DISTRO" in
+        arch)    echo "${PKG_ARCH[$generic]:-$generic}" ;;
+        fedora)  echo "${PKG_FEDORA[$generic]:-$generic}" ;;
+        ubuntu|debian) echo "${PKG_UBUNTU[$generic]:-$generic}" ;;
+        opensuse) echo "${PKG_OPENSUSE[$generic]:-$generic}" ;;
+        *)       echo "$generic" ;;
+    esac
+}
+
+install_packages() {
+    local packages=("$@")
+    [[ ${#packages[@]} -eq 0 ]] && return 0
+
+    case "$PKG_MGR" in
+        pacman)
+            sudo pacman -S --needed "${packages[@]}"
+            ;;
+        dnf)
+            sudo dnf install -y "${packages[@]}"
+            ;;
+        apt)
+            sudo apt-get update
+            sudo apt-get install -y "${packages[@]}"
+            ;;
+        zypper)
+            sudo zypper install -y "${packages[@]}"
+            ;;
+        flatpak)
+            warn "Flatpak-based system - please install packages via your distro's package manager"
+            return 1
+            ;;
+        *)
+            error "Unknown package manager: $PKG_MGR"
+            ;;
+    esac
+}
+
+install_aur_package() {
+    local pkg="$1"
+    if command -v yay >/dev/null 2>&1; then
+        yay -S --needed "$pkg"
+    elif command -v paru >/dev/null 2>&1; then
+        paru -S --needed "$pkg"
+    else
+        warn "No AUR helper found. Install yay or paru, then run: yay -S $pkg"
+        return 1
+    fi
+}
+
+install_copr_package() {
+    local pkg="$1"
+    # umu-launcher is in Bazzite/Nobara repos by default
+    # For vanilla Fedora, enable COPR
+    if ! rpm -q "$pkg" >/dev/null 2>&1; then
+        if [[ "$ID" == "fedora" ]]; then
+            sudo dnf copr enable -y kylegospo/umu-launcher 2>/dev/null || true
+        fi
+        sudo dnf install -y "$pkg"
+    fi
+}
+
+# =============================================================================
+# Dependency Checking
+# =============================================================================
+
+check_deps() {
+    local mode="${1:-runtime}"
+    local missing_pkgs=()
+    local missing_extra=()
+
+    detect_distro
+    step "Detected: $DISTRO ($PKG_MGR)${IMMUTABLE:+ [immutable]}"
+
+    # Runtime dependencies (always needed)
+    local runtime_deps=(gamescope fuse-overlayfs bubblewrap)
+    for dep in "${runtime_deps[@]}"; do
+        local cmd="$dep"
+        [[ "$dep" == "bubblewrap" ]] && cmd="bwrap"
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_pkgs+=("$(get_pkg_name "$dep")")
+        fi
+    done
+
+    # Build dependencies
+    if [[ "$mode" == "build" ]]; then
+        local build_deps=(rust git curl p7zip unzip sdl2 libudev)
+
+        # Check cargo specifically for rust
+        if ! command -v cargo >/dev/null 2>&1; then
+            missing_pkgs+=("$(get_pkg_name rust)")
+        fi
+
+        for dep in git curl unzip; do
+            if ! command -v "$dep" >/dev/null 2>&1; then
+                missing_pkgs+=("$(get_pkg_name "$dep")")
+            fi
+        done
+
+        # 7z command
+        if ! command -v 7z >/dev/null 2>&1; then
+            missing_pkgs+=("$(get_pkg_name p7zip)")
+        fi
+    fi
+
+    # umu-launcher (for Proton games)
+    if ! command -v umu-run >/dev/null 2>&1; then
+        missing_extra+=("umu-launcher")
+    fi
+
+    # Remove duplicates and empty entries
+    local unique_pkgs=($(printf '%s\n' "${missing_pkgs[@]}" | grep -v '^$' | sort -u))
+    local unique_extra=($(printf '%s\n' "${missing_extra[@]}" | grep -v '^$' | sort -u))
+
+    if [[ ${#unique_pkgs[@]} -eq 0 ]] && [[ ${#unique_extra[@]} -eq 0 ]]; then
+        info "All dependencies OK"
+        return 0
+    fi
+
+    # Show what's missing
+    echo ""
+    warn "Missing dependencies:"
+    echo ""
+    [[ ${#unique_pkgs[@]} -gt 0 ]] && echo -e "  ${CYAN}Packages:${NC} ${unique_pkgs[*]}"
+    [[ ${#unique_extra[@]} -gt 0 ]] && echo -e "  ${CYAN}Extra:${NC} ${unique_extra[*]}"
+    echo ""
+
+    # Handle immutable distros
+    if [[ "$IMMUTABLE" == true ]]; then
+        warn "Immutable system detected"
+        echo -e "  On Bazzite/SteamOS, most gaming deps are pre-installed."
+        echo -e "  If missing, use: ${GREEN}rpm-ostree install <package>${NC}"
+        echo ""
+        return 1
+    fi
+
+    # Prompt to install
+    read -p "  Install missing dependencies? [Y/n] " -n 1 -r
+    echo ""
+
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        # Install main packages
+        if [[ ${#unique_pkgs[@]} -gt 0 ]]; then
+            step "Installing packages..."
+            install_packages "${unique_pkgs[@]}" || error "Failed to install packages"
+        fi
+
+        # Install extra packages (AUR/COPR)
+        for pkg in "${unique_extra[@]}"; do
+            step "Installing $pkg..."
+            case "$DISTRO" in
+                arch)
+                    install_aur_package "${EXTRA_ARCH[$pkg]:-$pkg}" || warn "Failed to install $pkg"
+                    ;;
+                fedora)
+                    install_copr_package "${EXTRA_FEDORA[$pkg]:-$pkg}" || warn "Failed to install $pkg"
+                    ;;
+                ubuntu|debian)
+                    warn "$pkg not in repos - see: https://github.com/Open-Wine-Components/umu-launcher"
+                    ;;
+                *)
+                    warn "Don't know how to install $pkg on $DISTRO"
+                    ;;
+            esac
+        done
+
+        info "Dependencies installed"
+    else
+        echo ""
+        echo -e "  ${YELLOW}Manual install:${NC}"
+        case "$PKG_MGR" in
+            pacman) echo -e "    ${GREEN}sudo pacman -S ${unique_pkgs[*]}${NC}" ;;
+            dnf)    echo -e "    ${GREEN}sudo dnf install ${unique_pkgs[*]}${NC}" ;;
+            apt)    echo -e "    ${GREEN}sudo apt install ${unique_pkgs[*]}${NC}" ;;
+            zypper) echo -e "    ${GREEN}sudo zypper install ${unique_pkgs[*]}${NC}" ;;
+        esac
+        echo ""
+        return 1
+    fi
+}
+
+# =============================================================================
+# Get Cargo Target Directory
+# =============================================================================
+
 get_target_dir() {
     if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
         echo "$CARGO_TARGET_DIR"
@@ -27,174 +331,69 @@ get_target_dir() {
     fi
 }
 
-check_deps() {
-    local mode="${1:-runtime}"
-    local missing_pacman=()
-    local missing_aur=()
+# =============================================================================
+# Download Dependencies
+# =============================================================================
 
-    step "Checking dependencies..."
+download_goldberg() {
+    local gbe_out="$SCRIPT_DIR/res/goldberg"
 
-    # Required runtime dependencies (always checked)
-    command -v fuse-overlayfs >/dev/null 2>&1 || missing_pacman+=("fuse-overlayfs")
-    command -v bwrap >/dev/null 2>&1 || missing_pacman+=("bubblewrap")
-
-    # Build dependencies
-    if [[ "$mode" == "build" ]]; then
-        # Build tools
-        command -v cargo >/dev/null 2>&1 || missing_pacman+=("rust")
-        command -v meson >/dev/null 2>&1 || missing_pacman+=("meson")
-        command -v ninja >/dev/null 2>&1 || missing_pacman+=("ninja")
-        command -v cmake >/dev/null 2>&1 || missing_pacman+=("cmake")
-        command -v pkg-config >/dev/null 2>&1 || missing_pacman+=("pkgconf")
-        command -v git >/dev/null 2>&1 || missing_pacman+=("git")
-
-        # Gamescope build libraries (only if no system gamescope)
-        if ! command -v gamescope >/dev/null 2>&1; then
-            declare -A pkgmap=(
-                ["vulkan"]="vulkan-headers"
-                ["libpipewire-0.3"]="pipewire"
-                ["wayland-client"]="wayland"
-                ["x11"]="libx11"
-                ["xkbcommon"]="libxkbcommon"
-                ["libdrm"]="libdrm"
-                ["libinput"]="libinput"
-                ["sdl2"]="sdl2"
-                ["xcomposite"]="libxcomposite"
-                ["xtst"]="libxtst"
-                ["xres"]="libxres"
-                ["xmu"]="libxmu"
-                ["libcap"]="libcap"
-                ["libdecor-0"]="libdecor"
-                ["libavif"]="libavif"
-                ["benchmark"]="benchmark"
-                ["lcms2"]="lcms2"
-                ["libdisplay-info"]="libdisplay-info"
-                ["pixman-1"]="pixman"
-            )
-
-            for pkg in "${!pkgmap[@]}"; do
-                if ! pkg-config --exists "$pkg" 2>/dev/null; then
-                    missing_pacman+=("${pkgmap[$pkg]}")
-                fi
-            done
-
-            # Check vulkan header specifically
-            if ! echo '#include <vulkan/vulkan.h>' | cpp -x c - >/dev/null 2>&1; then
-                [[ ! " ${missing_pacman[*]} " =~ " vulkan-headers " ]] && missing_pacman+=("vulkan-headers")
-            fi
-        fi
+    if [[ -f "$gbe_out/linux64/libsteam_api.so" ]] && [[ -f "$gbe_out/win/steam_api64.dll" ]]; then
+        info "Goldberg already available"
+        copy_steam_client_libs
+        return 0
     fi
 
-    # umu-launcher for Windows games
-    command -v umu-run >/dev/null 2>&1 || missing_aur+=("umu-launcher")
+    step "Downloading Goldberg Steam emulator..."
+    local tmp_dir=$(mktemp -d)
+    trap "rm -rf '$tmp_dir'" EXIT
 
-    # Prompt to install missing dependencies
-    if [[ ${#missing_pacman[@]} -gt 0 ]] || [[ ${#missing_aur[@]} -gt 0 ]]; then
-        echo ""
-        warn "Missing dependencies detected"
-        echo ""
+    # Linux binaries
+    curl -fsSL "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-linux-release.tar.bz2" \
+        -o "$tmp_dir/goldberg-linux.tar.bz2" || { warn "Failed to download Goldberg (linux)"; return 1; }
 
-        # Remove duplicates
-        local unique_pacman=($(printf '%s\n' "${missing_pacman[@]}" | sort -u))
-        local unique_aur=($(printf '%s\n' "${missing_aur[@]}" | sort -u))
+    tar -xjf "$tmp_dir/goldberg-linux.tar.bz2" -C "$tmp_dir"
+    mkdir -p "$gbe_out/linux64" "$gbe_out/linux32"
+    cp -f "$tmp_dir"/release/regular/x64/*.so "$gbe_out/linux64/" 2>/dev/null || true
+    cp -f "$tmp_dir"/release/regular/x32/*.so "$gbe_out/linux32/" 2>/dev/null || true
 
-        if [[ ${#unique_pacman[@]} -gt 0 ]]; then
-            echo -e "  ${CYAN}Pacman packages:${NC} ${unique_pacman[*]}"
-        fi
-        if [[ ${#unique_aur[@]} -gt 0 ]]; then
-            echo -e "  ${CYAN}AUR packages:${NC} ${unique_aur[*]}"
-        fi
-        echo ""
+    # Windows binaries (for Proton games)
+    curl -fsSL "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-win-release.7z" \
+        -o "$tmp_dir/goldberg-win.7z" || { warn "Failed to download Goldberg (windows)"; return 1; }
 
-        read -p "  Would you like to install missing dependencies now? [Y/n] " -n 1 -r
-        echo ""
+    7z x -o"$tmp_dir" "$tmp_dir/goldberg-win.7z" >/dev/null
+    mkdir -p "$gbe_out/win"
+    cp -f "$tmp_dir"/release/regular/x64/*.dll "$gbe_out/win/" 2>/dev/null || true
+    cp -f "$tmp_dir"/release/regular/x32/*.dll "$gbe_out/win/" 2>/dev/null || true
 
-        if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
-            # Install pacman packages
-            if [[ ${#unique_pacman[@]} -gt 0 ]]; then
-                step "Installing pacman packages..."
-                sudo pacman -S --needed "${unique_pacman[@]}" || {
-                    error "Failed to install pacman packages"
-                }
-            fi
-
-            # Install AUR packages
-            if [[ ${#unique_aur[@]} -gt 0 ]]; then
-                step "Installing AUR packages..."
-                if command -v yay >/dev/null 2>&1; then
-                    yay -S --needed "${unique_aur[@]}" || {
-                        error "Failed to install AUR packages"
-                    }
-                elif command -v paru >/dev/null 2>&1; then
-                    paru -S --needed "${unique_aur[@]}" || {
-                        error "Failed to install AUR packages"
-                    }
-                else
-                    echo ""
-                    error "No AUR helper found. Install yay or paru, then run: yay -S ${unique_aur[*]}"
-                fi
-            fi
-
-            info "Dependencies installed successfully"
-        else
-            echo ""
-            echo -e "  ${YELLOW}To install manually:${NC}"
-            if [[ ${#unique_pacman[@]} -gt 0 ]]; then
-                echo -e "    ${GREEN}sudo pacman -S ${unique_pacman[*]}${NC}"
-            fi
-            if [[ ${#unique_aur[@]} -gt 0 ]]; then
-                echo -e "    ${GREEN}yay -S ${unique_aur[*]}${NC}"
-            fi
-            echo ""
-            exit 1
-        fi
-    fi
-
-    info "Dependencies OK"
-}
-
-init_submodules() {
-    cd "$SCRIPT_DIR"
-    if git submodule status | grep -q '^-'; then
-        step "Initializing submodules..."
-        git submodule update --init --recursive
-    fi
+    trap - EXIT
+    rm -rf "$tmp_dir"
+    info "Goldberg downloaded"
+    copy_steam_client_libs
 }
 
 copy_steam_client_libs() {
-    # Copy Steam's steamclient.so to Goldberg directories
-    # Games need both libsteam_api.so (from Goldberg) AND steamclient.so (from Steam)
     local gbe_out="$SCRIPT_DIR/res/goldberg"
     local steam_dir="$HOME/.local/share/Steam"
 
-    # Copy 64-bit libraries
+    # 64-bit
     if [[ -f "$steam_dir/linux64/steamclient.so" ]] && [[ ! -f "$gbe_out/linux64/steamclient.so" ]]; then
         cp -f "$steam_dir/linux64/steamclient.so" "$gbe_out/linux64/" 2>/dev/null && \
-            info "Copied steamclient.so (64-bit) to goldberg"
+            info "Copied steamclient.so (64-bit)"
     fi
-    if [[ -f "$steam_dir/linux64/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux64/crashhandler.so" ]]; then
+    [[ -f "$steam_dir/linux64/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux64/crashhandler.so" ]] && \
         cp -f "$steam_dir/linux64/crashhandler.so" "$gbe_out/linux64/" 2>/dev/null
-    fi
 
-    # Copy 32-bit libraries
+    # 32-bit
     if [[ -f "$steam_dir/linux32/steamclient.so" ]] && [[ ! -f "$gbe_out/linux32/steamclient.so" ]]; then
         cp -f "$steam_dir/linux32/steamclient.so" "$gbe_out/linux32/" 2>/dev/null && \
-            info "Copied steamclient.so (32-bit) to goldberg"
+            info "Copied steamclient.so (32-bit)"
     fi
-    if [[ -f "$steam_dir/linux32/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux32/crashhandler.so" ]]; then
+    [[ -f "$steam_dir/linux32/crashhandler.so" ]] && [[ ! -f "$gbe_out/linux32/crashhandler.so" ]] && \
         cp -f "$steam_dir/linux32/crashhandler.so" "$gbe_out/linux32/" 2>/dev/null
-    fi
-
-    # Create sdk32/sdk64 symlinks if they don't exist (needed by splitux)
-    if [[ ! -L "$steam_dir/sdk32" ]]; then
-        ln -sf linux32 "$steam_dir/sdk32" 2>/dev/null
-    fi
-    if [[ ! -L "$steam_dir/sdk64" ]]; then
-        ln -sf linux64 "$steam_dir/sdk64" 2>/dev/null
-    fi
 }
 
-build_bepinex() {
+download_bepinex() {
     local bepinex_out="$SCRIPT_DIR/res/bepinex"
 
     if [[ -d "$bepinex_out/core" ]] && [[ -f "$bepinex_out/winhttp.dll" ]]; then
@@ -202,26 +401,14 @@ build_bepinex() {
         return 0
     fi
 
-    step "Downloading BepInEx (Unity IL2CPP)..."
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
+    step "Downloading BepInEx..."
+    local tmp_dir=$(mktemp -d)
+    trap "rm -rf '$tmp_dir'" EXIT
 
-    # Download BepInEx for Unity IL2CPP (Windows x64)
-    # This is the most common Unity build type for modern games
-    curl -L "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
-        -o "$tmp_dir/bepinex.zip" || {
-        warn "Failed to download BepInEx"
-        rm -rf "$tmp_dir"
-        return 1
-    }
+    curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
+        -o "$tmp_dir/bepinex.zip" || { warn "Failed to download BepInEx"; return 1; }
 
-    unzip -q "$tmp_dir/bepinex.zip" -d "$tmp_dir/bepinex" || {
-        warn "Failed to extract BepInEx"
-        rm -rf "$tmp_dir"
-        return 1
-    }
-
-    # Fix restrictive permissions from the zip archive
+    unzip -q "$tmp_dir/bepinex.zip" -d "$tmp_dir/bepinex"
     chmod -R u+rwX "$tmp_dir/bepinex"
 
     mkdir -p "$bepinex_out"
@@ -230,107 +417,14 @@ build_bepinex() {
     cp -f "$tmp_dir/bepinex/doorstop_config.ini" "$bepinex_out/" 2>/dev/null || true
     cp -f "$tmp_dir/bepinex/.doorstop_version" "$bepinex_out/" 2>/dev/null || true
 
+    trap - EXIT
     rm -rf "$tmp_dir"
     info "BepInEx downloaded"
 }
 
-build_goldberg() {
-    local gbe_out="$SCRIPT_DIR/res/goldberg"
-
-    if [[ -d "$gbe_out/linux64" ]] && [[ -d "$gbe_out/win" ]]; then
-        info "goldberg already available"
-        copy_steam_client_libs
-        return 0
-    fi
-
-    step "Downloading goldberg Steam emulator..."
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-
-    # Download Linux binaries
-    curl -L "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-linux-release.tar.bz2" \
-        -o "$tmp_dir/goldberg-linux.tar.bz2" || {
-        warn "Failed to download goldberg (linux)"
-        rm -rf "$tmp_dir"
-        return 1
-    }
-
-    tar -xjf "$tmp_dir/goldberg-linux.tar.bz2" -C "$tmp_dir" || {
-        warn "Failed to extract goldberg (linux)"
-        rm -rf "$tmp_dir"
-        return 1
-    }
-
-    mkdir -p "$gbe_out/linux64" "$gbe_out/linux32"
-    cp -f "$tmp_dir"/release/regular/x64/*.so "$gbe_out/linux64/" 2>/dev/null || true
-    cp -f "$tmp_dir"/release/regular/x32/*.so "$gbe_out/linux32/" 2>/dev/null || true
-    rm -rf "$tmp_dir/release"
-
-    # Download Windows binaries (needed for Proton/Wine games)
-    curl -L "https://github.com/Detanup01/gbe_fork/releases/latest/download/emu-win-release.7z" \
-        -o "$tmp_dir/goldberg-win.7z" || {
-        warn "Failed to download goldberg (windows)"
-        rm -rf "$tmp_dir"
-        return 1
-    }
-
-    7z x -o"$tmp_dir" "$tmp_dir/goldberg-win.7z" >/dev/null || {
-        warn "Failed to extract goldberg (windows)"
-        rm -rf "$tmp_dir"
-        return 1
-    }
-
-    mkdir -p "$gbe_out/win"
-    cp -f "$tmp_dir"/release/regular/x64/*.dll "$gbe_out/win/" 2>/dev/null || true
-    cp -f "$tmp_dir"/release/regular/x32/*.dll "$gbe_out/win/" 2>/dev/null || true
-
-    rm -rf "$tmp_dir"
-    info "goldberg downloaded"
-    copy_steam_client_libs
-}
-
-build_gamescope() {
-    local gsc_src="$SCRIPT_DIR/deps/gamescope"
-    local gsc_build="$gsc_src/build-gcc"
-
-    # Already built?
-    if [[ -f "$gsc_build/src/gamescope" ]]; then
-        info "gamescope-kbm already built"
-        return 0
-    fi
-
-    # Try system gamescope first
-    for path in /usr/bin/gamescope /usr/local/bin/gamescope /usr/sbin/gamescope; do
-        if [[ -x "$path" ]]; then
-            info "Using system gamescope: $path"
-            mkdir -p "$SCRIPT_DIR/deps/gamescope/build-gcc/src"
-            ln -sf "$path" "$SCRIPT_DIR/deps/gamescope/build-gcc/src/gamescope"
-            return 0
-        fi
-    done
-
-    # Build from source as fallback
-    if [[ ! -f "$gsc_src/meson.build" ]]; then
-        step "Initializing gamescope submodule..."
-        cd "$SCRIPT_DIR"
-        git submodule update --init deps/gamescope
-        cd "$gsc_src"
-        git submodule update --init --recursive
-    fi
-
-    step "Building gamescope-kbm from source..."
-    cd "$gsc_src"
-    if meson setup build-gcc --buildtype=release \
-        -Dpipewire=disabled -Drt_cap=disabled \
-        -Ddrm_backend=disabled -Dsdl2_backend=enabled \
-        -Denable_openvr_support=false 2>/dev/null && \
-       ninja -C build-gcc -j"$(nproc)" 2>/dev/null; then
-        info "gamescope-kbm built from source"
-    else
-        warn "gamescope-kbm build failed and no system gamescope found"
-        return 1
-    fi
-}
+# =============================================================================
+# Build
+# =============================================================================
 
 build_splitux() {
     step "Building splitux..."
@@ -338,65 +432,47 @@ build_splitux() {
     cargo build --release -j"$(nproc)"
 
     local target_dir=$(get_target_dir)
-    if [[ ! -f "$target_dir/release/splitux" ]]; then
-        error "Binary not found at $target_dir/release/splitux"
-    fi
+    [[ ! -f "$target_dir/release/splitux" ]] && error "Binary not found"
     info "splitux built"
 }
 
 do_build() {
-    check_deps build
+    check_deps build || exit 1
 
-    # Build all components in parallel
-    step "Building components in parallel..."
-    build_gamescope &
-    local gsc_pid=$!
-    build_goldberg &
+    # Download dependencies in parallel
+    step "Fetching dependencies..."
+    download_goldberg &
     local gbe_pid=$!
-    build_bepinex &
+    download_bepinex &
     local bep_pid=$!
-    build_splitux &
-    local spx_pid=$!
 
-    # Wait for all
-    wait $gsc_pid || warn "gamescope build failed"
-    wait $gbe_pid || warn "goldberg build failed"
+    # Build splitux
+    build_splitux
+
+    # Wait for downloads
+    wait $gbe_pid || warn "Goldberg download failed"
     wait $bep_pid || warn "BepInEx download failed"
-    wait $spx_pid || error "splitux build failed"
 
     # Setup build directory
     step "Setting up build directory..."
     rm -rf "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR/res" "$BUILD_DIR/bin"
+    mkdir -p "$BUILD_DIR/res"
 
     local target_dir=$(get_target_dir)
     cp "$target_dir/release/splitux" "$BUILD_DIR/"
     cp "$SCRIPT_DIR/LICENSE" "$BUILD_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/COPYING.md" "$BUILD_DIR/thirdparty.txt" 2>/dev/null || true
-
-    # Copy all resources (icons, scripts, templates, etc.)
     cp -r "$SCRIPT_DIR/res/"* "$BUILD_DIR/res/" 2>/dev/null || true
-
-    # Gamescope-kbm
-    if [[ -f "$SCRIPT_DIR/deps/gamescope/build-gcc/src/gamescope" ]]; then
-        cp "$SCRIPT_DIR/deps/gamescope/build-gcc/src/gamescope" "$BUILD_DIR/bin/gamescope-kbm"
-    else
-        warn "gamescope-kbm not available - install system-wide or build manually"
-    fi
-
-    # umu-run (for Windows/Proton games)
-    if [[ -f "$SCRIPT_DIR/deps/umu-launcher/umu/umu-run" ]]; then
-        cp "$SCRIPT_DIR/deps/umu-launcher/umu/umu-run" "$BUILD_DIR/bin/"
-    elif ! command -v umu-run >/dev/null 2>&1; then
-        warn "umu-run not available - Windows games may not work"
-    fi
 
     info "Build complete: $BUILD_DIR/"
 }
 
+# =============================================================================
+# Run / Install / Update / Clean
+# =============================================================================
+
 do_run() {
     [[ ! -f "$BUILD_DIR/splitux" ]] && do_build
-    check_deps runtime
+    check_deps runtime || exit 1
     info "Running splitux..."
     exec "$BUILD_DIR/splitux" "$@"
 }
@@ -410,7 +486,6 @@ do_install() {
 
     cp "$BUILD_DIR/splitux" "$prefix/bin/"
     [[ -d "$BUILD_DIR/res" ]] && cp -r "$BUILD_DIR/res"/* "$prefix/share/splitux/"
-    [[ -f "$BUILD_DIR/bin/gamescope-kbm" ]] && cp "$BUILD_DIR/bin/gamescope-kbm" "$prefix/bin/"
 
     info "Installed to $prefix (ensure $prefix/bin is in PATH)"
 }
@@ -433,47 +508,56 @@ do_update() {
         [[ "$behind" -gt 0 ]] && warn "Behind by $behind commit(s) - run: git pull"
         [[ "$ahead" -gt 0 ]] && info "Ahead by $ahead commit(s)"
     fi
-
-    git submodule status | grep -q '^-' && warn "Submodules not initialized - run: $0 build"
 }
 
 do_clean() {
     step "Cleaning..."
     rm -rf "$BUILD_DIR"
-    rm -rf "$SCRIPT_DIR/deps/gamescope/build-gcc"
+    rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
+    rm -rf "$SCRIPT_DIR/res/bepinex"
     cargo clean 2>/dev/null || true
     info "Clean complete"
 }
 
+# =============================================================================
+# Usage
+# =============================================================================
+
 usage() {
+    detect_distro
     cat <<EOF
-${GREEN}Splitux${NC} - Build & Run Script
+${GREEN}Splitux${NC} - Local co-op split-screen gaming for Linux
 
 ${CYAN}Usage:${NC} $0 <command> [options]
 
 ${CYAN}Commands:${NC}
-    build       Build splitux and gamescope-kbm (parallel)
+    build       Build splitux (downloads dependencies automatically)
     run         Build if needed, then run
     install     Install to ~/.local or specified prefix
     update      Check for updates from remote
     check       Verify dependencies
-    clean       Remove all build artifacts
+    clean       Remove build artifacts and downloaded deps
 
 ${CYAN}Examples:${NC}
     $0 build                # Build everything
     $0 run                  # Build and run
     $0 install              # Install to ~/.local
     $0 install /usr/local   # System-wide install (needs sudo)
-    $0 update               # Check for updates
+
+${CYAN}Detected:${NC} $DISTRO ($PKG_MGR)${IMMUTABLE:+ [immutable]}
 EOF
 }
+
+# =============================================================================
+# Main
+# =============================================================================
 
 case "${1:-}" in
     build)   do_build ;;
     run)     shift; do_run "$@" ;;
     install) do_install "${2:-}" ;;
     update)  do_update ;;
-    check)   check_deps build ;;
+    check)   check_deps "${2:-runtime}" ;;
     clean)   do_clean ;;
     *)       usage ;;
 esac
