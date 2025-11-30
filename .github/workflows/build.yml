@@ -1,0 +1,133 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 4 AM UTC
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'nightly'
+        type: choice
+        options:
+          - nightly
+          - release
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman-key --init
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            git rust cargo sdl2 \
+            p7zip unzip curl wget \
+            libx11 libudev0 openssl
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version info
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            RELEASE_NAME="Splitux ${VERSION}"
+            IS_NIGHTLY="false"
+          else
+            VERSION="nightly-$(date +%Y%m%d)"
+            RELEASE_NAME="Splitux Nightly ($(date +%Y-%m-%d))"
+            IS_NIGHTLY="true"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "is_nightly=$IS_NIGHTLY" >> $GITHUB_OUTPUT
+
+      - name: Build Splitux
+        run: |
+          chmod +x splitux.sh
+          ./splitux.sh build
+
+      - name: Package release
+        run: |
+          mkdir -p release
+          cp -r build release/splitux
+          cd release
+          tar -czvf splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz splitux/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splitux-${{ steps.version.outputs.version }}-linux-x86_64
+          path: release/splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.release_type != ''
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version info
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            RELEASE_NAME="Splitux ${VERSION}"
+            IS_NIGHTLY="false"
+            PRERELEASE="false"
+          else
+            VERSION="nightly-$(date +%Y%m%d)"
+            RELEASE_NAME="Splitux Nightly ($(date +%Y-%m-%d))"
+            IS_NIGHTLY="true"
+            PRERELEASE="true"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "is_nightly=$IS_NIGHTLY" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: splitux-${{ steps.version.outputs.version }}-linux-x86_64
+
+      - name: Delete existing nightly release
+        if: steps.version.outputs.is_nightly == 'true'
+        continue-on-error: true
+        run: |
+          gh release delete nightly --yes --repo ${{ github.repository }} || true
+          git push --delete origin nightly || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: ${{ steps.version.outputs.release_name }}
+          tag_name: ${{ steps.version.outputs.is_nightly == 'true' && 'nightly' || github.ref_name }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: ${{ steps.version.outputs.is_nightly != 'true' }}
+          body: ${{ steps.version.outputs.is_nightly == 'true' && 'Automated nightly build. May be unstable.' || '' }}
+          files: |
+            splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

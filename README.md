@@ -7,8 +7,7 @@ Split-screen gaming on Linux
 ---
 
 <p align="center">
-    <img src=".github/assets/launcher.png" width="49%" />
-    <img src=".github/assets/gameplay1.png" width="49%" />
+    <img src=".github/assets/launcher.png" width="80%" />
 </p>
 
 ## Features
@@ -27,17 +26,19 @@ Split-screen gaming on Linux
 Splitux launches each game instance inside its own containerized environment:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Splitux                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │  Gamescope   │  │  Gamescope   │  │  Gamescope   │      │
-│  │  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │      │
-│  │  │Bubblewrap│ │  │  │Bubblewrap│ │  │  │Bubblewrap│ │   │
-│  │  │  Game   │  │  │  │  Game   │  │  │  │  Game   │  │   │
-│  │  └────────┘  │  │  └────────┘  │  │  └────────┘  │      │
-│  │  Player 1    │  │  Player 2    │  │  Player 3    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ Splitux                                                    │
+│ ┌────────────────┐ ┌────────────────┐ ┌────────────────┐   │
+│ │ Gamescope      │ │ Gamescope      │ │ Gamescope      │   │
+│ │ ┌────────────┐ │ │ ┌────────────┐ │ │ ┌────────────┐ │   │
+│ │ │ Bubblewrap │ │ │ │ Bubblewrap │ │ │ │ Bubblewrap │ │   │
+│ │ │ ┌────────┐ │ │ │ │ ┌────────┐ │ │ │ │ ┌────────┐ │ │   │
+│ │ │ │  Game  │ │ │ │ │ │  Game  │ │ │ │ │ │  Game  │ │ │   │
+│ │ │ └────────┘ │ │ │ │ └────────┘ │ │ │ │ └────────┘ │ │   │
+│ │ └────────────┘ │ │ └────────────┘ │ │ └────────────┘ │   │
+│ │ Player 1       │ │ Player 2       │ │ Player 3       │   │
+│ └────────────────┘ └────────────────┘ └────────────────┘   │
+└────────────────────────────────────────────────────────────┘
 ```
 
 Each instance runs in:

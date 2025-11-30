@@ -411,6 +411,36 @@ download_goldberg() {
     copy_steam_client_libs
 }
 
+download_gamescope() {
+    local gsc_out="$SCRIPT_DIR/res/gamescope-splitux"
+    local gsc_repo="gabrielgad/gamescope-splitux"
+    local gsc_release="v1.0.0"
+
+    # Check if already available
+    if [[ -f "$gsc_out/bin/gamescope" ]]; then
+        info "gamescope-splitux already available"
+        return 0
+    fi
+
+    step "Downloading gamescope-splitux..."
+    local tmp_dir=$(mktemp -d)
+    local base_url="https://github.com/$gsc_repo/releases/download/$gsc_release"
+
+    if ! curl -fsSL "$base_url/gamescope-splitux-$gsc_release.zip" -o "$tmp_dir/gamescope.zip"; then
+        warn "Failed to download gamescope-splitux"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Extract
+    mkdir -p "$gsc_out"
+    unzip -q "$tmp_dir/gamescope.zip" -d "$gsc_out"
+    chmod +x "$gsc_out/bin/"*
+
+    rm -rf "$tmp_dir"
+    info "gamescope-splitux downloaded"
+}
+
 copy_steam_client_libs() {
     local gbe_out="$SCRIPT_DIR/res/goldberg"
     local steam_dir="$HOME/.local/share/Steam"
@@ -497,55 +527,6 @@ download_bepinex() {
 # Build
 # =============================================================================
 
-build_gamescope_splitux() {
-    local gsc_dir="$SCRIPT_DIR/deps/gamescope"
-    local gsc_build="$gsc_dir/build"
-    local gsc_bin="$gsc_build/src/gamescope"
-
-    # Check if already built
-    if [[ -f "$gsc_bin" ]]; then
-        info "gamescope-splitux already built"
-        return 0
-    fi
-
-    if [[ ! -d "$gsc_dir" ]]; then
-        error "gamescope submodule not found. Run: git submodule update --init"
-    fi
-
-    step "Building gamescope-splitux (this may take a while)..."
-    cd "$gsc_dir"
-
-    # Init gamescope's own submodules (some may have broken refs, init individually)
-    step "Initializing gamescope submodules..."
-    git submodule update --init src/reshade 2>/dev/null || true
-    git submodule update --init thirdparty/SPIRV-Headers 2>/dev/null || true
-    git submodule update --init subprojects/wlroots 2>/dev/null || true
-    git submodule update --init subprojects/vkroots 2>/dev/null || true
-    git submodule update --init subprojects/libliftoff 2>/dev/null || true
-    git submodule update --init subprojects/libdisplay-info 2>/dev/null || true
-    # Remove broken glm submodule dir if exists (meson will use wrap file)
-    [[ -d "subprojects/glm" ]] && rm -rf "subprojects/glm"
-
-    # Configure with meson
-    if [[ ! -d "$gsc_build" ]]; then
-        meson setup build/ \
-            --buildtype=release \
-            -Dpipewire=disabled \
-            -Ddrm_backend=disabled \
-            -Dsdl2_backend=enabled \
-            -Denable_openvr_support=false \
-            -Dinput_emulation=disabled \
-            || error "Meson setup failed"
-    fi
-
-    # Build
-    ninja -C build/ -j"$(nproc)" || error "Gamescope build failed"
-
-    [[ ! -f "$gsc_bin" ]] && error "gamescope binary not found after build"
-    info "gamescope-splitux built"
-    cd "$SCRIPT_DIR"
-}
-
 build_splitux() {
     step "Building splitux..."
     cd "$SCRIPT_DIR"
@@ -565,22 +546,16 @@ do_build() {
     local gbe_pid=$!
     download_bepinex &
     local bep_pid=$!
+    download_gamescope &
+    local gsc_pid=$!
 
-    # Build gamescope-splitux first (takes longest)
-    build_gamescope_splitux
-
-    # Build splitux
+    # Build splitux while dependencies download
     build_splitux
 
-    # Wait for downloads (disable errexit for wait)
-    set +e
-    wait $gbe_pid
-    local gbe_status=$?
-    wait $bep_pid
-    local bep_status=$?
-    set -e
-    [[ $gbe_status -ne 0 ]] && warn "Goldberg download failed"
-    [[ $bep_status -ne 0 ]] && warn "BepInEx download failed"
+    # Wait for downloads to complete
+    wait $gbe_pid 2>/dev/null || warn "Goldberg download may have failed"
+    wait $bep_pid 2>/dev/null || warn "BepInEx download may have failed"
+    wait $gsc_pid 2>/dev/null || warn "gamescope-splitux download may have failed"
 
     # Setup build directory
     step "Setting up build directory..."
@@ -592,10 +567,10 @@ do_build() {
     cp "$SCRIPT_DIR/LICENSE" "$BUILD_DIR/" 2>/dev/null || true
     cp -r "$SCRIPT_DIR/res/"* "$BUILD_DIR/res/" 2>/dev/null || true
 
-    # Copy gamescope-splitux
-    if [[ -f "$SCRIPT_DIR/deps/gamescope/build/src/gamescope" ]]; then
-        cp "$SCRIPT_DIR/deps/gamescope/build/src/gamescope" "$BUILD_DIR/bin/gamescope-splitux"
-        chmod +x "$BUILD_DIR/bin/gamescope-splitux"
+    # Copy gamescope-splitux from downloaded binaries
+    if [[ -f "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescope" ]]; then
+        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/"* "$BUILD_DIR/bin/"
+        chmod +x "$BUILD_DIR/bin/"*
         info "gamescope-splitux installed to build/bin/"
     else
         warn "gamescope-splitux not found - input holding support will be unavailable"
@@ -653,7 +628,7 @@ do_clean() {
     rm -rf "$BUILD_DIR"
     rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
     rm -rf "$SCRIPT_DIR/res/bepinex"
-    rm -rf "$SCRIPT_DIR/deps/gamescope/build"
+    rm -rf "$SCRIPT_DIR/res/gamescope-splitux"
     cargo clean 2>/dev/null || true
     info "Clean complete"
 }
