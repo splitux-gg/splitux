@@ -2,7 +2,7 @@
 
 ### `Splitux`
 
-A split-screen game launcher for Linux
+Split-screen gaming on Linux
 
 ---
 
@@ -11,45 +11,62 @@ A split-screen game launcher for Linux
     <img src=".github/assets/gameplay1.png" width="49%" />
 </p>
 
-> [!NOTE]
-> Splitux is in early development. Contributions and feedback are welcome!
-
 ## Features
 
-- Launch multiple game instances with automatic window tiling (up to 4 per monitor)
-- Native Linux games and Windows games via Proton/UMU Launcher
-- Controller isolation - each instance only sees its assigned controller
-- Keyboard and mouse support via custom Gamescope fork
-- Multi-monitor support
-- Steam multiplayer emulation for LAN play
-- Per-player profiles for separate saves and settings
-- Works on SteamOS and desktop Linux (KDE Plasma, Hyprland)
+- **Split-screen multiplayer** - Run multiple game instances with automatic window tiling
+- **Controller isolation** - Each instance only sees its assigned controllers
+- **Keyboard & mouse support** - Per-instance input isolation via custom Gamescope fork
+- **Steam artwork integration** - Automatically fetches game icons and banners from your local Steam library
+- **LAN multiplayer emulation** - Play online-only games locally via Goldberg Steam Emulator
+- **Proton support** - Run Windows games through Proton/UMU Launcher
+- **Per-player profiles** - Separate saves, settings, and Steam identities per player
+- **Hyprland & KDE Plasma** - Native window manager integration
 
-## How it Works
+## How It Works
 
-Splitux combines several technologies to enable split-screen gaming:
+Splitux launches each game instance inside its own containerized environment:
 
-| Component | Purpose |
-|-----------|---------|
-| [Gamescope](https://github.com/ValveSoftware/gamescope) | Nested Wayland compositor - contains each game instance in its own window, receives input even when unfocused |
-| [Bubblewrap](https://github.com/containers/bubblewrap) | Sandboxing - masks input devices so each instance only sees its assigned controller |
-| [Goldberg Steam Emu](https://github.com/Detanup01/gbe_fork) | Steam API emulation - enables LAN multiplayer between instances |
-| [UMU Launcher](https://github.com/Open-Wine-Components/umu-launcher) | Proton runtime - runs Windows games on Linux |
-| [KWin](https://invent.kde.org/plasma/kwin) / [Hyprland](https://hyprland.org/) | Window management - tiles game windows on screen |
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Splitux                                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │  Gamescope   │  │  Gamescope   │  │  Gamescope   │      │
+│  │  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │      │
+│  │  │Bubblewrap│ │  │  │Bubblewrap│ │  │  │Bubblewrap│ │   │
+│  │  │  Game   │  │  │  │  Game   │  │  │  │  Game   │  │   │
+│  │  └────────┘  │  │  └────────┘  │  │  └────────┘  │      │
+│  │  Player 1    │  │  Player 2    │  │  Player 3    │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Each instance runs in:
+- **Gamescope** - Nested Wayland compositor that contains the game window and handles input
+- **Bubblewrap** - Lightweight sandbox that masks input devices and mounts profile-specific directories
+- **Overlay filesystem** - Injects multiplayer DLLs and per-player configurations
+
+## Supported Backends
+
+| Backend | Use Case |
+|---------|----------|
+| **Goldberg Steam Emulator** | Steam P2P games - emulates Steam networking for LAN play |
+| **Photon + BepInEx** | Unity Photon games - injects LocalMultiplayer mod |
+| **None** | Games with native LAN support or single-player |
 
 ## Installation
 
+### Requirements
+
+- **Window Manager**: Hyprland or KDE Plasma
+- **Dependencies**: Gamescope, Bubblewrap, fuse-overlayfs, SDL2
+
+### From Release
+
 Download the latest release from [Releases](https://github.com/gabrielgad/splitux/releases).
 
-### SteamOS
-Run `splitux` in desktop mode. For Gaming Mode, add `GamingModeLauncher.sh` as a non-Steam game and disable Steam Input.
+### Building from Source
 
-### Desktop Linux
-Install dependencies: KDE Plasma or Hyprland, Gamescope, Bubblewrap, fuse-overlayfs. Run `splitux` from your desktop session.
-
-## Building
-
-Requires Rust (2024 edition), meson, and ninja.
+Requires Rust (nightly), meson, and ninja.
 
 ```bash
 git clone --recurse-submodules https://github.com/gabrielgad/splitux.git
@@ -57,7 +74,57 @@ cd splitux
 ./splitux.sh build
 ```
 
-Output will be in `build/`.
+The build script automatically:
+- Detects your distro (Arch, Fedora, Ubuntu, Debian, openSUSE)
+- Checks for required dependencies
+- Builds gamescope-splitux (custom fork with input isolation)
+- Compiles the Rust application
+- Outputs everything to `build/`
+
+## Configuration
+
+Settings are stored in `~/.local/share/splitux/`:
+
+```
+splitux/
+├── handlers/           # Game configurations (handler.yaml + assets)
+├── profiles/           # Per-player save data and settings
+├── prefixes/           # Wine prefixes for Windows games
+└── settings.json       # Global configuration
+```
+
+### Handler Format
+
+Games are configured via YAML handlers:
+
+```yaml
+name: "Game Name"
+exec: "game.exe"
+steam_appid: 12345
+
+backend: goldberg        # or: photon, none
+use_goldberg: true
+
+# Optional
+args: "-windowed"
+env: "DXVK_ASYNC=1"
+proton_path: "GE-Proton"
+```
+
+## Controls
+
+The launcher is fully navigable with a gamepad:
+
+| Input | Action |
+|-------|--------|
+| D-Pad / Left Stick | Navigate |
+| A | Select / Confirm |
+| B | Back |
+| Y | Change Profile |
+| X | Edit Handler |
+| Start | Launch Game |
+| LB / RB | Switch Tabs |
+| Right Stick | Scroll |
 
 ## License
 
@@ -65,8 +132,8 @@ MIT License - see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
-Built on the shoulders of giants:
-- [Gamescope](https://github.com/ValveSoftware/gamescope) by Valve
-- [Goldberg Steam Emu](https://github.com/Detanup01/gbe_fork) by Mr_Goldberg & Detanup01
-- [UMU Launcher](https://github.com/Open-Wine-Components/umu-launcher) by GloriousEggroll et al.
-- [Nucleus Coop](https://github.com/SplitScreen-Me/splitscreenme-nucleus) by the Splitscreen.me team
+- [PartyDeck](https://github.com/Seezeed7/PartyDeck) - Original inspiration for split-screen gaming on Linux
+- [Gamescope](https://github.com/ValveSoftware/gamescope) - Wayland compositor by Valve
+- [Goldberg Steam Emulator](https://github.com/Detanup01/gbe_fork) - Steam API emulation
+- [UMU Launcher](https://github.com/Open-Wine-Components/umu-launcher) - Proton launcher
+- [Nucleus Co-op](https://github.com/SplitScreen-Me/splitscreenme-nucleus) - Split-screen gaming on Windows
