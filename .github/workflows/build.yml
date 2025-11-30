@@ -32,7 +32,7 @@ jobs:
           pacman -Syu --noconfirm
           pacman -S --noconfirm --needed \
             git rust sdl2 \
-            p7zip unzip curl wget \
+            p7zip unzip zip curl wget \
             libx11 systemd-libs openssl \
             bubblewrap fuse-overlayfs slirp4netns
 
@@ -65,12 +65,36 @@ jobs:
           curl -fsSL https://github.com/gabrielgad/gamescope-splitux/releases/download/v1.0.0/gamescope-splitux-v1.0.0.zip -o /tmp/gsc.zip
           unzip -q /tmp/gsc.zip -d res/gamescope-splitux
 
-          # Download Goldberg
-          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-linux-release.tar.bz2 -o /tmp/gbe.tar.bz2
-          tar -xjf /tmp/gbe.tar.bz2 -C /tmp
-          mkdir -p res/goldberg/{linux64,linux32}
+          # Download Goldberg (Linux)
+          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
+          tar -xjf /tmp/gbe-linux.tar.bz2 -C /tmp
+          mkdir -p res/goldberg/{linux64,linux32,win,steamnetworkingsockets/x64,steamnetworkingsockets/x32}
           cp -f /tmp/release/regular/x64/*.so res/goldberg/linux64/ 2>/dev/null || true
           cp -f /tmp/release/regular/x32/*.so res/goldberg/linux32/ 2>/dev/null || true
+
+          # Download Goldberg (Windows - for Wine/Proton games)
+          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-win-release.7z -o /tmp/gbe-win.7z
+          7z x -o/tmp/gbe-win /tmp/gbe-win.7z -y
+          cp -f /tmp/gbe-win/release/regular/steam_api64.dll res/goldberg/win/ 2>/dev/null || true
+          cp -f /tmp/gbe-win/release/regular/steam_api.dll res/goldberg/win/ 2>/dev/null || true
+          cp -f /tmp/gbe-win/release/steamnetworkingsockets/x64/*.dll res/goldberg/steamnetworkingsockets/x64/ 2>/dev/null || true
+          cp -f /tmp/gbe-win/release/steamnetworkingsockets/x32/*.dll res/goldberg/steamnetworkingsockets/x32/ 2>/dev/null || true
+
+          # Download BepInEx 5 (Mono)
+          curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.2/BepInEx_win_x64_5.4.23.2.zip -o /tmp/bepinex-mono.zip
+          mkdir -p res/bepinex/mono/core
+          unzip -q /tmp/bepinex-mono.zip -d /tmp/bepinex-mono
+          cp -f /tmp/bepinex-mono/BepInEx/core/* res/bepinex/mono/core/ 2>/dev/null || true
+          cp -f /tmp/bepinex-mono/winhttp.dll res/bepinex/mono/ 2>/dev/null || true
+          cp -f /tmp/bepinex-mono/doorstop_config.ini res/bepinex/mono/ 2>/dev/null || true
+
+          # Download BepInEx 6 (IL2CPP)
+          curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip -o /tmp/bepinex-il2cpp.zip
+          mkdir -p res/bepinex/il2cpp/core
+          unzip -q /tmp/bepinex-il2cpp.zip -d /tmp/bepinex-il2cpp
+          cp -f /tmp/bepinex-il2cpp/BepInEx/core/* res/bepinex/il2cpp/core/ 2>/dev/null || true
+          cp -f /tmp/bepinex-il2cpp/winhttp.dll res/bepinex/il2cpp/ 2>/dev/null || true
+          cp -f /tmp/bepinex-il2cpp/doorstop_config.ini res/bepinex/il2cpp/ 2>/dev/null || true
 
       - name: Build Splitux
         run: |
@@ -92,15 +116,22 @@ jobs:
           cp -r res/* release/splitux/res/
           cp LICENSE release/splitux/ 2>/dev/null || true
 
-          # Create archive
+          # Copy scripts and desktop file
+          cp launch.sh release/splitux/
+          cp install.sh release/splitux/
+          cp splitux.sh release/splitux/
+          cp splitux.desktop release/splitux/
+          chmod +x release/splitux/launch.sh release/splitux/install.sh release/splitux/splitux.sh
+
+          # Create zip archive
           cd release
-          tar -czvf splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz splitux/
+          zip -r splitux-${{ steps.version.outputs.version }}-linux-x86_64.zip splitux/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: splitux-${{ steps.version.outputs.version }}-linux-x86_64
-          path: release/splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz
+          path: release/splitux-${{ steps.version.outputs.version }}-linux-x86_64.zip
 
   release:
     needs: build
@@ -156,6 +187,6 @@ jobs:
           generate_release_notes: ${{ steps.version.outputs.is_nightly != 'true' }}
           body: ${{ steps.version.outputs.is_nightly == 'true' && 'Automated nightly build. May be unstable.' || '' }}
           files: |
-            splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz
+            splitux-${{ steps.version.outputs.version }}-linux-x86_64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

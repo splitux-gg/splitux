@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Splitux
+Comment=Local co-op split-screen gaming for Linux
+Exec=splitux
+Icon=splitux
+Terminal=false
+Type=Application
+Categories=Game;
+Keywords=splitscreen;couch;coop;gaming;multiplayer;
