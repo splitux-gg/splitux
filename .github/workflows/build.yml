@@ -30,10 +30,10 @@ jobs:
         run: |
           pacman-key --init
           pacman -Syu --noconfirm
-          pacman -S --noconfirm \
-            git rust cargo sdl2 \
+          pacman -S --noconfirm --needed \
+            git rust sdl2 \
             p7zip unzip curl wget \
-            libx11 libudev0 openssl
+            libx11 systemd-libs openssl
 
       - name: Checkout
         uses: actions/checkout@v4
