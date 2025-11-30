@@ -169,11 +169,11 @@ impl eframe::App for PartyApp {
         if !self.is_lite() {
             egui::SidePanel::left("games_panel")
                 .resizable(false)
-                .exact_width(200.0)
+                .exact_width(160.0)
                 .frame(egui::Frame::NONE
                     .fill(super::theme::colors::BG_MID)
-                    .inner_margin(egui::Margin::same(8))
-                    .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
+                    .inner_margin(egui::Margin::same(8)))
+                .show_separator_line(true)
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
@@ -185,11 +185,11 @@ impl eframe::App for PartyApp {
         if self.cur_page == MenuPage::Instances {
             egui::SidePanel::right("devices_panel")
                 .resizable(false)
-                .exact_width(180.0)
+                .exact_width(200.0)
                 .frame(egui::Frame::NONE
                     .fill(super::theme::colors::BG_MID)
-                    .inner_margin(egui::Margin::same(8))
-                    .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
+                    .inner_margin(egui::Margin { left: 16, right: 8, top: 8, bottom: 8 }))
+                .show_separator_line(true)
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
@@ -201,7 +201,7 @@ impl eframe::App for PartyApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE
                 .fill(super::theme::colors::BG_DARK)
-                .inner_margin(egui::Margin::same(0)))
+                .inner_margin(egui::Margin { left: 16, right: 8, top: 0, bottom: 8 }))
             .show(ctx, |ui| {
             if self.task.is_some() {
                 ui.disable();

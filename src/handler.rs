@@ -302,12 +302,134 @@ impl Handler {
         handler
     }
 
-    pub fn icon(&self) -> ImageSource<'_> {
-        if self.path_handler.join("icon.png").exists() {
-            format!("file://{}/icon.png", self.path_handler.display()).into()
-        } else {
-            egui::include_image!("../res/executable_icon.png")
+    /// Find a file in Steam's librarycache for this app
+    /// Steam stores files in: {STEAM}/appcache/librarycache/{appid}/{hash}/{filename}
+    /// or directly as: {STEAM}/appcache/librarycache/{appid}/{filename}
+    fn find_steam_cache_file(&self, filename: &str) -> Option<std::path::PathBuf> {
+        use crate::paths::PATH_STEAM;
+
+        let appid = self.steam_appid?;
+        let app_cache = PATH_STEAM.join("appcache/librarycache").join(appid.to_string());
+
+        if !app_cache.exists() {
+            return None;
         }
+
+        // Check directly in app folder
+        let direct_path = app_cache.join(filename);
+        if direct_path.exists() {
+            return Some(direct_path);
+        }
+
+        // Search in hash subfolders
+        if let Ok(entries) = std::fs::read_dir(&app_cache) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    let file_path = entry.path().join(filename);
+                    if file_path.exists() {
+                        return Some(file_path);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Find the small icon (32x32 jpg) directly in the librarycache app folder
+    /// These are stored as {hash}.jpg directly in the app folder (not in subfolders)
+    /// The icon files have hash names (not library_*, header*, logo*, etc.)
+    fn find_steam_icon(&self) -> Option<std::path::PathBuf> {
+        use crate::paths::PATH_STEAM;
+
+        let appid = self.steam_appid?;
+        let app_cache = PATH_STEAM.join("appcache/librarycache").join(appid.to_string());
+
+        if !app_cache.exists() {
+            return None;
+        }
+
+        // Look for image files directly in the app folder (not in subfolders)
+        // Icon files have hash names like "b3a992fd5991bd2f4c956d58e062b0ce2988d6cd.jpg"
+        // Skip files named library_*, header*, logo* as those are other artwork
+        if let Ok(entries) = std::fs::read_dir(&app_cache) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                        // Skip known non-icon files
+                        if filename.starts_with("library_")
+                            || filename.starts_with("header")
+                            || filename.starts_with("logo") {
+                            continue;
+                        }
+
+                        if let Some(ext) = path.extension() {
+                            if ext == "jpg" || ext == "png" || ext == "ico" {
+                                return Some(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn icon(&self) -> ImageSource<'_> {
+        // Check for local icon first (supports .png, .jpg, .ico)
+        let local_icon_png = self.path_handler.join("icon.png");
+        let local_icon_jpg = self.path_handler.join("icon.jpg");
+        let local_icon_ico = self.path_handler.join("icon.ico");
+        if local_icon_png.exists() {
+            return format!("file://{}", local_icon_png.display()).into();
+        }
+        if local_icon_jpg.exists() {
+            return format!("file://{}", local_icon_jpg.display()).into();
+        }
+        if local_icon_ico.exists() {
+            return format!("file://{}", local_icon_ico.display()).into();
+        }
+
+        // Try Steam's local cache - small icon (32x32) in the app folder root
+        if let Some(cached) = self.find_steam_icon() {
+            return format!("file://{}", cached.display()).into();
+        }
+
+        // Fallback to default icon
+        egui::include_image!("../res/executable_icon.png")
+    }
+
+    /// Returns the box art (library_600x900.jpg) for display when no logo available
+    pub fn box_art(&self) -> Option<String> {
+        self.find_steam_cache_file("library_600x900.jpg")
+            .map(|p| format!("file://{}", p.display()))
+    }
+
+    /// Returns the game logo from Steam cache if available
+    pub fn logo_image(&self) -> Option<String> {
+        self.find_steam_cache_file("logo.png")
+            .map(|p| format!("file://{}", p.display()))
+    }
+
+    /// Returns the Steam library hero image (1920x620 banner) from local cache
+    pub fn hero_image(&self) -> Option<String> {
+        self.find_steam_cache_file("library_hero.jpg")
+            .map(|p| format!("file://{}", p.display()))
+    }
+
+    /// Returns the Steam header image (smaller banner) from local cache
+    pub fn header_image(&self) -> Option<String> {
+        // Check for locally cached header in handler directory first
+        let local_header = self.path_handler.join("imgs").join("steam_header.jpg");
+        if local_header.exists() {
+            return Some(format!("file://{}", local_header.display()));
+        }
+
+        // Then check Steam's local cache
+        self.find_steam_cache_file("library_header.jpg")
+            .map(|p| format!("file://{}", p.display()))
     }
 
     pub fn display(&self) -> &str {

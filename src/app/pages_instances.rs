@@ -20,7 +20,7 @@ impl PartyApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     // Add instance control
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_SOUTH.png")).max_height(16.0));
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_A.png")).max_height(16.0));
                     ui.label(" / Z / Right-Click:");
                     let add_text = match self.instance_add_dev {
                         None => "Add Instance",
@@ -33,7 +33,7 @@ impl PartyApp {
                     ui.add_space(16.0);
 
                     // Remove/Cancel control
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_EAST.png")).max_height(16.0));
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_B.png")).max_height(16.0));
                     ui.label(" / X:");
                     let remove_text = match self.instance_add_dev {
                         None => "Remove",
@@ -46,9 +46,23 @@ impl PartyApp {
                     ui.add_space(16.0);
 
                     // Invite control
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_NORTH.png")).max_height(16.0));
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_Y.png")).max_height(16.0));
                     ui.label(" / A:");
                     ui.label(RichText::new("Invite Device").strong());
+
+                    ui.add_space(16.0);
+                    ui.add(egui::Separator::default().vertical());
+                    ui.add_space(16.0);
+
+                    // Navigation hints
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_DPAD.png")).max_height(16.0));
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_STICK_L.png")).max_height(16.0));
+                    ui.label(RichText::new("Navigate").strong());
+
+                    ui.add_space(8.0);
+
+                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_STICK_R.png")).max_height(16.0));
+                    ui.label(RichText::new("Scroll").strong());
                 });
             });
         ui.add_space(8.0);
@@ -109,7 +123,8 @@ impl PartyApp {
                         if self.instance_add_dev == None {
                             let invitebtn = ui.add(
                                 egui::Button::image_and_text(
-                                    egui::include_image!("../../res/BTN_NORTH.png"),
+                                    egui::Image::new(egui::include_image!("../../res/BTN_Y.png"))
+                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                     " Invite Device",
                                 )
                                 .min_size(egui::vec2(0.0, 26.0)),
@@ -157,7 +172,8 @@ impl PartyApp {
                 ui.add_space(12.0);
                 let start_btn = ui.add(
                     egui::Button::image_and_text(
-                        egui::include_image!("../../res/BTN_START.png"),
+                        egui::Image::new(egui::include_image!("../../res/BTN_A.png"))
+                            .fit_to_exact_size(egui::vec2(24.0, 24.0)),
                         "  Start Game  ",
                     )
                     .min_size(egui::vec2(180.0, 48.0))

@@ -73,6 +73,7 @@ detect_distro() {
 declare -A PKG_ARCH=(
     [fuse-overlayfs]="fuse-overlayfs"
     [bubblewrap]="bubblewrap"
+    [slirp4netns]="slirp4netns"
     [rust]="rust"
     [git]="git"
     [curl]="curl"
@@ -106,6 +107,7 @@ declare -A PKG_FEDORA=(
     [gamescope]="gamescope"
     [fuse-overlayfs]="fuse-overlayfs"
     [bubblewrap]="bubblewrap"
+    [slirp4netns]="slirp4netns"
     [rust]="rust cargo"
     [git]="git"
     [curl]="curl"
@@ -119,6 +121,7 @@ declare -A PKG_UBUNTU=(
     [gamescope]="gamescope"
     [fuse-overlayfs]="fuse-overlayfs"
     [bubblewrap]="bubblewrap"
+    [slirp4netns]="slirp4netns"
     [rust]="rustc cargo"
     [git]="git"
     [curl]="curl"
@@ -132,6 +135,7 @@ declare -A PKG_OPENSUSE=(
     [gamescope]="gamescope"
     [fuse-overlayfs]="fuse-overlayfs"
     [bubblewrap]="bubblewrap"
+    [slirp4netns]="slirp4netns"
     [rust]="rust cargo"
     [git]="git"
     [curl]="curl"
@@ -231,7 +235,7 @@ check_deps() {
 
     # Runtime dependencies (always needed)
     # Note: gamescope-splitux is built from source, not a package
-    local runtime_deps=(fuse-overlayfs bubblewrap)
+    local runtime_deps=(fuse-overlayfs bubblewrap slirp4netns)
     for dep in "${runtime_deps[@]}"; do
         local cmd="$dep"
         [[ "$dep" == "bubblewrap" ]] && cmd="bwrap"
