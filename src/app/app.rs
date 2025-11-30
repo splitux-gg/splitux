@@ -9,6 +9,7 @@ use crate::input::*;
 use crate::instance::*;
 use crate::monitor::Monitor;
 use crate::profiles::*;
+use crate::registry::RegistryIndex;
 use crate::util::*;
 
 use eframe::egui;
@@ -23,6 +24,7 @@ pub enum FocusPane {
 #[derive(Eq, PartialEq, Debug)]
 pub enum MenuPage {
     Games,     // Combined home + profiles view
+    Registry,  // Browse and download handlers from online registry
     Settings,
     Instances, // Controller assignment screen (enters when "Play" pressed)
 }
@@ -67,6 +69,14 @@ pub struct PartyApp {
     pub loading_since: Option<std::time::Instant>,
     #[allow(dead_code)]
     pub task: Option<std::thread::JoinHandle<()>>,
+
+    // Registry state
+    pub registry_index: Option<RegistryIndex>,
+    pub registry_loading: bool,
+    pub registry_error: Option<String>,
+    pub registry_search: String,
+    pub registry_selected: Option<usize>,
+    pub registry_installing: Option<String>,
 }
 
 impl PartyApp {
@@ -125,6 +135,14 @@ impl PartyApp {
             loading_msg: None,
             loading_since: None,
             task: None,
+
+            // Registry state
+            registry_index: None,
+            registry_loading: false,
+            registry_error: None,
+            registry_search: String::new(),
+            registry_selected: None,
+            registry_installing: None,
         };
 
         app.spawn_task("Checking for updates", move || {
@@ -208,6 +226,7 @@ impl eframe::App for PartyApp {
             }
             match self.cur_page {
                 MenuPage::Games => self.display_page_games(ui),
+                MenuPage::Registry => self.display_page_registry(ui),
                 MenuPage::Settings => self.display_page_settings(ui),
                 MenuPage::Instances => self.display_page_instances(ui),
             }

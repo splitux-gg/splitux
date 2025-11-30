@@ -9,6 +9,7 @@ mod focus;
 mod pages_edit_handler;
 mod pages_games;
 mod pages_instances;
+mod pages_registry;
 mod pages_settings;
 pub mod theme;
 

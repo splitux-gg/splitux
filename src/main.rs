@@ -1,6 +1,7 @@
 mod app;
 mod backend;
 mod bwrap;
+mod game_patches;
 mod gamescope;
 mod goldberg;
 mod handler;
@@ -12,6 +13,7 @@ mod paths;
 mod photon;
 mod profiles;
 mod proton;
+mod registry;
 mod util;
 mod wm;
 

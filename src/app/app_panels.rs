@@ -33,6 +33,22 @@ impl PartyApp {
                 self.cur_page = games_page;
             }
 
+            // Registry tab (only show in full mode, not lite)
+            if !self.is_lite() {
+                let registry_btn = ui.add(
+                    egui::Button::new("Registry")
+                        .min_size(egui::vec2(70.0, 28.0))
+                        .selected(self.cur_page == MenuPage::Registry),
+                );
+                if registry_btn.clicked() {
+                    self.cur_page = MenuPage::Registry;
+                    // Fetch registry if not already loaded
+                    if self.registry_index.is_none() && !self.registry_loading {
+                        self.fetch_registry();
+                    }
+                }
+            }
+
             // Settings tab
             let settings_btn = ui.add(
                 egui::Button::new("Settings")
