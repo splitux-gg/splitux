@@ -33,7 +33,8 @@ jobs:
           pacman -S --noconfirm --needed \
             git rust sdl2 \
             p7zip unzip curl wget \
-            libx11 systemd-libs openssl
+            libx11 systemd-libs openssl \
+            bubblewrap fuse-overlayfs slirp4netns
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,15 +57,42 @@ jobs:
           echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
           echo "is_nightly=$IS_NIGHTLY" >> $GITHUB_OUTPUT
 
+      - name: Fetch dependencies
+        run: |
+          mkdir -p res/goldberg res/gamescope-splitux res/bepinex
+
+          # Download gamescope-splitux
+          curl -fsSL https://github.com/gabrielgad/gamescope-splitux/releases/download/v1.0.0/gamescope-splitux-v1.0.0.zip -o /tmp/gsc.zip
+          unzip -q /tmp/gsc.zip -d res/gamescope-splitux
+
+          # Download Goldberg
+          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-linux-release.tar.bz2 -o /tmp/gbe.tar.bz2
+          tar -xjf /tmp/gbe.tar.bz2 -C /tmp
+          mkdir -p res/goldberg/{linux64,linux32}
+          cp -f /tmp/release/regular/x64/*.so res/goldberg/linux64/ 2>/dev/null || true
+          cp -f /tmp/release/regular/x32/*.so res/goldberg/linux32/ 2>/dev/null || true
+
       - name: Build Splitux
         run: |
-          chmod +x splitux.sh
-          ./splitux.sh build
+          cargo build --release
 
       - name: Package release
         run: |
-          mkdir -p release
-          cp -r build release/splitux
+          mkdir -p release/splitux/bin release/splitux/res
+
+          # Copy binary
+          cp target/release/splitux release/splitux/
+          chmod +x release/splitux/splitux
+
+          # Copy gamescope-splitux
+          cp res/gamescope-splitux/bin/* release/splitux/bin/
+          chmod +x release/splitux/bin/*
+
+          # Copy resources
+          cp -r res/* release/splitux/res/
+          cp LICENSE release/splitux/ 2>/dev/null || true
+
+          # Create archive
           cd release
           tar -czvf splitux-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz splitux/
 
