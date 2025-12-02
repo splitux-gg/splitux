@@ -10,6 +10,10 @@ Split-screen gaming on Linux
     <img src=".github/assets/launcher.png" width="80%" />
 </p>
 
+<p align="center">
+    <img src=".github/assets/gameplay1.png" width="80%" />
+</p>
+
 ## Features
 
 - **Split-screen multiplayer** - Run multiple game instances with automatic window tiling
