@@ -132,7 +132,7 @@ impl PartyApp {
                                 }
                             }
                         }
-                    } else {
+                    } else if !on_instances_page {
                         key = Some(Key::ArrowUp);
                     }
                 }
@@ -157,7 +157,7 @@ impl PartyApp {
                                 self.info_pane_index += 1;
                             }
                         }
-                    } else {
+                    } else if !on_instances_page {
                         key = Some(Key::ArrowDown);
                     }
                 }
@@ -183,7 +183,7 @@ impl PartyApp {
                                 self.focus_pane = FocusPane::ActionBar;
                             }
                         }
-                    } else {
+                    } else if !on_instances_page {
                         key = Some(Key::ArrowLeft);
                     }
                 }
@@ -210,7 +210,7 @@ impl PartyApp {
                                 // Already at rightmost - do nothing
                             }
                         }
-                    } else {
+                    } else if !on_instances_page {
                         key = Some(Key::ArrowRight);
                     }
                 }
