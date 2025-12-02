@@ -10,6 +10,7 @@ pub const REGISTRY_BASE: &str =
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct RegistryIndex {
+    #[allow(dead_code)]
     pub version: u32,
     pub handlers: Vec<RegistryEntry>,
 }
@@ -126,6 +127,7 @@ pub fn download_handler(entry: &RegistryEntry) -> Result<(), Box<dyn Error>> {
 }
 
 /// Remove an installed handler from the registry
+#[allow(dead_code)]
 pub fn uninstall_handler(entry: &RegistryEntry) -> Result<(), Box<dyn Error>> {
     let handler_dir = entry.local_path();
     if handler_dir.exists() {

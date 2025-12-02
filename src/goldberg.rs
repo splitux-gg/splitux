@@ -72,6 +72,10 @@ fn detect_bitness(path: &Path, filename: &str) -> bool {
 /// Returns relative paths from the game root along with bitness information
 pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn std::error::Error>> {
     let mut dlls = Vec::new();
+    // Track directories containing 64-bit steam_api DLLs (for inferring GameNetworkingSockets bitness)
+    let mut dirs_with_64bit_steam_api: Vec<PathBuf> = Vec::new();
+    // Defer GameNetworkingSockets detection until we know steam_api bitness
+    let mut networking_sockets_paths: Vec<(PathBuf, PathBuf)> = Vec::new(); // (full_path, rel_path)
 
     for entry in WalkDir::new(game_dir).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -85,6 +89,11 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
             {
                 if let Ok(rel_path) = path.strip_prefix(game_dir) {
                     let is_64bit = detect_bitness(path, &filename_lower);
+                    if is_64bit {
+                        if let Some(dir) = rel_path.parent() {
+                            dirs_with_64bit_steam_api.push(dir.to_path_buf());
+                        }
+                    }
                     dlls.push(SteamApiDll {
                         rel_path: rel_path.to_path_buf(),
                         is_64bit,
@@ -97,23 +106,37 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
                     );
                 }
             }
-            // GameNetworkingSockets.dll (used by games like The Riftbreaker)
+            // GameNetworkingSockets.dll - defer bitness detection
             else if filename_lower == "gamenetworkingsockets.dll" {
                 if let Ok(rel_path) = path.strip_prefix(game_dir) {
-                    let is_64bit = detect_bitness(path, &filename_lower);
-                    dlls.push(SteamApiDll {
-                        rel_path: rel_path.to_path_buf(),
-                        is_64bit,
-                        dll_type: SteamDllType::NetworkingSockets,
-                    });
-                    println!(
-                        "[splitux] Found GameNetworkingSockets: {} ({})",
-                        rel_path.display(),
-                        if is_64bit { "64-bit" } else { "32-bit" }
-                    );
+                    networking_sockets_paths.push((path.to_path_buf(), rel_path.to_path_buf()));
                 }
             }
         }
+    }
+
+    // Now process GameNetworkingSockets.dll with knowledge of steam_api locations
+    for (full_path, rel_path) in networking_sockets_paths {
+        let dll_dir = rel_path.parent().map(|p| p.to_path_buf());
+
+        // Infer bitness: if steam_api64.dll exists in same directory, it's 64-bit
+        let is_64bit = if let Some(ref dir) = dll_dir {
+            dirs_with_64bit_steam_api.iter().any(|d| d == dir)
+        } else {
+            // Fallback to path-based detection
+            detect_bitness(&full_path, "gamenetworkingsockets.dll")
+        };
+
+        dlls.push(SteamApiDll {
+            rel_path: rel_path.clone(),
+            is_64bit,
+            dll_type: SteamDllType::NetworkingSockets,
+        });
+        println!(
+            "[splitux] Found GameNetworkingSockets: {} ({})",
+            rel_path.display(),
+            if is_64bit { "64-bit" } else { "32-bit" }
+        );
     }
 
     Ok(dlls)
@@ -124,6 +147,7 @@ fn write_steam_settings(
     dir: &Path,
     config: &GoldbergConfig,
     handler_settings: &HashMap<String, String>,
+    disable_networking: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // steam_appid.txt
     fs::write(dir.join("steam_appid.txt"), config.app_id.to_string())?;
@@ -136,6 +160,7 @@ fn write_steam_settings(
     fs::write(dir.join("configs.user.ini"), user_ini)?;
 
     // configs.main.ini
+    let disable_networking_val = if disable_networking { 1 } else { 0 };
     let main_ini = format!(
         r#"[main::general]
 new_app_ticket=1
@@ -145,13 +170,14 @@ matchmaking_server_details_via_source_query=0
 
 [main::connectivity]
 disable_lan_only=0
-disable_networking=0
+disable_networking={}
 listen_port={}
 offline=0
 disable_lobby_creation=0
 disable_source_query=0
 share_leaderboards_over_network=0
 "#,
+        disable_networking_val,
         config.listen_port
     );
     fs::write(dir.join("configs.main.ini"), main_ini)?;
@@ -195,6 +221,7 @@ pub fn create_instance_overlay(
     config: &GoldbergConfig,
     is_windows: bool,
     handler_settings: &HashMap<String, String>,
+    disable_networking: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let overlay_dir = PATH_PARTY
         .join("tmp")
@@ -256,12 +283,12 @@ pub fn create_instance_overlay(
         // Create steam_settings next to DLL
         let settings_dir = target_dir.join("steam_settings");
         fs::create_dir_all(&settings_dir)?;
-        write_steam_settings(&settings_dir, config, handler_settings)?;
+        write_steam_settings(&settings_dir, config, handler_settings, disable_networking)?;
     }
 
     println!(
-        "[splitux] Goldberg overlay {} created: Steam ID {}, Port {}, Broadcasts: {:?}",
-        instance_idx, config.steam_id, config.listen_port, config.broadcast_ports
+        "[splitux] Goldberg overlay {} created: Steam ID {}, Port {}, Broadcasts: {:?}, disable_networking: {}",
+        instance_idx, config.steam_id, config.listen_port, config.broadcast_ports, disable_networking
     );
 
     Ok(overlay_dir)
@@ -275,11 +302,12 @@ pub fn create_all_overlays(
     configs: &[GoldbergConfig],
     is_windows: bool,
     handler_settings: &HashMap<String, String>,
+    disable_networking: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let mut overlays = Vec::new();
 
     for (i, config) in configs.iter().enumerate() {
-        let overlay = create_instance_overlay(i, dlls, config, is_windows, handler_settings)?;
+        let overlay = create_instance_overlay(i, dlls, config, is_windows, handler_settings, disable_networking)?;
         overlays.push(overlay);
     }
 

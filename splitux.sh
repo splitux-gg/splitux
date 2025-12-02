@@ -567,9 +567,11 @@ do_build() {
     cp "$SCRIPT_DIR/LICENSE" "$BUILD_DIR/" 2>/dev/null || true
     cp -r "$SCRIPT_DIR/res/"* "$BUILD_DIR/res/" 2>/dev/null || true
 
-    # Copy gamescope-splitux from downloaded binaries
+    # Copy gamescope-splitux from downloaded binaries (rename to gamescope-splitux)
     if [[ -f "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescope" ]]; then
-        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/"* "$BUILD_DIR/bin/"
+        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescope" "$BUILD_DIR/bin/gamescope-splitux"
+        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescopectl" "$BUILD_DIR/bin/" 2>/dev/null || true
+        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescopereaper" "$BUILD_DIR/bin/" 2>/dev/null || true
         chmod +x "$BUILD_DIR/bin/"*
         info "gamescope-splitux installed to build/bin/"
     else

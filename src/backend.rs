@@ -72,7 +72,13 @@ fn create_goldberg_overlays(
     is_windows: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let game_root = PathBuf::from(handler.get_game_rootpath()?);
-    let dlls = goldberg::find_steam_api_dlls(&game_root)?;
+    let mut dlls = goldberg::find_steam_api_dlls(&game_root)?;
+
+    // Filter out NetworkingSockets unless explicitly enabled
+    // Most games work better with disable_steam config patch instead
+    if !handler.goldberg_networking_sockets {
+        dlls.retain(|dll| dll.dll_type != goldberg::SteamDllType::NetworkingSockets);
+    }
 
     if dlls.is_empty() {
         println!("[splitux] Warning: Goldberg backend enabled but no Steam API DLLs found");
@@ -108,7 +114,7 @@ fn create_goldberg_overlays(
         })
         .collect();
 
-    goldberg::create_all_overlays(&dlls, &configs, is_windows, &handler.goldberg_settings)
+    goldberg::create_all_overlays(&dlls, &configs, is_windows, &handler.goldberg_settings, handler.goldberg_disable_networking)
 }
 
 /// Create Photon/BepInEx overlays for all instances

@@ -363,19 +363,36 @@ impl DeviceMonitor {
 
 /// Try to open a single device by path and create an InputDevice
 pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
-    // Retry a few times - udev events can arrive before device is ready
+    // Retry with exponential backoff - udev events can arrive before device is ready
+    // and permission changes (udev rules) may take time to apply
     let dev = {
         let mut attempts = 0;
+        let max_attempts = 8;
+        let mut delay_ms = 50u64;
         loop {
             match Device::open(path) {
                 Ok(d) => break d,
                 Err(e) => {
                     attempts += 1;
-                    if attempts >= 5 {
-                        println!("[splitux] evdev: Failed to open {} after {} attempts: {}", path, attempts, e);
+                    let is_permission_error = e.kind() == std::io::ErrorKind::PermissionDenied;
+
+                    if attempts >= max_attempts {
+                        if is_permission_error {
+                            println!("[splitux] evdev: Permission denied for {} - ensure your user is in the 'input' group (run: sudo usermod -aG input $USER)", path);
+                        } else {
+                            println!("[splitux] evdev: Failed to open {} after {} attempts: {}", path, attempts, e);
+                        }
                         return None;
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+
+                    // Use longer delays for permission errors (udev rules may be slow)
+                    let wait_time = if is_permission_error {
+                        delay_ms * 2
+                    } else {
+                        delay_ms
+                    };
+                    std::thread::sleep(std::time::Duration::from_millis(wait_time));
+                    delay_ms = (delay_ms * 2).min(500); // Exponential backoff, max 500ms
                 }
             }
         }

@@ -4,6 +4,7 @@ use std::process::Command;
 use crate::app::{PartyConfig, PadFilterType, WindowManagerType};
 use crate::backend::{self, MultiplayerBackend};
 use crate::bwrap;
+use crate::game_patches;
 use crate::gamescope;
 use crate::handler::*;
 use crate::input::*;
@@ -216,51 +217,55 @@ pub fn launch_cmds(
         gamescope::add_input_holding_args(&mut cmd, instance, input_devices, cfg);
         gamescope::add_separator(&mut cmd);
 
-        // 4. Add bwrap container
-        bwrap::add_base_args(&mut cmd);
+        // 4. Add bwrap container (unless disabled)
+        if !h.disable_bwrap {
+            bwrap::add_base_args(&mut cmd);
 
-        // Get gamepad paths for this instance
-        let gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
-        if !gamepad_paths.is_empty() {
-            println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(","));
-        }
+            // Get gamepad paths for this instance
+            let gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
+            if !gamepad_paths.is_empty() {
+                println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(","));
+            }
 
-        // Set up SDL environment inside container
-        bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
+            // Set up SDL environment inside container
+            bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
 
-        // Block unassigned input devices
-        bwrap::block_unassigned_devices(&mut cmd, input_devices, &instance.devices, i);
+            // Block unassigned input devices
+            bwrap::block_unassigned_devices(&mut cmd, input_devices, &instance.devices, i);
 
-        // 5. Profile bindings
-        if win {
-            let path_pfx_user = proton::get_prefix_user_path(cfg, i);
-            cmd.arg("--bind")
-                .args([&path_prof.join("windata"), &path_pfx_user]);
+            // 5. Profile bindings
+            if win {
+                let path_pfx_user = proton::get_prefix_user_path(cfg, i);
+                cmd.arg("--bind")
+                    .args([&path_prof.join("windata"), &path_pfx_user]);
+            } else {
+                let path_prof_home = path_prof.join("home");
+                cmd.env("HOME", &path_prof_home);
+                // Also bind the Steam directory as the Steam runtimes look for HOME/.steam
+                if !runtime.is_empty() || h.steam_appid.is_some() {
+                    cmd.args([
+                        "--bind",
+                        &PATH_STEAM.to_string_lossy(),
+                        &path_prof_home.join(".steam").to_string_lossy(),
+                    ]);
+                }
+            }
+
+            // 6. Game null paths (disable specific game features)
+            for subpath in &h.game_null_paths {
+                let game_subpath = gamedir.join(subpath);
+                if game_subpath.is_file() {
+                    cmd.args(["--bind", "/dev/null", &game_subpath.to_string_lossy()]);
+                } else if game_subpath.is_dir() {
+                    cmd.args([
+                        "--bind",
+                        &PATH_PARTY.join("tmp/null").to_string_lossy(),
+                        &game_subpath.to_string_lossy(),
+                    ]);
+                }
+            }
         } else {
-            let path_prof_home = path_prof.join("home");
-            cmd.env("HOME", &path_prof_home);
-            // Also bind the Steam directory as the Steam runtimes look for HOME/.steam
-            if !runtime.is_empty() || h.steam_appid.is_some() {
-                cmd.args([
-                    "--bind",
-                    &PATH_STEAM.to_string_lossy(),
-                    &path_prof_home.join(".steam").to_string_lossy(),
-                ]);
-            }
-        }
-
-        // 6. Game null paths (disable specific game features)
-        for subpath in &h.game_null_paths {
-            let game_subpath = gamedir.join(subpath);
-            if game_subpath.is_file() {
-                cmd.args(["--bind", "/dev/null", &game_subpath.to_string_lossy()]);
-            } else if game_subpath.is_dir() {
-                cmd.args([
-                    "--bind",
-                    &PATH_PARTY.join("tmp/null").to_string_lossy(),
-                    &game_subpath.to_string_lossy(),
-                ]);
-            }
+            println!("[splitux] Instance {}: bwrap disabled, skipping container", i);
         }
 
         // 7. Runtime (Proton/Wine or Steam Runtime)
@@ -353,10 +358,11 @@ fn print_launch_cmds(cmds: &Vec<Command>) {
 /// Mount game directories with fuse-overlayfs
 ///
 /// Creates overlay mounts for each instance with:
-/// 1. Backend overlay (if enabled) - Goldberg DLLs or BepInEx files
-/// 2. Handler overlay (if exists) - custom handler files
-/// 3. Base game directory - read-only game files
-/// 4. Upper dir - per-profile save data (read-write)
+/// 1. Game patches overlay (if defined) - YAML-defined config file modifications
+/// 2. Backend overlay (if enabled) - Goldberg DLLs or BepInEx files
+/// 3. Handler overlay (if exists) - binary files from required_mods
+/// 4. Base game directory - read-only game files
+/// 5. Upper dir - per-profile save data (read-write)
 pub fn fuse_overlayfs_mount_gamedirs(
     h: &Handler,
     instances: &Vec<Instance>,
@@ -364,24 +370,47 @@ pub fn fuse_overlayfs_mount_gamedirs(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_dir = PATH_PARTY.join("tmp");
     let game_root = h.get_game_rootpath()?;
+    let game_root_path = Path::new(&game_root);
     let gamename = h.handler_dir_name().to_string();
+
+    // Apply game patches if defined (creates patched files in temp overlay)
+    let patches_overlay = if !h.game_patches.is_empty() {
+        let patches_dir = tmp_dir.join("game-patches");
+        std::fs::create_dir_all(&patches_dir)?;
+
+        // Clear previous patches
+        if patches_dir.exists() {
+            std::fs::remove_dir_all(&patches_dir)?;
+            std::fs::create_dir_all(&patches_dir)?;
+        }
+
+        game_patches::apply_game_patches(game_root_path, &patches_dir, &h.game_patches)?;
+        Some(patches_dir)
+    } else {
+        None
+    };
 
     for (i, instance) in instances.iter().enumerate() {
         // Build lowerdir stack (leftmost has highest priority)
         let mut lowerdir_parts: Vec<String> = Vec::new();
 
-        // 1. Backend overlay first (highest priority)
+        // 1. Game patches overlay first (highest priority)
+        if let Some(ref patches_dir) = patches_overlay {
+            lowerdir_parts.push(patches_dir.display().to_string());
+        }
+
+        // 2. Backend overlay (Goldberg DLLs or BepInEx files)
         if let Some(overlay) = backend_overlays.get(i) {
             lowerdir_parts.push(overlay.display().to_string());
         }
 
-        // 2. Handler overlay (if exists)
+        // 3. Handler overlay for required_mods binary files (if exists)
         let handler_overlay = h.path_handler.join("overlay");
         if handler_overlay.exists() {
             lowerdir_parts.push(handler_overlay.display().to_string());
         }
 
-        // 3. Base game directory (lowest priority)
+        // 4. Base game directory (lowest priority)
         lowerdir_parts.push(game_root.clone());
 
         let path_lowerdir = lowerdir_parts.join(":");

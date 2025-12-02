@@ -21,6 +21,13 @@ pub enum FocusPane {
     InfoPane,   // Right side - scrollable info area with buttons
 }
 
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
+pub enum InstanceFocus {
+    #[default]
+    Devices,       // Device/instance cards
+    LaunchOptions, // Launch options bar at bottom
+}
+
 #[derive(Eq, PartialEq, Debug)]
 pub enum MenuPage {
     Games,     // Combined home + profiles view
@@ -41,6 +48,8 @@ pub struct PartyApp {
     pub device_monitor: Option<DeviceMonitor>,
     pub instances: Vec<Instance>,
     pub instance_add_dev: Option<usize>,
+    pub instance_focus: InstanceFocus,
+    pub launch_option_index: usize, // 0=Split style, 1=KB/Mouse support
     pub profiles: Vec<String>,
     pub game_profiles: HashMap<String, usize>, // Maps handler path -> selected profile index
 
@@ -116,6 +125,8 @@ impl PartyApp {
             device_monitor,
             instances: Vec::new(),
             instance_add_dev: None,
+            instance_focus: InstanceFocus::default(),
+            launch_option_index: 0,
             profiles,
             game_profiles: HashMap::new(),
             handlers,

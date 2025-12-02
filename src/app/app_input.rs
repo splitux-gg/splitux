@@ -1,6 +1,6 @@
 // Input handling for gamepad/keyboard navigation
 
-use super::app::{FocusPane, MenuPage, PartyApp};
+use super::app::{FocusPane, InstanceFocus, MenuPage, PartyApp};
 use crate::input::*;
 
 use eframe::egui::{self, Key, Vec2};
@@ -26,6 +26,7 @@ impl PartyApp {
         let dropdown_selection = self.profile_dropdown_selection;
         let profiles_len = self.profiles.len();
         let on_games_page = self.cur_page == MenuPage::Games;
+        let on_instances_page = self.cur_page == MenuPage::Instances;
         let has_handlers = !self.handlers.is_empty();
 
         for pad in &mut self.input_devices {
@@ -298,14 +299,36 @@ impl PartyApp {
             }
             match self.input_devices[i].poll() {
                 Some(PadButton::ABtn) | Some(PadButton::ZKey) | Some(PadButton::RightClick) => {
+                    // Handle A button based on current focus
+                    if self.instance_focus == InstanceFocus::LaunchOptions {
+                        // Toggle the focused launch option
+                        let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                        match self.launch_option_index {
+                            0 if self.instances.len() == 2 => {
+                                // Toggle split style
+                                self.options.vertical_two_player = !self.options.vertical_two_player;
+                            }
+                            idx if idx == max_options - 1 => {
+                                // Toggle KB/mouse support (last option)
+                                self.options.input_holding = !self.options.input_holding;
+                            }
+                            _ => {}
+                        }
+                        i += 1;
+                        continue;
+                    }
+
+                    // Normal device handling when focused on devices
                     if self.input_devices[i].device_type() != DeviceType::Gamepad
                         && !self.options.input_holding
                     {
+                        i += 1;
                         continue;
                     }
                     if !self.options.allow_multiple_instances_on_same_device
                         && self.is_device_in_any_instance(i)
                     {
+                        i += 1;
                         continue;
                     }
                     // Prevent same keyboard/mouse device in multiple instances due to current custom gamescope limitations
@@ -313,6 +336,7 @@ impl PartyApp {
                     if self.input_devices[i].device_type() != DeviceType::Gamepad
                         && self.is_device_in_any_instance(i)
                     {
+                        i += 1;
                         continue;
                     }
 
@@ -323,6 +347,7 @@ impl PartyApp {
                                 self.instance_add_dev = None;
                                 self.instances[inst].devices.push(i);
                             } else {
+                                i += 1;
                                 continue;
                             }
                         }
@@ -339,12 +364,16 @@ impl PartyApp {
                     }
                 }
                 Some(PadButton::BBtn) | Some(PadButton::XKey) => {
-                    if self.instance_add_dev != None {
+                    if self.instance_focus == InstanceFocus::LaunchOptions {
+                        // Move focus back to devices
+                        self.instance_focus = InstanceFocus::Devices;
+                    } else if self.instance_add_dev != None {
                         self.instance_add_dev = None;
                     } else if self.is_device_in_any_instance(i) {
                         self.remove_device(i);
                     } else if self.instances.len() < 1 {
                         self.cur_page = MenuPage::Games;
+                        self.instance_focus = InstanceFocus::Devices;
                     }
                 }
                 Some(PadButton::YBtn) | Some(PadButton::AKey) => {
@@ -357,6 +386,35 @@ impl PartyApp {
                 Some(PadButton::StartBtn) => {
                     if self.instances.len() > 0 && self.is_device_in_any_instance(i) {
                         self.prepare_game_launch();
+                    }
+                }
+                // D-pad navigation for launch options
+                Some(PadButton::Up) => {
+                    if self.instance_focus == InstanceFocus::LaunchOptions {
+                        // Move focus back to devices area
+                        self.instance_focus = InstanceFocus::Devices;
+                    }
+                }
+                Some(PadButton::Down) => {
+                    if self.instance_focus == InstanceFocus::Devices && self.instances.len() > 0 {
+                        // Move focus to launch options
+                        self.instance_focus = InstanceFocus::LaunchOptions;
+                        self.launch_option_index = 0;
+                    }
+                }
+                Some(PadButton::Left) => {
+                    if self.instance_focus == InstanceFocus::LaunchOptions {
+                        if self.launch_option_index > 0 {
+                            self.launch_option_index -= 1;
+                        }
+                    }
+                }
+                Some(PadButton::Right) => {
+                    if self.instance_focus == InstanceFocus::LaunchOptions {
+                        let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                        if self.launch_option_index < max_options - 1 {
+                            self.launch_option_index += 1;
+                        }
                     }
                 }
                 _ => {}

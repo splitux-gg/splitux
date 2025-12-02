@@ -86,24 +86,6 @@ impl PartyApp {
         });
 
         ui.horizontal(|ui| {
-            let split_style_label = ui.label("Split style");
-            let r1 = ui.radio_value(
-                &mut self.options.vertical_two_player,
-                false,
-                "Horizontal",
-            );
-            let r2 = ui.radio_value(
-                &mut self.options.vertical_two_player,
-                true,
-                "Vertical",
-            );
-            if split_style_label.hovered() || r1.hovered() || r2.hovered() {
-                self.infotext =
-                    "DEFAULT: Horizontal\n\nChoose whether to split two-player games horizontally (above/below) instead of vertically (side by side).".to_string();
-            }
-        });
-
-        ui.horizontal(|ui| {
             let filter_label = ui.label("Controller filter");
             let r1 = ui.radio_value(
                 &mut self.options.pad_filter_type,
@@ -236,10 +218,6 @@ impl PartyApp {
         );
         let gamescope_sdl_backend_check =
             ui.checkbox(&mut self.options.gamescope_sdl_backend, "Use SDL backend");
-        let input_holding_check = ui.checkbox(
-            &mut self.options.input_holding,
-            "Enable input holding (gamescope-splitux)",
-        );
         let gamescope_force_grab_cursor_check = ui.checkbox(
             &mut self.options.gamescope_force_grab_cursor,
             "Force grab cursor for Gamescope",
@@ -250,9 +228,6 @@ impl PartyApp {
         }
         if gamescope_sdl_backend_check.hovered() {
             self.infotext = "Runs gamescope sessions using the SDL backend. This is required for multi-monitor support. If unsure, leave this checked. If gamescope sessions only show a black screen or give an error (especially on Nvidia + Wayland), try disabling this.".to_string();
-        }
-        if input_holding_check.hovered() {
-            self.infotext = "Uses gamescope-splitux with input device holding support. This allows assigning keyboards and mice to specific players. Uncheck to use system gamescope instead.".to_string();
         }
         if gamescope_force_grab_cursor_check.hovered() {
             self.infotext = "Sets the \"--force-grab-cursor\" flag in Gamescope. This keeps the cursor within the Gamescope window. If unsure, leave this unchecked.".to_string();

@@ -2,7 +2,7 @@
 
 use std::thread::sleep;
 
-use super::app::{MenuPage, PartyApp};
+use super::app::{InstanceFocus, MenuPage, PartyApp};
 use super::config::save_cfg;
 use crate::input::*;
 use crate::instance::*;
@@ -33,6 +33,8 @@ impl PartyApp {
             self.monitors = get_monitors_sdl();
             self.profiles = scan_profiles(true);
             self.instance_add_dev = None;
+            self.instance_focus = InstanceFocus::Devices;
+            self.launch_option_index = 0;
             self.cur_page = MenuPage::Instances;
         }
     }

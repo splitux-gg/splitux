@@ -168,6 +168,15 @@ pub struct Handler {
     /// Values are file contents (use empty string for empty files)
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub goldberg_settings: HashMap<String, String>,
+    /// Disable Steam Networking Sockets in Goldberg.
+    /// Set to true for games that have lobby discovery issues with SNS.
+    /// This forces the game to use legacy networking for LAN discovery.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub goldberg_disable_networking: bool,
+    /// Also replace GameNetworkingSockets.dll with Goldberg's version.
+    /// Most games work better with disable_steam config patch instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub goldberg_networking_sockets: bool,
     /// Photon-specific settings (only used when backend = photon)
     #[serde(default, skip_serializing_if = "PhotonSettings::is_empty")]
     pub photon_settings: PhotonSettings,
@@ -179,6 +188,17 @@ pub struct Handler {
     // Advanced
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub game_null_paths: Vec<String>,
+    /// Disable bwrap container (may be needed for games with networking issues)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable_bwrap: bool,
+
+    /// Game config file patches - modify game config files with key-value replacements
+    /// Outer key: file path relative to game root (e.g., "conf/settings.cfg")
+    /// Inner key-value: config key to find and new value to set
+    /// Supports set-style (set key "value"), ini-style (key=value), space-style (key value)
+    /// Falls back to line search/replace if format not detected
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub game_patches: HashMap<String, HashMap<String, String>>,
 }
 
 fn is_default_spec_ver(v: &u16) -> bool {
@@ -215,10 +235,14 @@ impl Default for Handler {
             use_goldberg: false,
             steam_appid: None,
             goldberg_settings: std::collections::HashMap::new(),
+            goldberg_disable_networking: false,
+            goldberg_networking_sockets: false,
             photon_settings: PhotonSettings::default(),
             required_mods: Vec::new(),
 
             game_null_paths: Vec::new(),
+            disable_bwrap: false,
+            game_patches: HashMap::new(),
         }
     }
 }
@@ -420,6 +444,7 @@ impl Handler {
     }
 
     /// Returns the Steam header image (smaller banner) from local cache
+    #[allow(dead_code)]
     pub fn header_image(&self) -> Option<String> {
         // Check for locally cached header in handler directory first
         let local_header = self.path_handler.join("imgs").join("steam_header.jpg");
