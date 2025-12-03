@@ -113,22 +113,6 @@ pub fn get_installed_steamapps() -> Vec<Option<steamlocate::App>> {
     return games;
 }
 
-/// Get Steam's compatdata path for a given app ID
-/// Returns the path to the compatdata folder (e.g., /mnt/games/SteamLibrary/steamapps/compatdata/361420)
-pub fn get_steam_compat_data_path(appid: u32) -> Option<std::path::PathBuf> {
-    if let Ok(steam_dir) = steamlocate::SteamDir::locate()
-        && let Ok(libraries) = steam_dir.libraries()
-    {
-        for library in libraries.flatten() {
-            let compat_path = library.path().join("steamapps/compatdata").join(appid.to_string());
-            if compat_path.exists() {
-                return Some(compat_path);
-            }
-        }
-    }
-    None
-}
-
 /// Resolve a Proton path from a name (e.g., "Proton - Experimental") or full path
 /// Returns the full path to the proton executable if found
 pub fn resolve_proton_path(proton_name: &str) -> Option<PathBuf> {

@@ -9,7 +9,7 @@ use std::process::Command;
 use crate::app::PartyConfig;
 use crate::handler::Handler;
 use crate::paths::{PATH_PARTY, PATH_STEAM, BIN_UMU_RUN};
-use crate::util::{get_steam_compat_data_path, resolve_proton_path};
+use crate::util::resolve_proton_path;
 
 /// Get the Wine prefix path for an instance
 pub fn get_prefix_path(cfg: &PartyConfig, instance_idx: usize) -> PathBuf {
@@ -43,12 +43,9 @@ pub fn setup_env(
     cmd.env("PROTONPATH", protonpath);
 
     // Steam compatibility paths
-    // Use Steam's compatdata path if available for this game, otherwise use splitux's prefix parent
-    let compat_data_path = handler
-        .steam_appid
-        .and_then(get_steam_compat_data_path)
-        .unwrap_or_else(|| path_pfx.parent().unwrap_or(&path_pfx).to_path_buf());
-    cmd.env("STEAM_COMPAT_DATA_PATH", &compat_data_path);
+    // Always use splitux's prefix for STEAM_COMPAT_DATA_PATH to avoid conflicts
+    // between multiple instances (Proton locks files in this directory)
+    cmd.env("STEAM_COMPAT_DATA_PATH", &path_pfx);
     cmd.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", &*PATH_STEAM);
 
     // Steam App IDs (required for some games/Proton features)
