@@ -50,7 +50,7 @@ jobs:
             RELEASE_NAME="Splitux ${VERSION}"
             IS_NIGHTLY="false"
           else
-            VERSION="nightly-$(date +%Y%m%d)"
+            VERSION="nightly"
             RELEASE_NAME="Splitux Nightly ($(date +%Y-%m-%d))"
             IS_NIGHTLY="true"
           fi
@@ -231,7 +231,7 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${{ github.ref_name }}"
           else
-            VERSION="nightly-$(date +%Y%m%d)"
+            VERSION="nightly"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -336,7 +336,7 @@ jobs:
             IS_NIGHTLY="false"
             PRERELEASE="false"
           else
-            VERSION="nightly-$(date +%Y%m%d)"
+            VERSION="nightly"
             RELEASE_NAME="Splitux Nightly ($(date +%Y-%m-%d))"
             IS_NIGHTLY="true"
             PRERELEASE="true"

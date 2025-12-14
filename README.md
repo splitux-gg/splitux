@@ -79,12 +79,15 @@ Backends are auto-detected by presence of config fields. Multiple backends can c
 The easiest way to run Splitux. No installation required.
 
 ```bash
-# Download
+# Download latest stable
 curl -LO https://github.com/splitux-gg/splitux/releases/latest/download/Splitux-x86_64.AppImage
 
+# Or download nightly (latest features, may be unstable)
+curl -LO https://github.com/splitux-gg/splitux/releases/download/nightly/Splitux-nightly-x86_64.AppImage
+
 # Make executable and run
-chmod +x Splitux-x86_64.AppImage
-./Splitux-x86_64.AppImage
+chmod +x Splitux-*.AppImage
+./Splitux-*.AppImage
 ```
 
 ### Flatpak
@@ -92,11 +95,14 @@ chmod +x Splitux-x86_64.AppImage
 Sandboxed installation with automatic dependency management.
 
 ```bash
-# Download the Flatpak bundle
+# Download latest stable
 curl -LO https://github.com/splitux-gg/splitux/releases/latest/download/Splitux.flatpak
 
+# Or download nightly
+curl -LO https://github.com/splitux-gg/splitux/releases/download/nightly/Splitux-nightly.flatpak
+
 # Install
-flatpak install --user Splitux.flatpak
+flatpak install --user Splitux*.flatpak
 
 # Run
 flatpak run gg.splitux.Splitux
