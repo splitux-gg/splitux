@@ -60,9 +60,12 @@ Each instance runs in:
 
 | Backend | Use Case |
 |---------|----------|
-| **Goldberg Steam Emulator** | Steam P2P games - emulates Steam networking for LAN play |
-| **Photon + BepInEx** | Unity Photon games - injects LocalMultiplayer mod |
+| **Goldberg** | Steam P2P games - emulates Steam networking for LAN play |
+| **Photon** | Unity Photon games - injects LocalMultiplayer mod via BepInEx |
+| **Facepunch** | Unity games using Facepunch.Steamworks - spoofs Steam identity via BepInEx |
 | **None** | Games with native LAN support or single-player |
+
+Backends are auto-detected by presence of config fields. Multiple backends can coexist (e.g., Goldberg + Facepunch).
 
 ## Installation
 
@@ -106,21 +109,43 @@ splitux/
 
 ### Handler Format
 
-Games are configured via YAML handlers:
+Games are configured via YAML handlers using dot notation:
 
 ```yaml
 name: "Game Name"
 exec: "game.exe"
 steam_appid: 12345
 
-backend: goldberg        # or: photon, none
-use_goldberg: true
+# Goldberg backend (auto-detected by presence)
+goldberg.settings.force_lobby_type.txt: "2"
+goldberg.settings.invite_all.txt: ""
 
-# Optional
+# Optional launch settings
 args: "-windowed"
 env: "DXVK_ASYNC=1"
-proton_path: "GE-Proton"
+proton_path: "Proton - Experimental"
+pause_between_starts: 5.0
 ```
+
+**Backend Examples:**
+
+```yaml
+# Goldberg (Steam networking emulation)
+goldberg.disable_networking: false
+goldberg.settings.force_lobby_type.txt: "2"
+
+# Photon (Unity games with BepInEx mod)
+photon.config_path: "AppData/LocalLow/Company/Game/config.cfg"
+photon.shared_files:
+  - "AppData/LocalLow/Company/Game/SharedSave"
+
+# Facepunch (Unity games using Facepunch.Steamworks)
+facepunch.spoof_identity: true
+facepunch.force_valid: true
+facepunch.photon_bypass: true
+```
+
+Browse and download community handlers from the in-app handler registry, or create your own using `res/handler_template.yaml` as reference.
 
 ## Controls
 
