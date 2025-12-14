@@ -21,9 +21,7 @@ mod types;
 pub use types::{FacepunchConfig, RuntimePatch};
 
 // Re-export key functions for direct access
-pub use operations::{create_instance_overlay, get_linux_bepinex_env};
-pub use pipelines::{create_all_overlays, FacepunchInstance};
-pub use pure::generate_config_content;
+pub use operations::create_instance_overlay;
 
 /// Facepunch settings from handler YAML (dot-notation: facepunch.*)
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]

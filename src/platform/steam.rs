@@ -10,8 +10,7 @@ mod cache;
 mod locate;
 
 // Re-export submodule functions for direct access if needed
-pub use cache::{box_art_uri, find_cache_file, find_icon, header_uri, hero_uri, icon_uri, logo_uri};
-pub use locate::{find_game_path, get_install_dir_name, steam_dir};
+pub use locate::{find_game_path, get_install_dir_name};
 
 /// Steam platform implementation
 pub struct SteamPlatform {

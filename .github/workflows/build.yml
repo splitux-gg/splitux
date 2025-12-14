@@ -276,11 +276,14 @@ jobs:
                   sha256: 957ad1149db9033db88e988b12bcebe349a445e1efc8a9b59ad2939a113d333a
 
             - name: fuse-overlayfs
-              buildsystem: autotools
+              buildsystem: simple
+              build-commands:
+                - install -Dm755 fuse-overlayfs /app/bin/fuse-overlayfs
               sources:
-                - type: git
-                  url: https://github.com/containers/fuse-overlayfs.git
-                  tag: v1.14
+                - type: file
+                  url: https://github.com/containers/fuse-overlayfs/releases/download/v1.14/fuse-overlayfs-x86_64
+                  sha256: 4817a8896a9e6f0433080f88f5b71dec931e8829a89d64c71af94b0630ccb4a9
+                  dest-filename: fuse-overlayfs
 
             - name: splitux
               buildsystem: simple

@@ -1,6 +1,7 @@
 //! Game execution pipeline
 
 use crate::app::{PartyConfig, WindowManagerType};
+use crate::facepunch;
 use crate::handler::Handler;
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
@@ -55,8 +56,17 @@ pub fn launch_game(
 
     let mut handles = Vec::new();
 
+    // For native Linux games with Facepunch/BepInEx, redirect stdout to prevent
+    // CStreamWriter crash. BepInEx's LinuxConsoleDriver checks isatty(1) and crashes
+    // if stdout is a TTY. Redirecting to null makes isatty(1) return false.
+    let redirect_stdout = !h.win() && facepunch::uses_facepunch(h);
+
     let mut i = 0;
     for mut cmd in new_cmds {
+        if redirect_stdout {
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+        }
         let handle = cmd.spawn()?;
         handles.push(handle);
 

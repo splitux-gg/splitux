@@ -1,6 +1,14 @@
+mod io;
+mod types;
+
+// Re-export types from submodule
+pub use types::{FacepunchSettings, PhotonSettings, RequiredMod, RuntimePatch, SDL2Override, is_default_sdl2};
+// Re-export I/O functions from submodule
+pub use io::{import_handler, scan_handlers};
+
 use crate::backend::{
     FacepunchSettings as BackendFacepunchSettings, GoldbergSettings as BackendGoldbergSettings,
-    MultiplayerBackend, PhotonSettings as BackendPhotonSettings, RuntimePatch as BackendRuntimePatch,
+    MultiplayerBackend, PhotonSettings as BackendPhotonSettings,
 };
 use crate::paths::*;
 use crate::util::*;
@@ -16,146 +24,8 @@ use std::path::{Path, PathBuf};
 
 pub const HANDLER_SPEC_CURRENT_VERSION: u16 = 3;
 
-/// A required mod/file that must be installed by the user
-#[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct RequiredMod {
-    /// Display name of the mod
-    pub name: String,
-    /// Description of what the mod does
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub description: String,
-    /// URL where the mod can be downloaded
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub url: String,
-    /// Destination path relative to handler directory (e.g., "overlay/BepInEx/plugins")
-    pub dest_path: String,
-    /// Expected filename or pattern (e.g., "LocalMultiplayer.dll" or "*.dll")
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub file_pattern: String,
-}
-
-impl RequiredMod {
-    /// Check if the mod is installed at the expected location
-    pub fn is_installed(&self, handler_path: &Path) -> bool {
-        let dest = handler_path.join(&self.dest_path);
-        if !dest.exists() {
-            return false;
-        }
-
-        // If no pattern specified, just check if dest directory exists
-        if self.file_pattern.is_empty() {
-            return true;
-        }
-
-        // Check if any file matching the pattern exists
-        if let Ok(entries) = std::fs::read_dir(&dest) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if self.matches_pattern(&name) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Check if a filename matches the pattern (supports * wildcard)
-    fn matches_pattern(&self, filename: &str) -> bool {
-        let pattern = &self.file_pattern;
-        if pattern.starts_with('*') {
-            // *.dll -> check if ends with .dll
-            let suffix = &pattern[1..];
-            filename.ends_with(suffix)
-        } else if pattern.ends_with('*') {
-            // prefix* -> check if starts with prefix
-            let prefix = &pattern[..pattern.len() - 1];
-            filename.starts_with(prefix)
-        } else {
-            // Exact match or contains
-            filename == pattern || filename.contains(pattern)
-        }
-    }
-
-    /// Get the full destination path
-    pub fn dest_full_path(&self, handler_path: &Path) -> PathBuf {
-        handler_path.join(&self.dest_path)
-    }
-}
-
-/// Photon-specific settings for BepInEx/LocalMultiplayer
-#[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct PhotonSettings {
-    /// Path pattern for LocalMultiplayer config file within profile's windata
-    /// Example: "AppData/LocalLow/CompanyName/GameName/LocalMultiplayer/global.cfg"
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub config_path: String,
-
-    /// Files that should be shared between all instances (relative to windata)
-    /// These files will be symlinked to a shared location so instances can communicate
-    /// Example: "AppData/LocalLow/CompanyName/GameName/LocalMultiplayer/GlobalSave"
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub shared_files: Vec<String>,
-}
-
-impl PhotonSettings {
-    pub fn is_empty(&self) -> bool {
-        self.config_path.is_empty() && self.shared_files.is_empty()
-    }
-}
-
-/// Facepunch.Steamworks patch settings for SplituxFacepunch BepInEx plugin
-/// Presence of this section enables the Facepunch patches.
-#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
-pub struct FacepunchSettings {
-    /// Spoof SteamClient.SteamId and SteamClient.Name to unique per-instance values
-    #[serde(default)]
-    pub spoof_identity: bool,
-
-    /// Force SteamClient.IsValid and IsLoggedOn to return true
-    #[serde(default)]
-    pub force_valid: bool,
-
-    /// Bypass Photon Steam authentication (AuthType=255)
-    #[serde(default)]
-    pub photon_bypass: bool,
-}
-
-impl FacepunchSettings {
-    pub fn is_default(&self) -> bool {
-        !self.spoof_identity && !self.force_valid && !self.photon_bypass
-    }
-}
-
-/// A runtime patch specification for game-specific classes
-/// Used by SplituxFacepunch to apply Harmony patches at runtime
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct RuntimePatch {
-    /// Target class name (e.g., "SteamManager", "GameManager")
-    pub class: String,
-
-    /// Method name to patch (mutually exclusive with property)
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub method: String,
-
-    /// Property name to patch (mutually exclusive with method)
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub property: String,
-
-    /// Action to apply from PatchActions library
-    /// Available: force_true, force_false, skip, force_steam_loaded, fake_auth_ticket, photon_auth_none, log_call
-    pub action: String,
-}
-
 fn is_default_backend(b: &MultiplayerBackend) -> bool {
     *b == MultiplayerBackend::None
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Default)]
-pub enum SDL2Override {
-    #[default]
-    No,
-    Srt,
-    Sys,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -370,10 +240,6 @@ fn insert_nested(map: &mut serde_yaml::Mapping, parts: &[&str], value: serde_yam
 
 fn default_steam_home_path() -> String {
     "~/.steam".to_string()
-}
-
-fn is_default_sdl2(v: &SDL2Override) -> bool {
-    *v == SDL2Override::No
 }
 
 impl Default for Handler {
@@ -929,87 +795,4 @@ impl Handler {
     pub fn disable_facepunch(&mut self) {
         self.facepunch = None;
     }
-}
-
-pub fn scan_handlers() -> Vec<Handler> {
-    let mut out: Vec<Handler> = Vec::new();
-    let handlers_path = PATH_PARTY.join("handlers");
-
-    let Ok(entries) = std::fs::read_dir(handlers_path) else {
-        return out;
-    };
-
-    for entry_result in entries {
-        if let Ok(entry) = entry_result
-            && let Ok(file_type) = entry.file_type()
-            && file_type.is_dir()
-        {
-            let yaml_path = entry.path().join("handler.yaml");
-            if yaml_path.exists()
-                && let Ok(handler) = Handler::from_yaml(&yaml_path)
-            {
-                out.push(handler);
-            }
-        }
-    }
-    out.sort_by(|a, b| a.display().to_lowercase().cmp(&b.display().to_lowercase()));
-    out
-}
-
-pub fn import_handler() -> Result<(), Box<dyn Error>> {
-    let Some(file) = FileDialog::new()
-        .set_title("Select File")
-        .set_directory(&*PATH_HOME)
-        .add_filter("Splitux Handler Package", &["spx"])
-        .pick_file()
-    else {
-        return Ok(());
-    };
-
-    if !file.exists() || !file.is_file() || file.extension().unwrap_or_default() != "spx" {
-        return Err("Handler not valid!".into());
-    }
-
-    let dir_handlers = PATH_PARTY.join("handlers");
-    let dir_tmp = PATH_PARTY.join("tmp");
-    if !dir_tmp.exists() {
-        std::fs::create_dir_all(&dir_tmp)?;
-    }
-
-    let mut archive = zip::ZipArchive::new(File::open(&file)?)?;
-    archive.extract(&dir_tmp)?;
-
-    let handler_path = dir_tmp.join("handler.yaml");
-    if !handler_path.exists() {
-        clear_tmp()?;
-        return Err("handler.yaml not found in archive".into());
-    }
-
-    let mut fileclone = file.clone();
-    fileclone.set_extension("");
-    let name = fileclone
-        .file_name()
-        .ok_or_else(|| "No filename")?
-        .to_string_lossy();
-
-    let path = {
-        if !dir_handlers.join(name.as_ref()).exists() {
-            dir_handlers.join(name.as_ref())
-        } else {
-            let mut i = 1;
-            while PATH_PARTY
-                .join("handlers")
-                .join(&format!("{}-{}", name, i))
-                .exists()
-            {
-                i += 1;
-            }
-            dir_handlers.join(&format!("{}-{}", name, i))
-        }
-    };
-
-    copy_dir_recursive(&dir_tmp, &path)?;
-    clear_tmp()?;
-
-    Ok(())
 }

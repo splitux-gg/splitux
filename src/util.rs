@@ -4,7 +4,7 @@ use dialog::{Choice, DialogBox};
 use eframe::egui::TextBuffer;
 use rfd::FileDialog;
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Expand ~ and $HOME in a path string to the actual home directory

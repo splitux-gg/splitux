@@ -111,4 +111,3 @@ pub use manual::ManualPlatform;
 pub use steam::SteamPlatform;
 
 // Re-export steam submodule functions for convenience
-pub use steam::{find_game_path, get_install_dir_name};

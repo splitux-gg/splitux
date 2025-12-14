@@ -1,5 +1,4 @@
 mod app;
-mod backend_legacy;
 mod backend;
 mod bwrap;
 mod facepunch;
@@ -9,7 +8,6 @@ mod goldberg;
 mod handler;
 mod input;
 mod instance;
-mod launch_legacy;
 mod launch;
 mod monitor;
 mod paths;

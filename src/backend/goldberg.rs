@@ -19,12 +19,11 @@ mod pure;
 mod types;
 
 // Re-export types for external use
-pub use types::{GoldbergConfig, SteamApiDll, SteamDllType};
+pub use types::{GoldbergConfig, SteamApiDll};
 
 // Re-export key functions for direct access
-pub use operations::{create_instance_overlay, find_steam_api_dlls, write_steam_settings};
+pub use operations::{create_instance_overlay, find_steam_api_dlls};
 pub use pipelines::create_all_overlays;
-pub use pure::detect_bitness;
 
 /// Goldberg settings from handler YAML (dot-notation: goldberg.*)
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
