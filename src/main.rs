@@ -6,7 +6,6 @@ mod facepunch;
 mod game_patches;
 mod gamescope;
 mod goldberg;
-mod handler_legacy;
 mod handler;
 mod input;
 mod instance;
