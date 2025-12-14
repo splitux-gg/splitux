@@ -8,10 +8,20 @@ Split-screen gaming on Linux
 
 <p align="center">
     <img src=".github/assets/launcher.png" width="80%" />
+    <br>
+    <em>Splitux Launcher - Game selection and configuration</em>
+</p>
+
+<p align="center">
+    <img src=".github/assets/drg-splitscreen.png" width="80%" />
+    <br>
+    <em>Deep Rock Galactic - Two players in the Space Rig</em>
 </p>
 
 <p align="center">
     <img src=".github/assets/gameplay1.png" width="80%" />
+    <br>
+    <em>Astroneer - Co-op base building on an alien planet</em>
 </p>
 
 <p align="center">
