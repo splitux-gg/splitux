@@ -293,7 +293,7 @@ jobs:
                   RUSTUP_HOME: /run/build/splitux/rustup
               build-commands:
                 - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-                - . $RUSTUP_HOME/env && cargo build --release
+                - . $CARGO_HOME/env && cargo build --release
                 - install -Dm755 target/release/splitux /app/bin/splitux
                 - mkdir -p /app/share/splitux
                 - cp -r res/* /app/share/splitux/ || true
