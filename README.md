@@ -74,26 +74,65 @@ Backends are auto-detected by presence of config fields. Multiple backends can c
 - **Window Manager**: Hyprland or KDE Plasma
 - **Dependencies**: Gamescope, Bubblewrap, fuse-overlayfs, SDL2
 
-### From Release
+### AppImage (Recommended)
 
-Download the latest release from [Releases](https://github.com/gabrielgad/splitux/releases).
+The easiest way to run Splitux. No installation required.
+
+```bash
+# Download
+curl -LO https://github.com/splitux-gg/splitux/releases/latest/download/Splitux-x86_64.AppImage
+
+# Make executable and run
+chmod +x Splitux-x86_64.AppImage
+./Splitux-x86_64.AppImage
+```
+
+### Flatpak
+
+Sandboxed installation with automatic dependency management.
+
+```bash
+# Download the Flatpak bundle
+curl -LO https://github.com/splitux-gg/splitux/releases/latest/download/Splitux.flatpak
+
+# Install
+flatpak install --user Splitux.flatpak
+
+# Run
+flatpak run gg.splitux.Splitux
+```
+
+### Tarball (Native)
+
+Traditional installation for maximum performance.
+
+```bash
+# Download and extract
+curl -LO https://github.com/splitux-gg/splitux/releases/latest/download/splitux-linux-x86_64.tar.gz
+tar -xzf splitux-linux-x86_64.tar.gz
+cd splitux
+
+# Run
+./splitux
+```
+
+**Note:** The tarball requires these dependencies to be installed on your system:
+- `gamescope` or use the bundled `gamescope-splitux` in `bin/`
+- `bubblewrap`
+- `fuse-overlayfs`
+- `SDL2`
 
 ### Building from Source
 
-Requires Rust (nightly), meson, and ninja.
+Requires Rust 1.85+ (for edition 2024), meson, and ninja.
 
 ```bash
-git clone --recurse-submodules https://github.com/gabrielgad/splitux.git
+git clone --recurse-submodules https://github.com/splitux-gg/splitux.git
 cd splitux
-./splitux.sh build
+cargo build --release
 ```
 
-The build script automatically:
-- Detects your distro (Arch, Fedora, Ubuntu, Debian, openSUSE)
-- Checks for required dependencies
-- Builds gamescope-splitux (custom fork with input isolation)
-- Compiles the Rust application
-- Outputs everything to `build/`
+The binary will be at `target/release/splitux`. Copy the `res/` directory alongside it for bundled dependencies.
 
 ## Configuration
 
