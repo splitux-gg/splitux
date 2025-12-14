@@ -3,16 +3,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::app::{PadFilterType, PartyConfig};
+use crate::app::{load_photon_ids, PadFilterType, PartyConfig};
 use crate::backend;
+use crate::backend::facepunch::get_linux_bepinex_env;
+use crate::backend::photon::{generate_all_configs as photon_generate_configs, PhotonAppIds, PhotonInstance};
 use crate::bwrap;
-use crate::facepunch;
 use crate::gamescope;
 use crate::handler::{Handler, SDL2Override};
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
 use crate::paths::{PATH_PARTY, PATH_STEAM};
-use crate::photon;
 use crate::proton;
 use crate::util::*;
 
@@ -43,7 +43,23 @@ pub fn launch_cmds(
 
     // Generate Photon configs at launch time (needs instance count)
     if h.has_photon() && h.is_saved_handler() {
-        photon::generate_all_configs(h, instances)?;
+        if let Some(photon_settings) = h.photon_ref() {
+            let photon_instances: Vec<PhotonInstance> = instances
+                .iter()
+                .map(|i| PhotonInstance { profile_name: i.profname.clone() })
+                .collect();
+            let app_ids = load_photon_ids();
+            let photon_ids = PhotonAppIds {
+                pun_app_id: app_ids.pun_app_id,
+                voice_app_id: app_ids.voice_app_id,
+            };
+            photon_generate_configs(
+                &photon_instances,
+                &photon_settings.config_path,
+                &photon_settings.shared_files,
+                &photon_ids,
+            )?;
+        }
     }
 
     // Mount game directories with overlays
@@ -133,8 +149,8 @@ pub fn launch_cmds(
             bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
 
             // Set up BepInEx environment for Linux native games with Facepunch
-            if !win && facepunch::uses_facepunch(h) {
-                let bepinex_env = facepunch::get_linux_bepinex_env(&gamedir);
+            if !win && h.has_facepunch() {
+                let bepinex_env = get_linux_bepinex_env(&gamedir);
                 if !bepinex_env.is_empty() {
                     bwrap::setup_bepinex_env(&mut cmd, &bepinex_env);
                 }

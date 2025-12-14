@@ -23,9 +23,8 @@ pub use types::{FacepunchConfig, RuntimePatch};
 // Internal re-exports (used within this module)
 pub use operations::create_instance_overlay;
 
-// Note: Additional re-exports for external use commented out until migration complete (see Phase 9.5)
-// pub use operations::get_linux_bepinex_env;
-// pub use pipelines::create_all_overlays;
+// Phase 9.5: Re-exports for external use
+pub use operations::get_linux_bepinex_env;
 
 /// Facepunch settings from handler YAML (dot-notation: facepunch.*)
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]

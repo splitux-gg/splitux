@@ -1,7 +1,6 @@
 //! Game execution pipeline
 
 use crate::app::{PartyConfig, WindowManagerType};
-use crate::facepunch;
 use crate::handler::Handler;
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
@@ -59,7 +58,7 @@ pub fn launch_game(
     // For native Linux games with Facepunch/BepInEx, redirect stdout to prevent
     // CStreamWriter crash. BepInEx's LinuxConsoleDriver checks isatty(1) and crashes
     // if stdout is a TTY. Redirecting to null makes isatty(1) return false.
-    let redirect_stdout = !h.win() && facepunch::uses_facepunch(h);
+    let redirect_stdout = !h.win() && h.has_facepunch();
 
     let mut i = 0;
     for mut cmd in new_cmds {

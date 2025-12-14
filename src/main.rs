@@ -1,17 +1,20 @@
 mod app;
 mod backend;
 mod bwrap;
-mod facepunch;
+#[allow(dead_code)]
+mod facepunch; // Legacy - kept as reference during migration validation
 mod game_patches;
 mod gamescope;
-mod goldberg;
+#[allow(dead_code)]
+mod goldberg; // Legacy - kept as reference during migration validation
 mod handler;
 mod input;
 mod instance;
 mod launch;
 mod monitor;
 mod paths;
-mod photon;
+#[allow(dead_code)]
+mod photon; // Legacy - kept as reference during migration validation
 mod platform;
 mod profiles;
 mod proton;

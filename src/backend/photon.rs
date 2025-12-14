@@ -24,9 +24,9 @@ pub use types::{PhotonConfig, UnityBackend, PHOTON_BASE_PORT};
 pub use operations::{bepinex_backend_available, create_instance_overlay};
 pub use pure::detect_unity_backend;
 
-// Note: Additional re-exports commented out until migration complete (see Phase 9.5)
-// pub use operations::{bepinex_available, generate_instance_config};
-// pub use pipelines::{create_all_overlays, generate_all_configs};
+// Phase 9.5: Re-exports for external use
+pub use operations::PhotonAppIds;
+pub use pipelines::{generate_all_configs, PhotonInstance};
 
 /// Photon settings from handler YAML (dot-notation: photon.*)
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]

@@ -306,6 +306,7 @@ jobs:
           flatpak-builder --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
+          mkdir -p release
           flatpak build-bundle repo release/Splitux-${{ steps.version.outputs.version }}.flatpak gg.splitux.Splitux
 
       - name: Upload Flatpak artifact
