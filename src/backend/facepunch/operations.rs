@@ -6,4 +6,6 @@ mod bepinex;
 mod env;
 mod overlay;
 
-pub use overlay::create_instance_overlay;
+// Note: Re-exports commented out until migration complete (see Phase 9.5)
+// pub use env::get_linux_bepinex_env;
+// pub use overlay::create_instance_overlay;

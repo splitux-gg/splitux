@@ -20,8 +20,9 @@ mod types;
 // Re-export types for external use
 pub use types::{FacepunchConfig, RuntimePatch};
 
-// Re-export key functions for direct access
-pub use operations::create_instance_overlay;
+// Note: Additional re-exports commented out until migration complete (see Phase 9.5)
+// pub use operations::{create_instance_overlay, get_linux_bepinex_env};
+// pub use pipelines::create_all_overlays;
 
 /// Facepunch settings from handler YAML (dot-notation: facepunch.*)
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]

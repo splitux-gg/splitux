@@ -22,8 +22,10 @@ pub use types::{PhotonConfig, UnityBackend, PHOTON_BASE_PORT};
 
 // Re-export key functions for direct access
 pub use operations::{
-    bepinex_backend_available, create_instance_overlay,
+    bepinex_available, bepinex_backend_available, create_instance_overlay,
+    generate_instance_config,
 };
+pub use pipelines::{create_all_overlays, generate_all_configs};
 pub use pure::detect_unity_backend;
 
 /// Photon settings from handler YAML (dot-notation: photon.*)

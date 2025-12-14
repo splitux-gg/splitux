@@ -240,7 +240,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08 org.freedesktop.Sdk.Extension.rust-stable//23.08
+          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
 
       - name: Build Flatpak
         run: |
@@ -250,8 +250,6 @@ jobs:
           runtime: org.freedesktop.Platform
           runtime-version: '23.08'
           sdk: org.freedesktop.Sdk
-          sdk-extensions:
-            - org.freedesktop.Sdk.Extension.rust-stable
           command: splitux
           finish-args:
             - --share=ipc
@@ -288,11 +286,12 @@ jobs:
             - name: splitux
               buildsystem: simple
               build-options:
-                append-path: /usr/lib/sdk/rust-stable/bin
                 env:
                   CARGO_HOME: /run/build/splitux/cargo
+                  RUSTUP_HOME: /run/build/splitux/rustup
               build-commands:
-                - cargo build --release
+                - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+                - . $RUSTUP_HOME/env && cargo build --release
                 - install -Dm755 target/release/splitux /app/bin/splitux
                 - mkdir -p /app/share/splitux
                 - cp -r res/* /app/share/splitux/ || true

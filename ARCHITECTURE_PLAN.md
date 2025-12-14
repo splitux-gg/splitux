@@ -804,16 +804,87 @@ launch.rs              # Module root + re-exports
 
 **Validation**: `cargo build` passes ✅
 
-### Phase 9: Cleanup (PARTIAL)
-- [ ] Remove deprecated old files (handler_legacy.rs, backend_legacy.rs, launch_legacy.rs)
+### Phase 9: Cleanup (IN PROGRESS)
+
+**Completed:**
+- [x] Remove handler_legacy.rs (merged into handler.rs)
+- [x] Remove launch_legacy.rs (merged into launch/)
+- [x] Remove backend_legacy.rs (merged into backend.rs)
+- [x] Wire up handler/types.rs and handler/io.rs
+- [x] Wire up launch/ submodules
+
+**Remaining (documented for future session):**
+- [ ] Complete backend module migration (see Phase 9.5 below)
 - [ ] Remove backward-compat shims
-- [ ] Update all imports
 - [ ] Run clippy, fix warnings
-- [ ] Update documentation
 
-**Note**: Phase 9 cleanup is deferred. Legacy files are kept for backward compatibility during testing. Can be completed when confident that new modules work correctly.
+**Current State**: ~85 warnings (mostly dead code in orphaned backend/* submodules)
 
-**Current State**: 119 warnings (mostly unused imports in new module structure)
+---
+
+### Phase 9.5: Backend Module Migration (FUTURE WORK)
+
+**Problem**: Duplicate implementations exist:
+| Module | Old Location (ACTIVE) | New Location (ORPHANED) |
+|--------|----------------------|------------------------|
+| Facepunch | `src/facepunch.rs` (279 lines) | `src/backend/facepunch/` (~400 lines) |
+| Goldberg | `src/goldberg.rs` (344 lines) | `src/backend/goldberg/` (~500 lines) |
+| Photon | `src/photon.rs` (433 lines) | `src/backend/photon/` (~600 lines) |
+
+The code currently calls the OLD top-level modules. The NEW backend/* submodules were built but have different APIs and are completely orphaned (dead code).
+
+**API Differences:**
+
+1. **facepunch::uses_facepunch**
+   - OLD: `uses_facepunch(handler: &Handler) -> bool`
+   - NEW: `uses_facepunch(settings: &FacepunchSettings, patches: &[RuntimePatch]) -> bool`
+
+2. **photon::generate_all_configs**
+   - OLD: `generate_all_configs(handler: &Handler, instances: &[Instance])`
+   - NEW: `generate_all_configs(instances: &[PhotonInstance], config_path, shared_files, photon_ids)`
+
+3. **create_all_overlays** (all backends)
+   - OLD: Takes Handler + instances
+   - NEW: Takes specific config structs
+
+**Callers to Update:**
+- `src/launch/pipelines/execute.rs:62` - `facepunch::uses_facepunch(h)`
+- `src/launch/pipelines/build_cmds.rs:46` - `photon::generate_all_configs(h, instances)`
+- `src/launch/pipelines/build_cmds.rs:136-137` - `facepunch::uses_facepunch(h)`, `facepunch::get_linux_bepinex_env(&gamedir)`
+- `src/backend.rs:78-80` - Uses `facepunch_mod`, `goldberg_mod`, `photon_mod` aliases to OLD modules
+
+**Migration Options:**
+
+**Option A: Add Handler-based wrappers (Recommended)**
+Add wrapper functions to new modules that match old API signatures:
+```rust
+// In backend/photon.rs
+pub fn generate_all_configs_for_handler(
+    handler: &Handler,
+    instances: &[Instance],
+) -> Result<(), Box<dyn Error>> {
+    let settings = handler.photon_ref().ok_or("Photon not enabled")?;
+    // Extract parameters and call internal function
+    ...
+}
+```
+
+**Option B: Update all callers**
+Change every caller to use new API signatures. More invasive but cleaner result.
+
+**Option C: Keep old, delete new**
+Delete orphaned backend/* submodules. Keep using working old modules. Simplest but loses architectural work.
+
+**Files involved:**
+- `src/facepunch.rs` (old, active)
+- `src/goldberg.rs` (old, active)
+- `src/photon.rs` (old, active)
+- `src/backend/facepunch/` (new, orphaned)
+- `src/backend/goldberg/` (new, orphaned)
+- `src/backend/photon/` (new, orphaned)
+- `src/backend.rs` (uses old via aliases)
+- `src/launch/pipelines/build_cmds.rs` (caller)
+- `src/launch/pipelines/execute.rs` (caller)
 
 ---
 
