@@ -196,7 +196,7 @@ jobs:
 
           # Build AppImage (extract and run since FUSE may not work in container)
           /tmp/appimagetool --appimage-extract
-          ./squashfs-root/AppRun AppDir release/Splitux-${{ steps.version.outputs.version }}-x86_64.AppImage
+          ARCH=x86_64 ./squashfs-root/AppRun AppDir release/Splitux-${{ steps.version.outputs.version }}-x86_64.AppImage
 
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
@@ -276,7 +276,7 @@ jobs:
                   sha256: 957ad1149db9033db88e988b12bcebe349a445e1efc8a9b59ad2939a113d333a
 
             - name: fuse-overlayfs
-              buildsystem: meson
+              buildsystem: autotools
               sources:
                 - type: git
                   url: https://github.com/containers/fuse-overlayfs.git
