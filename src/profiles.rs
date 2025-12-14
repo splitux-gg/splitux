@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
 use crate::{handler::Handler, paths::*, util::copy_dir_recursive};
@@ -49,6 +50,26 @@ pub fn create_profile(name: &str) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(path_profile.join("home/.local/share"))?;
     std::fs::create_dir_all(path_profile.join("home/.config"))?;
     std::fs::create_dir_all(path_steam.clone())?;
+
+    // Create symlinks for Steam API access inside sandboxed HOME
+    // This allows native Linux games to initialize the Steam API while using isolated saves
+    if let Ok(real_home) = std::env::var("HOME") {
+        let real_home = PathBuf::from(real_home);
+
+        // Symlink ~/.steam -> real ~/.steam
+        let steam_dir = real_home.join(".steam");
+        let profile_steam = path_profile.join("home/.steam");
+        if steam_dir.exists() && !profile_steam.exists() {
+            let _ = symlink(&steam_dir, &profile_steam);
+        }
+
+        // Symlink ~/.local/share/Steam -> real Steam
+        let steam_share = real_home.join(".local/share/Steam");
+        let profile_steam_share = path_profile.join("home/.local/share/Steam");
+        if steam_share.exists() && !profile_steam_share.exists() {
+            let _ = symlink(&steam_share, &profile_steam_share);
+        }
+    }
 
     // Generate unique Steam ID and listen port for this profile
     let steam_id = generate_steam_id(name);

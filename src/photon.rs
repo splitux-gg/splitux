@@ -279,7 +279,7 @@ pub fn create_all_overlays(
 /// Generate the LocalMultiplayer config for an instance
 ///
 /// This writes the config file to the profile's windata directory at the path
-/// specified in handler.photon_settings.config_path
+/// specified in handler.photon.config_path
 pub fn generate_instance_config(
     profile_path: &Path,
     handler: &Handler,
@@ -288,11 +288,15 @@ pub fn generate_instance_config(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let photon_ids = load_photon_ids();
 
+    // Get Photon settings from new optional field (Phase 7)
+    let photon_settings = handler.photon_ref()
+        .ok_or("Photon backend not enabled")?;
+
     // Get config path from handler settings
-    let config_path_pattern = &handler.photon_settings.config_path;
+    let config_path_pattern = &photon_settings.config_path;
     if config_path_pattern.is_empty() {
         return Err(
-            "Handler must specify photon_settings.config_path for Photon backend".into(),
+            "Handler must specify photon.config_path for Photon backend".into(),
         );
     }
 
@@ -336,8 +340,12 @@ pub fn generate_all_configs(
     handler: &Handler,
     instances: &[Instance],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Get Photon settings from new optional field (Phase 7)
+    let photon_settings = handler.photon_ref()
+        .ok_or("Photon backend not enabled")?;
+
     // Set up shared files first (before instance configs)
-    if !handler.photon_settings.shared_files.is_empty() {
+    if !photon_settings.shared_files.is_empty() {
         setup_shared_files(handler, instances)?;
     }
 
@@ -359,11 +367,15 @@ fn setup_shared_files(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::unix::fs::symlink;
 
+    // Get Photon settings from new optional field (Phase 7)
+    let photon_settings = handler.photon_ref()
+        .ok_or("Photon backend not enabled")?;
+
     // Create shared directory for this game session
     let shared_dir = PATH_PARTY.join("tmp").join("photon-shared");
     fs::create_dir_all(&shared_dir)?;
 
-    for shared_path_pattern in &handler.photon_settings.shared_files {
+    for shared_path_pattern in &photon_settings.shared_files {
         // Get the filename for the shared file
         let file_name = Path::new(shared_path_pattern)
             .file_name()

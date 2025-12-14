@@ -229,3 +229,12 @@ pub fn get_assigned_gamepad_paths(
         })
         .collect()
 }
+
+/// Set up BepInEx environment variables for Linux native games
+///
+/// These are passed via --setenv so they apply inside the container
+pub fn setup_bepinex_env(cmd: &mut Command, env_vars: &std::collections::HashMap<String, String>) {
+    for (key, value) in env_vars {
+        cmd.args(["--setenv", key, value]);
+    }
+}

@@ -1,7 +1,6 @@
 // Handler editing page display functions
 
 use super::app::PartyApp;
-use crate::backend::MultiplayerBackend;
 use crate::handler::{scan_handlers, SDL2Override, HANDLER_SPEC_CURRENT_VERSION};
 use crate::paths::PATH_HOME;
 use crate::util::{dir_dialog, file_dialog_relative, msg};
@@ -95,15 +94,37 @@ impl PartyApp {
                 );
 
             ui.add_space(16.0);
-            ui.label("Backend:");
-            egui::ComboBox::from_id_salt("backend")
-                .width(140.0)
-                .selected_text(h.backend.display_name())
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut h.backend, MultiplayerBackend::None, "None");
-                    ui.selectable_value(&mut h.backend, MultiplayerBackend::Goldberg, "Goldberg (Steam)");
-                    ui.selectable_value(&mut h.backend, MultiplayerBackend::Photon, "Photon (BepInEx)");
-                });
+            ui.label("Backends:");
+
+            // Goldberg checkbox
+            let mut goldberg_enabled = h.has_goldberg();
+            if ui.checkbox(&mut goldberg_enabled, "Goldberg (Steam)").changed() {
+                if goldberg_enabled {
+                    h.enable_goldberg();
+                } else {
+                    h.disable_goldberg();
+                }
+            }
+
+            // Photon checkbox
+            let mut photon_enabled = h.has_photon();
+            if ui.checkbox(&mut photon_enabled, "Photon (BepInEx)").changed() {
+                if photon_enabled {
+                    h.enable_photon();
+                } else {
+                    h.disable_photon();
+                }
+            }
+
+            // Facepunch checkbox
+            let mut facepunch_enabled = h.has_facepunch();
+            if ui.checkbox(&mut facepunch_enabled, "Facepunch").changed() {
+                if facepunch_enabled {
+                    h.enable_facepunch();
+                } else {
+                    h.disable_facepunch();
+                }
+            }
         });
 
         h.steam_appid = match &self.installed_steamapps[selected_index] {
@@ -135,13 +156,13 @@ impl PartyApp {
             }
         });
 
-        // Photon-specific settings
-        if h.backend == MultiplayerBackend::Photon {
+        // Photon-specific settings (shown when Photon backend is enabled)
+        if let Some(photon_settings) = &mut h.photon {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label("Photon config path:");
                 ui.add(
-                    egui::TextEdit::singleline(&mut h.photon_settings.config_path)
+                    egui::TextEdit::singleline(&mut photon_settings.config_path)
                         .hint_text("AppData/LocalLow/Company/Game/LocalMultiplayer/global.cfg")
                         .desired_width(400.0),
                 );
@@ -152,6 +173,25 @@ impl PartyApp {
                     .weak(),
             );
             ui.add_space(4.0);
+        }
+
+        // Goldberg-specific settings (shown when Goldberg backend is enabled)
+        if let Some(goldberg_settings) = &mut h.goldberg {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut goldberg_settings.disable_networking, "Disable networking");
+                ui.label(RichText::new("(Forces LAN discovery mode)").small().weak());
+            });
+        }
+
+        // Facepunch-specific settings (shown when Facepunch backend is enabled)
+        if let Some(facepunch_settings) = &mut h.facepunch {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut facepunch_settings.spoof_identity, "Spoof identity");
+                ui.checkbox(&mut facepunch_settings.force_valid, "Force valid");
+                ui.checkbox(&mut facepunch_settings.photon_bypass, "Photon bypass");
+            });
         }
 
         ui.horizontal(|ui| {

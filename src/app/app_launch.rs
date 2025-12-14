@@ -9,6 +9,7 @@ use crate::instance::*;
 use crate::launch::*;
 use crate::monitor::get_monitors_sdl;
 use crate::profiles::*;
+use crate::save_sync;
 use crate::util::*;
 
 macro_rules! cur_handler {
@@ -75,12 +76,30 @@ impl PartyApp {
                     msg("Failed setting up profiles", &format!("{err}"));
                     return;
                 }
+
+                // Copy original saves to all profiles before launch
+                if !handler.original_save_path.is_empty() {
+                    if let Err(err) = save_sync::copy_original_saves_to_all_profiles(&handler, &instances) {
+                        println!("[splitux] Warning: Failed to copy original saves: {}", err);
+                        // Continue anyway - this is non-fatal
+                    }
+                }
+
                 // Note: fuse_overlayfs_mount_gamedirs is now called inside launch_cmds
                 // with proper Goldberg overlay support
                 if let Err(err) = launch_game(&handler, &dev_infos, &instances, &monitors, &cfg) {
                     println!("[splitux] Error launching instances: {}", err);
                     msg("Launch Error", &format!("{err}"));
                 }
+
+                // Sync saves back from the first named profile after game exits
+                if handler.save_sync_back {
+                    if let Err(err) = save_sync::sync_saves_back(&handler, &instances) {
+                        println!("[splitux] Error syncing saves back: {}", err);
+                        msg("Save Sync Error", &format!("Failed to sync saves back: {err}"));
+                    }
+                }
+
                 // WM teardown is now handled inside launch_game
                 if let Err(err) = remove_guest_profiles() {
                     println!("[splitux] Error removing guest profiles: {}", err);

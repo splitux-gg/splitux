@@ -4,8 +4,18 @@ use dialog::{Choice, DialogBox};
 use eframe::egui::TextBuffer;
 use rfd::FileDialog;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Expand ~ and $HOME in a path string to the actual home directory
+pub fn expand_path(path: &str) -> PathBuf {
+    let mut s = path.to_string();
+    if s.starts_with("~/") {
+        s = s.replacen("~", &PATH_HOME.to_string_lossy(), 1);
+    }
+    s = s.replace("$HOME", &PATH_HOME.to_string_lossy());
+    PathBuf::from(s)
+}
 
 pub fn msg(title: &str, contents: &str) {
     let _ = dialog::Message::new(contents).title(title).show();

@@ -41,9 +41,9 @@ pub struct GoldbergConfig {
     pub broadcast_ports: Vec<u16>,
 }
 
-/// Detect whether a Steam API DLL is 64-bit based on filename and directory hints
+/// Detect whether a Steam API DLL is 64-bit based on filename, directory hints, or ELF header
 fn detect_bitness(path: &Path, filename: &str) -> bool {
-    // 1. Check filename first (most reliable)
+    // 1. Check filename first (most reliable for Windows)
     if filename == "steam_api64.dll" {
         return true;
     }
@@ -60,7 +60,20 @@ fn detect_bitness(path: &Path, filename: &str) -> bool {
         // Default to 32-bit for steam_api.dll
         return false;
     }
-    // Linux: libsteam_api.so - check directory
+    // Linux: libsteam_api.so - read ELF header to determine bitness
+    if filename == "libsteam_api.so" {
+        if let Ok(data) = fs::read(path) {
+            // ELF magic: 0x7F 'E' 'L' 'F'
+            // e_ident[EI_CLASS] at offset 4: 1 = 32-bit, 2 = 64-bit
+            if data.len() >= 5 && &data[0..4] == b"\x7FELF" {
+                return data[4] == 2; // ELFCLASS64
+            }
+        }
+        // Fallback to directory hints if ELF read fails
+        let path_str = path.to_string_lossy().to_lowercase();
+        return path_str.contains("64") || path_str.contains("x86_64");
+    }
+    // Other files: use directory hints
     let path_str = path.to_string_lossy().to_lowercase();
     path_str.contains("64") || path_str.contains("x86_64")
 }
@@ -284,6 +297,22 @@ pub fn create_instance_overlay(
         let settings_dir = target_dir.join("steam_settings");
         fs::create_dir_all(&settings_dir)?;
         write_steam_settings(&settings_dir, config, handler_settings, disable_networking)?;
+    }
+
+    // For native Linux games, also create steam_settings and steam_appid.txt at overlay root
+    // Goldberg looks for config next to the executable, not just next to the .so
+    if !is_windows {
+        let root_settings_dir = overlay_dir.join("steam_settings");
+        if !root_settings_dir.exists() {
+            fs::create_dir_all(&root_settings_dir)?;
+            write_steam_settings(&root_settings_dir, config, handler_settings, disable_networking)?;
+            println!(
+                "[splitux] Goldberg overlay {}: Also created steam_settings at game root",
+                instance_idx
+            );
+        }
+        // Also create steam_appid.txt at game root (some games need this)
+        fs::write(overlay_dir.join("steam_appid.txt"), config.app_id.to_string())?;
     }
 
     println!(

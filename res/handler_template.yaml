@@ -92,6 +92,26 @@ spec_ver: 3
 # proton_path: "Proton - Experimental"
 
 # ============================================
+# SAVE GAME INTEGRATION
+# ============================================
+# Copy original saves to profiles and optionally sync back after play.
+#
+# Path to original save data. Supports:
+# - ~ or $HOME for home directory
+# - For Windows games: relative paths like "AppData/LocalLow/Company/Game"
+#   are relative to the Wine prefix user directory
+# - Absolute paths work for any game type
+#
+# original_save_path: "~/.local/share/GameName/saves"
+# original_save_path: "AppData/LocalLow/Company/GameName"
+#
+# Sync saves back to original location after session (default: false)
+# Uses the first named (non-guest) profile's saves.
+# Original saves are always backed up to ~/.local/share/splitux/save_backups/
+#
+# save_sync_back: true
+
+# ============================================
 # ADVANCED OPTIONS
 # ============================================
 

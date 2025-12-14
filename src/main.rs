@@ -1,19 +1,25 @@
 mod app;
+mod backend_legacy;
 mod backend;
 mod bwrap;
+mod facepunch;
 mod game_patches;
 mod gamescope;
 mod goldberg;
+mod handler_legacy;
 mod handler;
 mod input;
 mod instance;
+mod launch_legacy;
 mod launch;
 mod monitor;
 mod paths;
 mod photon;
+mod platform;
 mod profiles;
 mod proton;
 mod registry;
+mod save_sync;
 mod util;
 mod wm;
 

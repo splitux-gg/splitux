@@ -464,25 +464,33 @@ copy_steam_client_libs() {
 
 download_bepinex() {
     local bepinex_out="$SCRIPT_DIR/res/bepinex"
-    local need_mono=false
+    local need_mono_win=false
+    local need_mono_linux=false
     local need_il2cpp=false
 
-    [[ ! -d "$bepinex_out/mono/core" ]] && need_mono=true
+    [[ ! -d "$bepinex_out/mono/core" ]] && need_mono_win=true
+    [[ ! -d "$bepinex_out/mono-linux/core" ]] && need_mono_linux=true
     [[ ! -d "$bepinex_out/il2cpp/core" ]] && need_il2cpp=true
 
-    if [[ "$need_mono" == false ]] && [[ "$need_il2cpp" == false ]]; then
-        info "BepInEx already available (mono + il2cpp)"
+    if [[ "$need_mono_win" == false ]] && [[ "$need_mono_linux" == false ]] && [[ "$need_il2cpp" == false ]]; then
+        info "BepInEx already available (mono-win + mono-linux + il2cpp)"
         return 0
     fi
 
     step "Downloading BepInEx..."
     local tmp_dir=$(mktemp -d)
+    local bep_ver="5.4.23.4"
 
     # Download needed files in parallel
-    if [[ "$need_mono" == true ]]; then
-        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.4/BepInEx_win_x64_5.4.23.4.zip" \
-            -o "$tmp_dir/mono.zip" &
-        local mono_pid=$!
+    if [[ "$need_mono_win" == true ]]; then
+        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v${bep_ver}/BepInEx_win_x64_${bep_ver}.zip" \
+            -o "$tmp_dir/mono_win.zip" &
+        local mono_win_pid=$!
+    fi
+    if [[ "$need_mono_linux" == true ]]; then
+        curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v${bep_ver}/BepInEx_linux_x64_${bep_ver}.zip" \
+            -o "$tmp_dir/mono_linux.zip" &
+        local mono_linux_pid=$!
     fi
     if [[ "$need_il2cpp" == true ]]; then
         curl -fsSL "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" \
@@ -490,21 +498,41 @@ download_bepinex() {
         local il2cpp_pid=$!
     fi
 
-    # Wait and extract
-    if [[ "$need_mono" == true ]]; then
-        if wait $mono_pid && [[ -f "$tmp_dir/mono.zip" ]]; then
-            unzip -q "$tmp_dir/mono.zip" -d "$tmp_dir/mono"
-            chmod -R u+rwX "$tmp_dir/mono"
+    # Wait and extract - Windows Mono
+    if [[ "$need_mono_win" == true ]]; then
+        if wait $mono_win_pid && [[ -f "$tmp_dir/mono_win.zip" ]]; then
+            unzip -q "$tmp_dir/mono_win.zip" -d "$tmp_dir/mono_win"
+            chmod -R u+rwX "$tmp_dir/mono_win"
             mkdir -p "$bepinex_out/mono"
-            cp -r "$tmp_dir/mono/BepInEx/core" "$bepinex_out/mono/"
-            cp -f "$tmp_dir/mono/winhttp.dll" "$bepinex_out/mono/" 2>/dev/null || true
-            cp -f "$tmp_dir/mono/doorstop_config.ini" "$bepinex_out/mono/" 2>/dev/null || true
-            info "BepInEx 5 (Mono) downloaded"
+            cp -r "$tmp_dir/mono_win/BepInEx/core" "$bepinex_out/mono/"
+            cp -f "$tmp_dir/mono_win/winhttp.dll" "$bepinex_out/mono/" 2>/dev/null || true
+            cp -f "$tmp_dir/mono_win/doorstop_config.ini" "$bepinex_out/mono/" 2>/dev/null || true
+            info "BepInEx 5 (Mono/Windows) downloaded"
         else
-            warn "Failed to download BepInEx (mono)"
+            warn "Failed to download BepInEx (mono-win)"
         fi
     fi
 
+    # Wait and extract - Linux Mono
+    if [[ "$need_mono_linux" == true ]]; then
+        if wait $mono_linux_pid && [[ -f "$tmp_dir/mono_linux.zip" ]]; then
+            unzip -q "$tmp_dir/mono_linux.zip" -d "$tmp_dir/mono_linux"
+            chmod -R u+rwX "$tmp_dir/mono_linux"
+            mkdir -p "$bepinex_out/mono-linux"
+            cp -r "$tmp_dir/mono_linux/BepInEx/core" "$bepinex_out/mono-linux/"
+            # Linux uses libdoorstop.so and run script instead of winhttp.dll
+            cp -f "$tmp_dir/mono_linux/libdoorstop.so" "$bepinex_out/mono-linux/" 2>/dev/null || true
+            cp -f "$tmp_dir/mono_linux/run_bepinex.sh" "$bepinex_out/mono-linux/" 2>/dev/null || true
+            cp -f "$tmp_dir/mono_linux/.doorstop_version" "$bepinex_out/mono-linux/" 2>/dev/null || true
+            chmod +x "$bepinex_out/mono-linux/run_bepinex.sh" 2>/dev/null || true
+            chmod +x "$bepinex_out/mono-linux/libdoorstop.so" 2>/dev/null || true
+            info "BepInEx 5 (Mono/Linux) downloaded"
+        else
+            warn "Failed to download BepInEx (mono-linux)"
+        fi
+    fi
+
+    # Wait and extract - IL2CPP (Windows only for now)
     if [[ "$need_il2cpp" == true ]]; then
         if wait $il2cpp_pid && [[ -f "$tmp_dir/il2cpp.zip" ]]; then
             unzip -q "$tmp_dir/il2cpp.zip" -d "$tmp_dir/il2cpp"
@@ -521,6 +549,28 @@ download_bepinex() {
 
     rm -rf "$tmp_dir"
     return 0
+}
+
+download_facepunch() {
+    local fp_out="$SCRIPT_DIR/res/facepunch"
+    local fp_repo="splitux-gg/bepinex-facepunch-splitux"
+    local fp_release="v2.1.0"
+
+    if [[ -f "$fp_out/SplituxFacepunch.dll" ]]; then
+        info "SplituxFacepunch already available"
+        return 0
+    fi
+
+    step "Downloading SplituxFacepunch..."
+    mkdir -p "$fp_out"
+    local base_url="https://github.com/$fp_repo/releases/download/$fp_release"
+
+    if ! curl -fsSL "$base_url/SplituxFacepunch.dll" -o "$fp_out/SplituxFacepunch.dll"; then
+        warn "Failed to download SplituxFacepunch"
+        return 1
+    fi
+
+    info "SplituxFacepunch downloaded"
 }
 
 # =============================================================================
@@ -548,6 +598,8 @@ do_build() {
     local bep_pid=$!
     download_gamescope &
     local gsc_pid=$!
+    download_facepunch &
+    local fp_pid=$!
 
     # Build splitux while dependencies download
     build_splitux
@@ -556,6 +608,7 @@ do_build() {
     wait $gbe_pid 2>/dev/null || warn "Goldberg download may have failed"
     wait $bep_pid 2>/dev/null || warn "BepInEx download may have failed"
     wait $gsc_pid 2>/dev/null || warn "gamescope-splitux download may have failed"
+    wait $fp_pid 2>/dev/null || warn "SplituxFacepunch download may have failed"
 
     # Setup build directory
     step "Setting up build directory..."
@@ -629,7 +682,7 @@ do_clean() {
     step "Cleaning..."
     rm -rf "$BUILD_DIR"
     rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
-    rm -rf "$SCRIPT_DIR/res/bepinex"
+    rm -rf "$SCRIPT_DIR/res/bepinex/mono" "$SCRIPT_DIR/res/bepinex/mono-linux" "$SCRIPT_DIR/res/bepinex/il2cpp"
     rm -rf "$SCRIPT_DIR/res/gamescope-splitux"
     cargo clean 2>/dev/null || true
     info "Clean complete"
