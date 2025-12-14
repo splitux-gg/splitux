@@ -64,7 +64,7 @@ jobs:
 
           # Download gamescope-splitux
           curl -fsSL https://github.com/gabrielgad/gamescope-splitux/releases/download/v1.0.0/gamescope-splitux-v1.0.0.zip -o /tmp/gsc.zip
-          unzip -q /tmp/gsc.zip -d res/gamescope-splitux
+          unzip -o -q /tmp/gsc.zip -d res/gamescope-splitux
 
           # Download Goldberg (Linux)
           curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
@@ -279,8 +279,8 @@ jobs:
               buildsystem: meson
               sources:
                 - type: archive
-                  url: https://github.com/containers/fuse-overlayfs/releases/download/v1.13/fuse-overlayfs-1.13.tar.gz
-                  sha256: 96d40abbb3e70fb0a14b3f4eb04e597b9ef404ca4f389193aa1d12ae93e4e484
+                  url: https://github.com/containers/fuse-overlayfs/releases/download/v1.14/fuse-overlayfs-1.14.tar.gz
+                  sha256: 0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5
 
             - name: splitux
               buildsystem: simple
