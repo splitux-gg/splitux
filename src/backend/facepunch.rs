@@ -20,8 +20,11 @@ mod types;
 // Re-export types for external use
 pub use types::{FacepunchConfig, RuntimePatch};
 
-// Note: Additional re-exports commented out until migration complete (see Phase 9.5)
-// pub use operations::{create_instance_overlay, get_linux_bepinex_env};
+// Internal re-exports (used within this module)
+pub use operations::create_instance_overlay;
+
+// Note: Additional re-exports for external use commented out until migration complete (see Phase 9.5)
+// pub use operations::get_linux_bepinex_env;
 // pub use pipelines::create_all_overlays;
 
 /// Facepunch settings from handler YAML (dot-notation: facepunch.*)

@@ -300,8 +300,8 @@ jobs:
                   path: .
           MANIFEST
 
-          # Build flatpak
-          flatpak-builder --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
+          # Build flatpak (--allow-build-network for rustup to download Rust)
+          flatpak-builder --force-clean --allow-build-network --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
           flatpak build-bundle repo release/Splitux-${{ steps.version.outputs.version }}.flatpak gg.splitux.Splitux

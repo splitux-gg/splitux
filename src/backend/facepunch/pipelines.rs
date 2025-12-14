@@ -4,4 +4,5 @@
 
 mod setup;
 
-pub use setup::create_all_overlays;
+// Note: Re-export commented out until migration complete (see Phase 9.5)
+// pub use setup::create_all_overlays;
