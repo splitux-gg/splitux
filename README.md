@@ -13,9 +13,9 @@ Split-screen gaming on Linux
 </p>
 
 <p align="center">
-    <img src=".github/assets/drg-splitscreen.png" width="80%" />
+    <img src=".github/assets/riftbreaker-splitscreen.png" width="80%" />
     <br>
-    <em>Deep Rock Galactic - Two players in the Space Rig</em>
+    <em>The Riftbreaker - Co-op base defense on an alien planet</em>
 </p>
 
 <p align="center">
