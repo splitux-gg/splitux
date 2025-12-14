@@ -286,6 +286,8 @@ jobs:
             - name: splitux
               buildsystem: simple
               build-options:
+                build-args:
+                  - --share=network
                 env:
                   CARGO_HOME: /run/build/splitux/cargo
                   RUSTUP_HOME: /run/build/splitux/rustup
@@ -300,8 +302,8 @@ jobs:
                   path: .
           MANIFEST
 
-          # Build flatpak (--allow-build-network for rustup to download Rust)
-          flatpak-builder --force-clean --allow-build-network --repo=repo build-dir gg.splitux.Splitux.yml
+          # Build flatpak
+          flatpak-builder --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
           flatpak build-bundle repo release/Splitux-${{ steps.version.outputs.version }}.flatpak gg.splitux.Splitux

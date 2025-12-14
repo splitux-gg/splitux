@@ -164,7 +164,56 @@ facepunch.force_valid: true
 
 ---
 
-## Final Directory Structure
+## Current State (After Phase 9 Partial Cleanup)
+
+```
+src/
+├── main.rs
+│
+├── handler.rs                  # ✅ ACTIVE - Handler struct + methods
+├── handler/
+│   ├── types.rs                # ✅ WIRED - RequiredMod, PhotonSettings, etc.
+│   └── io.rs                   # ✅ WIRED - scan_handlers, import_handler
+│
+├── backend.rs                  # ✅ ACTIVE - Backend trait + create_backend_overlays()
+├── backend/
+│   ├── goldberg.rs             # ⚠️ PARTIAL - Settings types used, rest orphaned
+│   ├── goldberg/               # ❌ ORPHANED - 4-layer structure, dead code
+│   ├── photon.rs               # ⚠️ PARTIAL - Settings types used, rest orphaned
+│   ├── photon/                 # ❌ ORPHANED - 4-layer structure, dead code
+│   ├── facepunch.rs            # ⚠️ PARTIAL - Settings types used, rest orphaned
+│   └── facepunch/              # ❌ ORPHANED - 4-layer structure, dead code
+│
+├── launch.rs                   # ✅ ACTIVE - re-exports from launch/
+├── launch/
+│   ├── types.rs                # ✅ WIRED
+│   ├── pure/                   # ✅ WIRED
+│   ├── operations/             # ✅ WIRED
+│   └── pipelines/              # ✅ WIRED
+│
+├── facepunch.rs                # ⚠️ OLD BUT ACTIVE - should migrate to backend/
+├── goldberg.rs                 # ⚠️ OLD BUT ACTIVE - should migrate to backend/
+├── photon.rs                   # ⚠️ OLD BUT ACTIVE - should migrate to backend/
+│
+├── platform.rs                 # ✅ ACTIVE
+├── platform/                   # ⚠️ PARTIAL - some orphaned code
+│
+└── [other modules...]          # ✅ ACTIVE
+```
+
+**Legend:**
+- ✅ ACTIVE/WIRED - Code is used and properly integrated
+- ⚠️ PARTIAL/OLD - Code works but needs migration
+- ❌ ORPHANED - Dead code, not called from anywhere
+
+---
+
+## Target Directory Structure (After Phase 9.5)
+
+**Files to DELETE after migration:**
+- `src/facepunch.rs` (replaced by `backend/facepunch/`)
+- `src/goldberg.rs` (replaced by `backend/goldberg/`)
+- `src/photon.rs` (replaced by `backend/photon/`)
 
 ```
 src/
