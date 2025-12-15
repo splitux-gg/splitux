@@ -4,9 +4,9 @@ use std::error::Error;
 use std::path::PathBuf;
 
 pub const REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/gabrielgad/splitux-handlers/main/index.json";
+    "https://raw.githubusercontent.com/splitux-gg/splitux-handlers/main/index.json";
 pub const REGISTRY_BASE: &str =
-    "https://raw.githubusercontent.com/gabrielgad/splitux-handlers/main/handlers";
+    "https://raw.githubusercontent.com/splitux-gg/splitux-handlers/main/handlers";
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct RegistryIndex {
