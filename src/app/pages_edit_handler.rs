@@ -1,6 +1,6 @@
 // Handler editing page display functions
 
-use super::app::PartyApp;
+use super::app::Splitux;
 use crate::handler::{scan_handlers, SDL2Override, HANDLER_SPEC_CURRENT_VERSION};
 use crate::paths::PATH_HOME;
 use crate::util::{dir_dialog, file_dialog_relative, msg};
@@ -8,7 +8,7 @@ use eframe::egui::{self, RichText, Ui};
 use rfd::FileDialog;
 use std::path::PathBuf;
 
-impl PartyApp {
+impl Splitux {
     pub fn display_edit_handler_modal(&mut self, ctx: &egui::Context) {
         egui::Window::new("Edit Handler")
             .collapsible(false)

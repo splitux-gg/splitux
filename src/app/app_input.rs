@@ -1,11 +1,11 @@
 // Input handling for gamepad/keyboard navigation
 
-use super::app::{FocusPane, InstanceFocus, MenuPage, PartyApp};
+use super::app::{FocusPane, InstanceFocus, MenuPage, RegistryFocus, SettingsFocus, Splitux};
 use crate::input::*;
 
 use eframe::egui::{self, Key, Vec2};
 
-impl PartyApp {
+impl Splitux {
     pub(super) fn handle_gamepad_gui(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         // Debug: uncomment to trace input flow
         // println!("[DEBUG] handle_gamepad_gui: page={:?}, handlers={}, pane={:?}",
@@ -20,14 +20,19 @@ impl PartyApp {
         let mut start_pressed = false;
         let mut confirm_profile_selection = false;
         let mut open_profile_dropdown = false;
+        let mut fetch_registry_needed = false;
 
         // Cache values needed during loop
         let dropdown_open = self.profile_dropdown_open;
         let dropdown_selection = self.profile_dropdown_selection;
         let profiles_len = self.profiles.len();
         let on_games_page = self.cur_page == MenuPage::Games;
+        let on_registry_page = self.cur_page == MenuPage::Registry;
+        let on_settings_page = self.cur_page == MenuPage::Settings;
         let on_instances_page = self.cur_page == MenuPage::Instances;
         let has_handlers = !self.handlers.is_empty();
+        let registry_needs_fetch = self.registry_index.is_none() && !self.registry_loading;
+        let registry_handler_count = self.registry_index.as_ref().map(|r| r.handlers.len()).unwrap_or(0);
 
         for pad in &mut self.input_devices {
             if !pad.enabled() {
@@ -55,6 +60,33 @@ impl PartyApp {
                             }
                             FocusPane::ActionBar | FocusPane::InfoPane => {
                                 // Activate focused action button
+                                self.activate_focused = true;
+                            }
+                        }
+                    } else if on_registry_page {
+                        // Registry page A button behavior
+                        match self.registry_focus {
+                            RegistryFocus::HandlerList => {
+                                // A on handler list = move to install button
+                                if self.registry_selected.is_some() {
+                                    self.registry_focus = RegistryFocus::InstallButton;
+                                }
+                            }
+                            RegistryFocus::InstallButton => {
+                                // A on install button = activate it
+                                self.activate_focused = true;
+                            }
+                        }
+                    } else if on_settings_page {
+                        // Settings page A button behavior
+                        match self.settings_focus {
+                            SettingsFocus::Options => {
+                                // A in options area = activate focused widget
+                                self.activate_focused = true;
+                                key = Some(Key::Enter);
+                            }
+                            SettingsFocus::BottomButtons => {
+                                // A on bottom buttons = activate
                                 self.activate_focused = true;
                             }
                         }
@@ -117,9 +149,19 @@ impl PartyApp {
                     } else if on_games_page && has_handlers {
                         match self.focus_pane {
                             FocusPane::GameList => {
-                                // Navigate game list up
-                                if self.selected_handler > 0 {
-                                    self.selected_handler -= 1;
+                                if self.game_panel_bottom_focused {
+                                    // Navigate up from bottom buttons
+                                    if self.game_panel_bottom_index > 0 {
+                                        self.game_panel_bottom_index -= 1;
+                                    } else {
+                                        // Return to game list
+                                        self.game_panel_bottom_focused = false;
+                                    }
+                                } else {
+                                    // Navigate game list up
+                                    if self.selected_handler > 0 {
+                                        self.selected_handler -= 1;
+                                    }
                                 }
                             }
                             FocusPane::ActionBar => {
@@ -130,6 +172,37 @@ impl PartyApp {
                                 if self.info_pane_index > 0 {
                                     self.info_pane_index -= 1;
                                 }
+                            }
+                        }
+                    } else if on_registry_page {
+                        // Registry page Up navigation
+                        match self.registry_focus {
+                            RegistryFocus::HandlerList => {
+                                // Navigate handler list up
+                                if let Some(sel) = self.registry_selected {
+                                    if sel > 0 {
+                                        self.registry_selected = Some(sel - 1);
+                                    }
+                                } else if registry_handler_count > 0 {
+                                    self.registry_selected = Some(0);
+                                }
+                            }
+                            RegistryFocus::InstallButton => {
+                                // No vertical nav on install button
+                            }
+                        }
+                    } else if on_settings_page {
+                        // Settings page Up navigation
+                        match self.settings_focus {
+                            SettingsFocus::Options => {
+                                // Navigate up through settings options
+                                if self.settings_option_index > 0 {
+                                    self.settings_option_index -= 1;
+                                }
+                            }
+                            SettingsFocus::BottomButtons => {
+                                // Move back to options area (last option)
+                                self.settings_focus = SettingsFocus::Options;
                             }
                         }
                     } else if !on_instances_page {
@@ -144,9 +217,20 @@ impl PartyApp {
                     } else if on_games_page && has_handlers {
                         match self.focus_pane {
                             FocusPane::GameList => {
-                                // Navigate game list down
-                                if self.selected_handler < self.handlers.len() - 1 {
-                                    self.selected_handler += 1;
+                                if self.game_panel_bottom_focused {
+                                    // Navigate down within bottom buttons
+                                    if self.game_panel_bottom_index < 1 {
+                                        self.game_panel_bottom_index += 1;
+                                    }
+                                } else {
+                                    // Navigate game list down
+                                    if self.selected_handler < self.handlers.len() - 1 {
+                                        self.selected_handler += 1;
+                                    } else {
+                                        // At last game, move to bottom buttons
+                                        self.game_panel_bottom_focused = true;
+                                        self.game_panel_bottom_index = 0;
+                                    }
                                 }
                             }
                             FocusPane::ActionBar => {
@@ -155,6 +239,42 @@ impl PartyApp {
                             FocusPane::InfoPane => {
                                 // Navigate down in info pane (limit set in pages_games)
                                 self.info_pane_index += 1;
+                            }
+                        }
+                    } else if on_registry_page {
+                        // Registry page Down navigation
+                        match self.registry_focus {
+                            RegistryFocus::HandlerList => {
+                                // Navigate handler list down
+                                if let Some(sel) = self.registry_selected {
+                                    if sel + 1 < registry_handler_count {
+                                        self.registry_selected = Some(sel + 1);
+                                    }
+                                } else if registry_handler_count > 0 {
+                                    self.registry_selected = Some(0);
+                                }
+                            }
+                            RegistryFocus::InstallButton => {
+                                // No vertical nav on install button
+                            }
+                        }
+                    } else if on_settings_page {
+                        // Settings page Down navigation (20 total options: 0-19)
+                        const SETTINGS_MAX_OPTIONS: usize = 19; // 0-indexed max
+                        match self.settings_focus {
+                            SettingsFocus::Options => {
+                                // Navigate down through settings options
+                                if self.settings_option_index < SETTINGS_MAX_OPTIONS {
+                                    self.settings_option_index += 1;
+                                } else {
+                                    // Move to bottom buttons
+                                    self.settings_focus = SettingsFocus::BottomButtons;
+                                    self.settings_button_index = 0;
+                                }
+                            }
+                            SettingsFocus::BottomButtons => {
+                                // Cycle button selection
+                                self.settings_button_index = (self.settings_button_index + 1) % 2;
                             }
                         }
                     } else if !on_instances_page {
@@ -183,6 +303,31 @@ impl PartyApp {
                                 self.focus_pane = FocusPane::ActionBar;
                             }
                         }
+                    } else if on_registry_page {
+                        // Registry page Left navigation
+                        match self.registry_focus {
+                            RegistryFocus::HandlerList => {
+                                // Already at leftmost - do nothing
+                            }
+                            RegistryFocus::InstallButton => {
+                                // Move back to handler list
+                                self.registry_focus = RegistryFocus::HandlerList;
+                            }
+                        }
+                    } else if on_settings_page {
+                        // Settings page Left navigation
+                        match self.settings_focus {
+                            SettingsFocus::Options => {
+                                // Left in options can cycle radio buttons (handled in UI)
+                                key = Some(Key::ArrowLeft);
+                            }
+                            SettingsFocus::BottomButtons => {
+                                // Navigate between bottom buttons
+                                if self.settings_button_index > 0 {
+                                    self.settings_button_index -= 1;
+                                }
+                            }
+                        }
                     } else if !on_instances_page {
                         key = Some(Key::ArrowLeft);
                     }
@@ -193,9 +338,10 @@ impl PartyApp {
                     } else if on_games_page && has_handlers {
                         match self.focus_pane {
                             FocusPane::GameList => {
-                                // Move from game list to action bar
+                                // Move from game list/bottom buttons to action bar
                                 self.focus_pane = FocusPane::ActionBar;
                                 self.action_bar_index = 0; // Start at Play button
+                                self.game_panel_bottom_focused = false; // Reset bottom focus
                             }
                             FocusPane::ActionBar => {
                                 // Navigate right in action bar (Play -> Profile -> Edit)
@@ -210,14 +356,48 @@ impl PartyApp {
                                 // Already at rightmost - do nothing
                             }
                         }
+                    } else if on_registry_page {
+                        // Registry page Right navigation
+                        match self.registry_focus {
+                            RegistryFocus::HandlerList => {
+                                // Move to install button if handler selected
+                                if self.registry_selected.is_some() {
+                                    self.registry_focus = RegistryFocus::InstallButton;
+                                }
+                            }
+                            RegistryFocus::InstallButton => {
+                                // Already at rightmost - do nothing
+                            }
+                        }
+                    } else if on_settings_page {
+                        // Settings page Right navigation
+                        match self.settings_focus {
+                            SettingsFocus::Options => {
+                                // Right in options can cycle radio buttons (handled in UI)
+                                key = Some(Key::ArrowRight);
+                            }
+                            SettingsFocus::BottomButtons => {
+                                // Navigate between bottom buttons
+                                if self.settings_button_index < 1 {
+                                    self.settings_button_index += 1;
+                                }
+                            }
+                        }
                     } else if !on_instances_page {
                         key = Some(Key::ArrowRight);
                     }
                 }
-                Some(PadButton::LB) | Some(PadButton::RB) => {
-                    // Toggle between Games and Settings (2 tabs only)
+                Some(PadButton::RB) => {
+                    // Cycle forward: Games → Registry → Settings → Games
                     match self.cur_page {
                         MenuPage::Games => {
+                            self.cur_page = MenuPage::Registry;
+                            if registry_needs_fetch {
+                                fetch_registry_needed = true;
+                            }
+                            page_changed = true;
+                        }
+                        MenuPage::Registry => {
                             self.cur_page = MenuPage::Settings;
                             page_changed = true;
                         }
@@ -225,7 +405,28 @@ impl PartyApp {
                             self.cur_page = MenuPage::Games;
                             page_changed = true;
                         }
-                        _ => {} // Don't cycle from Instances page
+                        MenuPage::Instances => {} // Don't cycle from Instances page
+                    }
+                }
+                Some(PadButton::LB) => {
+                    // Cycle backward: Games → Settings → Registry → Games
+                    match self.cur_page {
+                        MenuPage::Games => {
+                            self.cur_page = MenuPage::Settings;
+                            page_changed = true;
+                        }
+                        MenuPage::Registry => {
+                            self.cur_page = MenuPage::Games;
+                            page_changed = true;
+                        }
+                        MenuPage::Settings => {
+                            self.cur_page = MenuPage::Registry;
+                            if registry_needs_fetch {
+                                fetch_registry_needed = true;
+                            }
+                            page_changed = true;
+                        }
+                        MenuPage::Instances => {} // Don't cycle from Instances page
                     }
                 }
                 Some(PadButton::LT) | Some(PadButton::RT) => {
@@ -257,6 +458,10 @@ impl PartyApp {
         }
 
         if let Some(delta) = scroll_delta {
+            // Set pointer position to center of screen so scroll events work
+            let screen_rect = ctx.screen_rect();
+            let center = screen_rect.center();
+            raw_input.events.push(egui::Event::PointerMoved(center));
             raw_input.events.push(egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
                 delta,
@@ -272,6 +477,9 @@ impl PartyApp {
             self.profile_dropdown_selection = self.get_current_profile();
             self.profile_dropdown_open = true;
         }
+        if fetch_registry_needed {
+            self.fetch_registry();
+        }
 
         // Handle Start button press after loop to avoid borrow issues
         if start_pressed && self.cur_page == MenuPage::Games && !self.handlers.is_empty() {
@@ -281,10 +489,20 @@ impl PartyApp {
 
         // When page changes, reset focus to first widget
         if page_changed {
+            // Reset Games page focus
             self.focus_pane = FocusPane::GameList;
             self.action_bar_index = 0;
             self.info_pane_index = 0;
             self.info_pane_scroll = 0.0;
+            self.game_panel_bottom_focused = false;
+            self.game_panel_bottom_index = 0;
+            // Reset Registry page focus
+            self.registry_focus = RegistryFocus::HandlerList;
+            // Reset Settings page focus
+            self.settings_focus = SettingsFocus::Options;
+            self.settings_button_index = 0;
+            self.settings_option_index = 0;
+            // Reset general focus
             self.focus_manager.focus_first();
             ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::NULL));
         }

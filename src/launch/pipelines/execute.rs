@@ -1,6 +1,10 @@
 //! Game execution pipeline
 
 use crate::app::{PartyConfig, WindowManagerType};
+use crate::audio::{
+    resolve_audio_system, setup_audio_session, teardown_audio_session, AudioContext, AudioSystem,
+    VirtualSink,
+};
 use crate::handler::Handler;
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
@@ -17,7 +21,10 @@ pub fn launch_game(
     monitors: &[Monitor],
     cfg: &PartyConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let new_cmds = launch_cmds(h, input_devices, instances, cfg)?;
+    // Set up audio routing if enabled
+    let (audio_system, virtual_sinks, audio_sink_envs) = setup_audio_routing(instances, cfg);
+
+    let new_cmds = launch_cmds(h, input_devices, instances, cfg, &audio_sink_envs)?;
     print_launch_cmds(&new_cmds);
 
     // Create WM backend based on config
@@ -89,5 +96,55 @@ pub fn launch_game(
     println!("[splitux] Tearing down {} window manager", wm.name());
     wm.teardown()?;
 
+    // Teardown audio routing
+    if !virtual_sinks.is_empty() {
+        if let Err(e) = teardown_audio_session(audio_system, &virtual_sinks) {
+            println!("[splitux] Warning: Audio teardown failed: {}", e);
+        }
+    }
+
     Ok(())
+}
+
+/// Set up audio routing for all instances
+///
+/// Returns (audio_system, virtual_sinks, sink_env_vars_per_instance)
+fn setup_audio_routing(
+    instances: &[Instance],
+    cfg: &PartyConfig,
+) -> (AudioSystem, Vec<VirtualSink>, Vec<String>) {
+    if !cfg.audio.enabled {
+        // Audio routing disabled, return empty vectors
+        return (AudioSystem::None, vec![], vec![String::new(); instances.len()]);
+    }
+
+    let audio_system = resolve_audio_system(cfg.audio.system);
+    if audio_system == AudioSystem::None {
+        println!("[splitux] audio - No audio system available, skipping audio routing");
+        return (AudioSystem::None, vec![], vec![String::new(); instances.len()]);
+    }
+
+    // Build assignments from config
+    let assignments: Vec<Option<String>> = (0..instances.len())
+        .map(|i| cfg.audio.default_assignments.get(&i).cloned())
+        .collect();
+
+    let ctx = AudioContext {
+        system: audio_system,
+        assignments,
+    };
+
+    match setup_audio_session(&ctx) {
+        Ok((virtual_sinks, sink_envs)) => {
+            println!(
+                "[splitux] audio - Audio routing set up: {} virtual sinks",
+                virtual_sinks.len()
+            );
+            (audio_system, virtual_sinks, sink_envs)
+        }
+        Err(e) => {
+            println!("[splitux] audio - Warning: Audio setup failed: {}", e);
+            (audio_system, vec![], vec![String::new(); instances.len()])
+        }
+    }
 }

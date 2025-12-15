@@ -1,12 +1,12 @@
 // Registry page - browse and download handlers from online registry
 
-use super::app::PartyApp;
+use super::app::{RegistryFocus, Splitux};
 use super::theme;
 use crate::handler::scan_handlers;
 use crate::registry::{download_handler, fetch_registry, RegistryEntry};
 use eframe::egui::{self, RichText, Ui};
 
-impl PartyApp {
+impl Splitux {
     pub fn display_page_registry(&mut self, ui: &mut Ui) {
         // Show loading state
         if self.registry_loading {
@@ -71,12 +71,13 @@ impl PartyApp {
             })
             .collect();
 
-        // Two-panel layout: left list, right details
-        ui.horizontal(|ui| {
-            // Left panel: handler list
-            ui.vertical(|ui| {
-                ui.set_width(200.0);
+        // Calculate available height for the scroll area
+        let available_height = ui.available_height();
 
+        // Two-panel layout using columns
+        ui.columns(2, |columns| {
+            // Left column: handler list
+            columns[0].vertical(|ui| {
                 // Search box
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -91,20 +92,27 @@ impl PartyApp {
                 ui.separator();
                 ui.add_space(4.0);
 
-                // Handler list
+                // Handler list with explicit height
+                let is_list_focused = self.registry_focus == RegistryFocus::HandlerList;
+                let scroll_height = (available_height - 80.0).max(200.0);
                 egui::ScrollArea::vertical()
-                    .max_height(ui.available_height() - 16.0)
+                    .max_height(scroll_height)
                     .show(ui, |ui| {
                         for (original_idx, entry) in &filtered_handlers {
                             let is_selected = self.registry_selected == Some(*original_idx);
                             let is_installed = entry.is_installed();
+                            let show_focus = is_selected && is_list_focused;
 
                             let frame = if is_selected {
                                 egui::Frame::NONE
                                     .fill(theme::colors::SELECTION_BG)
                                     .corner_radius(6)
                                     .inner_margin(egui::Margin::symmetric(6, 4))
-                                    .stroke(egui::Stroke::new(1.0, theme::colors::ACCENT_DIM))
+                                    .stroke(if show_focus {
+                                        theme::focus_stroke()
+                                    } else {
+                                        egui::Stroke::new(1.0, theme::colors::ACCENT_DIM)
+                                    })
                             } else {
                                 egui::Frame::NONE
                                     .fill(egui::Color32::TRANSPARENT)
@@ -112,7 +120,7 @@ impl PartyApp {
                                     .inner_margin(egui::Margin::symmetric(6, 4))
                             };
 
-                            frame.show(ui, |ui| {
+                            let frame_resp = frame.show(ui, |ui| {
                                 let response = ui.horizontal(|ui| {
                                     // Icon from registry CDN
                                     let icon_url = entry.icon_url();
@@ -140,15 +148,17 @@ impl PartyApp {
                                     self.registry_selected = Some(*original_idx);
                                 }
                             });
+                            // Auto-scroll to keep focused handler visible
+                            if show_focus {
+                                frame_resp.response.scroll_to_me(Some(egui::Align::Center));
+                            }
                             ui.add_space(2.0);
                         }
                     });
             });
 
-            ui.separator();
-
-            // Right panel: selected handler details
-            ui.vertical(|ui| {
+            // Right column: selected handler details
+            columns[1].vertical(|ui| {
                 ui.add_space(8.0);
 
                 if let Some(selected_idx) = self.registry_selected {
@@ -217,19 +227,25 @@ impl PartyApp {
         }
 
         // Install/Installed button
+        let is_button_focused = self.registry_focus == RegistryFocus::InstallButton;
         ui.horizontal(|ui| {
             if is_installed {
-                ui.add_enabled(false, egui::Button::new("Installed").min_size(egui::vec2(100.0, 32.0)));
+                let mut btn = egui::Button::new("Installed").min_size(egui::vec2(100.0, 32.0));
+                if is_button_focused {
+                    btn = btn.stroke(theme::focus_stroke());
+                }
+                ui.add_enabled(false, btn);
                 ui.add_space(8.0);
                 ui.label(RichText::new("This handler is already installed").small().color(theme::colors::SUCCESS));
             } else if is_installing {
                 ui.add_enabled(false, egui::Button::new("Installing...").min_size(egui::vec2(100.0, 32.0)));
             } else {
-                let install_btn = ui.add(
-                    egui::Button::new("Install")
-                        .min_size(egui::vec2(100.0, 32.0))
-                );
-                if install_btn.clicked() {
+                let mut btn = egui::Button::new("Install").min_size(egui::vec2(100.0, 32.0));
+                if is_button_focused {
+                    btn = btn.stroke(theme::focus_stroke());
+                }
+                let install_btn = ui.add(btn);
+                if install_btn.clicked() || (is_button_focused && self.activate_focused) {
                     self.install_registry_handler(entry.clone());
                 }
             }

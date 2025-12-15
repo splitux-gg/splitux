@@ -1,4 +1,5 @@
 mod app;
+mod audio;
 mod backend;
 mod bwrap;
 #[allow(dead_code)]
@@ -22,6 +23,10 @@ mod registry;
 mod save_sync;
 mod util;
 mod wm;
+
+// New domain structure (Phase 1 scaffolding)
+mod config;
+mod ui;
 
 use crate::app::*;
 use crate::handler::Handler;
@@ -164,7 +169,7 @@ fn main() -> eframe::Result {
             // Apply custom theme
             crate::app::theme::apply_theme(&cc.egui_ctx);
 
-            Ok(Box::<PartyApp>::new(PartyApp::new(
+            Ok(Box::<Splitux>::new(Splitux::new(
                 monitors.clone(),
                 handler_lite,
             )))

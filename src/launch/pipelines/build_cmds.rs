@@ -21,11 +21,15 @@ use super::super::pure::validate_runtime;
 use super::super::types::SDL_GAMECONTROLLER_IGNORE_DEVICES;
 
 /// Build launch commands for all instances
+///
+/// The `audio_sink_envs` parameter is a list of PULSE_SINK values per instance.
+/// Empty string means no audio routing for that instance.
 pub fn launch_cmds(
     h: &Handler,
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
     cfg: &PartyConfig,
+    audio_sink_envs: &[String],
 ) -> Result<Vec<std::process::Command>, Box<dyn std::error::Error>> {
     let win = h.win();
     let exec = Path::new(&h.exec);
@@ -147,6 +151,14 @@ pub fn launch_cmds(
 
             // Set up SDL environment inside container
             bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
+
+            // Set up audio routing inside container
+            if let Some(sink_name) = audio_sink_envs.get(i) {
+                if !sink_name.is_empty() {
+                    bwrap::setup_audio_env(&mut cmd, sink_name);
+                    println!("[splitux] Instance {}: PULSE_SINK={}", i, sink_name);
+                }
+            }
 
             // Set up BepInEx environment for Linux native games with Facepunch
             if !win && h.has_facepunch() {

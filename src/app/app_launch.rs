@@ -2,7 +2,7 @@
 
 use std::thread::sleep;
 
-use super::app::{InstanceFocus, MenuPage, PartyApp};
+use super::app::{InstanceFocus, MenuPage, Splitux};
 use super::config::save_cfg;
 use crate::input::*;
 use crate::instance::*;
@@ -18,7 +18,7 @@ macro_rules! cur_handler {
     };
 }
 
-impl PartyApp {
+impl Splitux {
     pub fn start_game_setup(&mut self) {
         let h = &self.handlers[self.selected_handler];
         if h.steam_appid.is_none() && h.path_gameroot.is_empty() {

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::config::*;
 use super::focus::FocusManager;
+use crate::audio::{resolve_audio_system, scan_sinks, AudioSink, AudioSystem};
 use crate::handler::*;
 use crate::input::*;
 use crate::instance::*;
@@ -14,29 +15,10 @@ use crate::util::*;
 
 use eframe::egui;
 
-#[derive(Eq, PartialEq, Debug, Clone, Copy)]
-pub enum FocusPane {
-    GameList,   // Left panel - game selection
-    ActionBar,  // Center panel - Play, Profile, Edit buttons
-    InfoPane,   // Right side - scrollable info area with buttons
-}
+// Re-export types from ui module (migrated)
+pub use crate::ui::{FocusPane, InstanceFocus, MenuPage, RegistryFocus, SettingsFocus};
 
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
-pub enum InstanceFocus {
-    #[default]
-    Devices,       // Device/instance cards
-    LaunchOptions, // Launch options bar at bottom
-}
-
-#[derive(Eq, PartialEq, Debug)]
-pub enum MenuPage {
-    Games,     // Combined home + profiles view
-    Registry,  // Browse and download handlers from online registry
-    Settings,
-    Instances, // Controller assignment screen (enters when "Play" pressed)
-}
-
-pub struct PartyApp {
+pub struct Splitux {
     pub installed_steamapps: Vec<Option<steamlocate::App>>,
     pub needs_update: bool,
     pub options: PartyConfig,
@@ -68,6 +50,8 @@ pub struct PartyApp {
     pub action_bar_index: usize, // 0=Play, 1=Profile, 2=Edit
     pub info_pane_index: usize,  // Index of focused element in info pane
     pub info_pane_scroll: f32,   // Scroll offset for info pane
+    pub game_panel_bottom_focused: bool, // True if focused on Add Game/Import Handler
+    pub game_panel_bottom_index: usize,  // 0=Add Game, 1=Import Handler
 
     // Profile dropdown state (opened with Y button)
     pub profile_dropdown_open: bool,
@@ -86,9 +70,19 @@ pub struct PartyApp {
     pub registry_search: String,
     pub registry_selected: Option<usize>,
     pub registry_installing: Option<String>,
+    pub registry_focus: RegistryFocus,
+
+    // Settings state
+    pub settings_focus: SettingsFocus,
+    pub settings_button_index: usize, // 0=Save, 1=Restore
+    pub settings_option_index: usize, // Index of focused option in settings
+
+    // Audio state
+    pub audio_system: AudioSystem,
+    pub audio_devices: Vec<AudioSink>,
 }
 
-impl PartyApp {
+impl Splitux {
     pub fn new(monitors: Vec<Monitor>, handler_lite: Option<Handler>) -> Self {
         let options = load_cfg();
         let input_devices = scan_input_devices(&options.pad_filter_type);
@@ -114,6 +108,21 @@ impl PartyApp {
         };
 
         let profiles = scan_profiles(false);
+
+        // Scan audio devices
+        let audio_system = resolve_audio_system(options.audio.system);
+        let audio_devices = if audio_system != AudioSystem::None {
+            scan_sinks(audio_system).unwrap_or_else(|e| {
+                eprintln!("[splitux] audio: Failed to scan audio devices: {}", e);
+                Vec::new()
+            })
+        } else {
+            Vec::new()
+        };
+        if !audio_devices.is_empty() {
+            println!("[splitux] audio: Found {} audio output devices", audio_devices.len());
+        }
+
         let mut app = Self {
             installed_steamapps: get_installed_steamapps(),
             needs_update: false,
@@ -140,6 +149,8 @@ impl PartyApp {
             action_bar_index: 0,
             info_pane_index: 0,
             info_pane_scroll: 0.0,
+            game_panel_bottom_focused: false,
+            game_panel_bottom_index: 0,
             profile_dropdown_open: false,
             profile_dropdown_selection: 0,
             show_new_profile_dialog: false,
@@ -154,6 +165,16 @@ impl PartyApp {
             registry_search: String::new(),
             registry_selected: None,
             registry_installing: None,
+            registry_focus: RegistryFocus::default(),
+
+            // Settings state
+            settings_focus: SettingsFocus::default(),
+            settings_button_index: 0,
+            settings_option_index: 0,
+
+            // Audio state
+            audio_system,
+            audio_devices,
         };
 
         app.spawn_task("Checking for updates", move || {
@@ -164,7 +185,7 @@ impl PartyApp {
     }
 }
 
-impl eframe::App for PartyApp {
+impl eframe::App for Splitux {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if !raw_input.focused || self.task.is_some() {
             return;
@@ -176,24 +197,32 @@ impl eframe::App for PartyApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Paint full-screen background to fill any gaps between panels
+        let screen_rect = ctx.screen_rect();
+        ctx.layer_painter(egui::LayerId::background())
+            .rect_filled(screen_rect, 0.0, super::theme::colors::BG_DARK);
+
         // Poll for device hotplug events
         self.poll_device_events();
 
         // Reset focus state at start of frame
         self.focus_manager.begin_frame();
 
-
         // Enable keyboard focus navigation
         ctx.options_mut(|opt| {
             opt.input_options.line_scroll_speed = 40.0;
         });
 
-        egui::TopBottomPanel::top("menu_nav_panel").show(ctx, |ui| {
-            if self.task.is_some() {
-                ui.disable();
-            }
-            self.display_panel_top(ui);
-        });
+        egui::TopBottomPanel::top("menu_nav_panel")
+            .frame(egui::Frame::NONE
+                .fill(super::theme::colors::BG_MID)
+                .inner_margin(egui::Margin::symmetric(8, 4)))
+            .show(ctx, |ui| {
+                if self.task.is_some() {
+                    ui.disable();
+                }
+                self.display_panel_top(ui);
+            });
 
         if !self.is_lite() {
             egui::SidePanel::left("games_panel")
@@ -201,8 +230,9 @@ impl eframe::App for PartyApp {
                 .exact_width(160.0)
                 .frame(egui::Frame::NONE
                     .fill(super::theme::colors::BG_MID)
-                    .inner_margin(egui::Margin::same(8)))
-                .show_separator_line(true)
+                    .inner_margin(egui::Margin::same(8))
+                    .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
+                .show_separator_line(false)
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
@@ -217,8 +247,9 @@ impl eframe::App for PartyApp {
                 .exact_width(200.0)
                 .frame(egui::Frame::NONE
                     .fill(super::theme::colors::BG_MID)
-                    .inner_margin(egui::Margin { left: 16, right: 8, top: 8, bottom: 8 }))
-                .show_separator_line(true)
+                    .inner_margin(egui::Margin { left: 16, right: 8, top: 8, bottom: 8 })
+                    .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
+                .show_separator_line(false)
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
@@ -230,7 +261,7 @@ impl eframe::App for PartyApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE
                 .fill(super::theme::colors::BG_DARK)
-                .inner_margin(egui::Margin { left: 16, right: 8, top: 0, bottom: 8 }))
+                .inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 8 }))
             .show(ctx, |ui| {
             if self.task.is_some() {
                 ui.disable();
@@ -297,7 +328,7 @@ impl eframe::App for PartyApp {
     }
 }
 
-impl PartyApp {
+impl Splitux {
     pub fn spawn_task<F>(&mut self, msg: &str, f: F)
     where
         F: FnOnce() + Send + 'static,

@@ -1,12 +1,12 @@
 // Profile management and profile-related UI
 
-use super::app::PartyApp;
+use super::app::Splitux;
 use crate::profiles::*;
 use crate::util::*;
 
 use eframe::egui;
 
-impl PartyApp {
+impl Splitux {
     /// Get the selected profile index for the current handler
     pub fn get_current_profile(&self) -> usize {
         if self.handlers.is_empty() {

@@ -1,4 +1,4 @@
-use super::app::{FocusPane, MenuPage, PartyApp};
+use super::app::{FocusPane, MenuPage, Splitux};
 use super::theme;
 use crate::Handler;
 use crate::handler::{import_handler, scan_handlers};
@@ -8,7 +8,7 @@ use eframe::egui::Popup;
 use eframe::egui::RichText;
 use eframe::egui::{self, Ui};
 
-impl PartyApp {
+impl Splitux {
     pub fn display_panel_top(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // === Main Navigation Tabs (2 tabs: Games, Settings) ===
@@ -95,27 +95,62 @@ impl PartyApp {
             ui.separator();
             ui.add_space(4.0);
 
-            let add_btn = ui.add(
-                egui::Button::new("➕ Add Game")
-                    .min_size(egui::vec2(ui.available_width(), 28.0))
-                    .frame(false),
-            );
-            if add_btn.clicked() {
+            // Check if bottom buttons are focused
+            let is_game_list_focused = self.focus_pane == FocusPane::GameList;
+            let add_focused = self.game_panel_bottom_focused && self.game_panel_bottom_index == 0 && is_game_list_focused;
+            let import_focused = self.game_panel_bottom_focused && self.game_panel_bottom_index == 1 && is_game_list_focused;
+
+            // Add Game button with focus indicator
+            let add_frame = if add_focused {
+                egui::Frame::NONE
+                    .fill(theme::colors::SELECTION_BG)
+                    .corner_radius(4)
+                    .inner_margin(egui::Margin::symmetric(4, 2))
+                    .stroke(theme::focus_stroke())
+            } else {
+                egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2))
+            };
+            let add_resp = add_frame.show(ui, |ui| {
+                ui.add(
+                    egui::Button::new("+ Add Game")
+                        .min_size(egui::vec2(ui.available_width(), 28.0))
+                        .frame(false),
+                )
+            });
+            if add_resp.inner.clicked() || (add_focused && self.activate_focused) {
                 self.handler_edit = Some(Handler::default());
                 self.show_edit_modal = true;
             }
+            if add_focused {
+                add_resp.response.scroll_to_me(Some(egui::Align::Center));
+            }
 
-            let import_btn = ui.add(
-                egui::Button::new("⬇ Import Handler")
-                    .min_size(egui::vec2(ui.available_width(), 28.0))
-                    .frame(false),
-            );
-            if import_btn.clicked() {
+            // Import Handler button with focus indicator
+            let import_frame = if import_focused {
+                egui::Frame::NONE
+                    .fill(theme::colors::SELECTION_BG)
+                    .corner_radius(4)
+                    .inner_margin(egui::Margin::symmetric(4, 2))
+                    .stroke(theme::focus_stroke())
+            } else {
+                egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2))
+            };
+            let import_resp = import_frame.show(ui, |ui| {
+                ui.add(
+                    egui::Button::new("Import Handler")
+                        .min_size(egui::vec2(ui.available_width(), 28.0))
+                        .frame(false),
+                )
+            });
+            if import_resp.inner.clicked() || (import_focused && self.activate_focused) {
                 if let Err(e) = import_handler() {
                     msg("Error", &format!("Error importing handler: {}", e));
                 } else {
                     self.handlers = scan_handlers();
                 }
+            }
+            if import_focused {
+                import_resp.response.scroll_to_me(Some(egui::Align::Center));
             }
         });
     }

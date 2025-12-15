@@ -1,8 +1,8 @@
 // Instance device management functions
 
-use super::app::PartyApp;
+use super::app::Splitux;
 
-impl PartyApp {
+impl Splitux {
     pub(super) fn is_device_in_any_instance(&self, dev: usize) -> bool {
         for instance in &self.instances {
             if instance.devices.contains(&dev) {

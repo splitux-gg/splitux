@@ -13,5 +13,5 @@ mod pages_registry;
 mod pages_settings;
 pub mod theme;
 
-pub use app::PartyApp;
+pub use app::Splitux;
 pub use config::{load_photon_ids, PadFilterType, PartyConfig, WindowManagerType};

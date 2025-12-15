@@ -1,6 +1,6 @@
 // Games page display functions
 
-use super::app::{FocusPane, PartyApp};
+use super::app::{FocusPane, Splitux};
 use super::theme;
 use crate::handler::HANDLER_SPEC_CURRENT_VERSION;
 use crate::paths::PATH_HOME;
@@ -14,7 +14,7 @@ macro_rules! cur_handler {
     };
 }
 
-impl PartyApp {
+impl Splitux {
     pub fn display_page_games(&mut self, ui: &mut Ui) {
         // If no handlers or in lite mode, show welcome screen
         if self.handlers.is_empty() && !self.is_lite() {

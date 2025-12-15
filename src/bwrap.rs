@@ -41,6 +41,18 @@ pub fn setup_sdl_env(cmd: &mut Command, gamepad_paths: &[String]) {
     }
 }
 
+/// Set up audio routing environment variables inside the bwrap container
+///
+/// Sets PULSE_SINK to route audio to a specific sink (works for both
+/// PulseAudio and PipeWire via pipewire-pulse compatibility layer)
+pub fn setup_audio_env(cmd: &mut Command, sink_name: &str) {
+    if sink_name.is_empty() {
+        return;
+    }
+    // PULSE_SINK works for both PulseAudio and PipeWire (via pipewire-pulse)
+    cmd.args(["--setenv", "PULSE_SINK", sink_name]);
+}
+
 /// Get all /dev/input/js* device paths to block legacy joystick interface
 pub fn glob_js_devices() -> Vec<String> {
     let mut devices = Vec::new();

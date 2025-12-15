@@ -1,10 +1,10 @@
 // Instance setup page display functions
 
-use super::app::{InstanceFocus, PartyApp};
+use super::app::{InstanceFocus, Splitux};
 use super::theme;
 use eframe::egui::{self, RichText, Ui};
 
-impl PartyApp {
+impl Splitux {
     pub fn display_page_instances(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
         ui.heading("Instance Setup");
