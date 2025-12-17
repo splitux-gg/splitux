@@ -79,9 +79,59 @@ impl Splitux {
         });
     }
 
+    /// Display collapsed games panel (just expand button)
+    pub fn display_collapsed_games_panel(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(4.0);
+            if ui
+                .add(egui::Button::new("»").min_size(egui::vec2(24.0, 24.0)))
+                .on_hover_text("Expand Games panel")
+                .clicked()
+            {
+                self.games_panel_collapsed = false;
+            }
+            ui.add_space(8.0);
+            // Vertical label
+            for ch in "Games".chars() {
+                ui.label(RichText::new(ch.to_string()).small().weak());
+            }
+        });
+    }
+
+    /// Display collapsed devices panel (just expand button)
+    pub fn display_collapsed_devices_panel(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(4.0);
+            if ui
+                .add(egui::Button::new("«").min_size(egui::vec2(24.0, 24.0)))
+                .on_hover_text("Expand Devices panel")
+                .clicked()
+            {
+                self.devices_panel_collapsed = false;
+            }
+            ui.add_space(8.0);
+            // Vertical label
+            for ch in "Devices".chars() {
+                ui.label(RichText::new(ch.to_string()).small().weak());
+            }
+        });
+    }
+
     pub fn display_panel_left(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
-        ui.heading("Games");
+        // Header with collapse toggle
+        ui.horizontal(|ui| {
+            ui.heading("Games");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(egui::Button::new("«").min_size(egui::vec2(20.0, 20.0)).frame(false))
+                    .on_hover_text("Collapse panel")
+                    .clicked()
+                {
+                    self.games_panel_collapsed = true;
+                }
+            });
+        });
         ui.add_space(4.0);
         ui.separator();
         ui.add_space(4.0);
@@ -157,7 +207,19 @@ impl Splitux {
 
     pub fn display_panel_right(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         ui.add_space(8.0);
-        ui.heading("Devices");
+        // Header with collapse toggle
+        ui.horizontal(|ui| {
+            ui.heading("Devices");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(egui::Button::new("»").min_size(egui::vec2(20.0, 20.0)).frame(false))
+                    .on_hover_text("Collapse panel")
+                    .clicked()
+                {
+                    self.devices_panel_collapsed = true;
+                }
+            });
+        });
         ui.add_space(4.0);
         ui.separator();
         ui.add_space(4.0);
@@ -174,12 +236,12 @@ impl Splitux {
             egui::ScrollArea::vertical()
                 .max_height(ui.available_height() - 80.0)
                 .show(ui, |ui| {
-                    for pad in self.input_devices.iter() {
-                        let event_num = pad.path().trim_start_matches("/dev/input/event");
+                    for (idx, pad) in self.input_devices.iter().enumerate() {
+                        let display_name = self.device_display_name(idx);
                         let mut dev_text = RichText::new(format!(
                             "{} {}",
                             pad.emoji(),
-                            pad.fancyname(),
+                            display_name,
                         ));
 
                         if !pad.enabled() {
@@ -188,10 +250,7 @@ impl Splitux {
                             dev_text = dev_text.strong();
                         }
 
-                        ui.horizontal(|ui| {
-                            ui.label(dev_text);
-                            ui.label(RichText::new(format!("({})", event_num)).small().weak());
-                        });
+                        ui.label(dev_text);
                     }
                 });
         }

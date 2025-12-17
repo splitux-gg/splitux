@@ -4,6 +4,7 @@ use super::app::{FocusPane, Splitux};
 use super::theme;
 use crate::handler::HANDLER_SPEC_CURRENT_VERSION;
 use crate::paths::PATH_HOME;
+use crate::ui::responsive::LayoutMode;
 use crate::util::msg;
 use eframe::egui::{self, RichText, Ui};
 use rfd::FileDialog;
@@ -176,48 +177,66 @@ impl Splitux {
         let activate = self.activate_focused && is_action_bar_focused;
         let focus_stroke = theme::focus_stroke();
 
-        ui.horizontal(|ui| {
+        // Responsive layout
+        let layout_mode = LayoutMode::from_ui(ui);
+        let is_narrow = layout_mode.is_narrow();
+        let is_medium = layout_mode == LayoutMode::Medium;
+
+        ui.horizontal_wrapped(|ui| {
             // Play button (action_bar_index = 0)
             let play_focused = is_action_bar_focused && self.action_bar_index == 0;
+            let (play_text, play_min_width) = if is_narrow {
+                ("", 36.0)
+            } else {
+                (" Play ", 100.0)
+            };
             let playbtn = ui.add(
                 egui::Button::image_and_text(
                     egui::Image::new(egui::include_image!("../../res/BTN_A.png"))
                         .fit_to_exact_size(egui::vec2(20.0, 20.0)),
-                    " Play ",
+                    play_text,
                 )
-                .min_size(egui::vec2(100.0, 36.0))
+                .min_size(egui::vec2(play_min_width, 36.0))
                 .corner_radius(8)
                 .stroke(if play_focused {
                     focus_stroke
                 } else {
                     egui::Stroke::NONE
                 }),
-            );
+            ).on_hover_text("Play");
             if playbtn.clicked() || (play_focused && activate) {
                 play_clicked = true;
             }
 
-            ui.add(egui::Separator::default().vertical());
+            if !is_narrow {
+                ui.add(egui::Separator::default().vertical());
+            }
 
             // Profile display (Y button to change) (action_bar_index = 1)
             let current_profile_idx = self.get_current_profile();
             let profile_text = if self.profiles.is_empty() {
                 "No profiles".to_string()
             } else if current_profile_idx < self.profiles.len() {
-                self.profiles[current_profile_idx].clone()
+                let name = &self.profiles[current_profile_idx];
+                if is_narrow && name.len() > 8 {
+                    format!("{}...", &name[..6])
+                } else {
+                    name.clone()
+                }
             } else {
                 "Select...".to_string()
             };
 
             // Show profile button (highlight if focused or dropdown open)
             let profile_focused = is_action_bar_focused && self.action_bar_index == 1;
+            let profile_min_width = if is_narrow { 60.0 } else { 100.0 };
             let profile_btn = ui.add(
                 egui::Button::image_and_text(
                     egui::Image::new(egui::include_image!("../../res/BTN_Y.png"))
                         .fit_to_exact_size(egui::vec2(20.0, 20.0)),
                     format!(" {} ", profile_text),
                 )
-                .min_size(egui::vec2(100.0, 36.0))
+                .min_size(egui::vec2(profile_min_width, 36.0))
                 .corner_radius(8)
                 .stroke(if self.profile_dropdown_open || profile_focused {
                     focus_stroke
@@ -231,45 +250,62 @@ impl Splitux {
             }
             profile_btn.on_hover_text("Press Y to change profile");
 
-            ui.add(egui::Separator::default().vertical());
+            if !is_narrow {
+                ui.add(egui::Separator::default().vertical());
+            }
 
             // Edit button (action_bar_index = 2)
             let edit_focused = is_action_bar_focused && self.action_bar_index == 2;
+            let (edit_text, edit_min_width) = if is_narrow {
+                ("", 36.0)
+            } else {
+                (" Edit ", 80.0)
+            };
             let editbtn = ui.add(
                 egui::Button::image_and_text(
                     egui::Image::new(egui::include_image!("../../res/BTN_X.png"))
                         .fit_to_exact_size(egui::vec2(20.0, 20.0)),
-                    " Edit ",
+                    edit_text,
                 )
-                .min_size(egui::vec2(80.0, 36.0))
+                .min_size(egui::vec2(edit_min_width, 36.0))
                 .corner_radius(8)
                 .stroke(if edit_focused {
                     focus_stroke
                 } else {
                     egui::Stroke::NONE
                 }),
-            );
+            ).on_hover_text("Edit handler");
             if editbtn.clicked() || (edit_focused && activate) {
                 edit_clicked = true;
             }
 
-            ui.add(egui::Separator::default().vertical());
-            if is_win {
-                ui.add(egui::Image::new(egui::include_image!("../../res/windows-logo.png"))
-                    .fit_to_exact_size(egui::vec2(18.0, 18.0)));
-                ui.label("Proton");
-            } else {
-                ui.add(egui::Image::new(egui::include_image!("../../res/linux-logo.png"))
-                    .fit_to_exact_size(egui::vec2(18.0, 18.0)));
-                ui.label("Native");
-            }
-            if !author.is_empty() {
+            // Platform indicator and metadata (hide in narrow mode)
+            if !is_narrow {
                 ui.add(egui::Separator::default().vertical());
-                ui.label(format!("Author: {}", author));
-            }
-            if !version.is_empty() {
-                ui.add(egui::Separator::default().vertical());
-                ui.label(format!("Version: {}", version));
+                if is_win {
+                    ui.add(egui::Image::new(egui::include_image!("../../res/windows-logo.png"))
+                        .fit_to_exact_size(egui::vec2(18.0, 18.0)));
+                    if !is_medium {
+                        ui.label("Proton");
+                    }
+                } else {
+                    ui.add(egui::Image::new(egui::include_image!("../../res/linux-logo.png"))
+                        .fit_to_exact_size(egui::vec2(18.0, 18.0)));
+                    if !is_medium {
+                        ui.label("Native");
+                    }
+                }
+                // Author and version (only in wide mode)
+                if !is_medium {
+                    if !author.is_empty() {
+                        ui.add(egui::Separator::default().vertical());
+                        ui.label(format!("Author: {}", author));
+                    }
+                    if !version.is_empty() {
+                        ui.add(egui::Separator::default().vertical());
+                        ui.label(format!("Version: {}", version));
+                    }
+                }
             }
         });
 
@@ -409,13 +445,18 @@ impl Splitux {
                 }
             }
 
-            // Game images
+            // Game images (responsive height)
             if !img_paths.is_empty() {
                 ui.add_space(8.0);
                 egui::ScrollArea::horizontal()
                     .max_width(f32::INFINITY)
                     .show(ui, |ui| {
-                        let available_height = 200.0; // Fixed height for images
+                        let img_layout = LayoutMode::from_ui(ui);
+                        let available_height = match img_layout {
+                            LayoutMode::Wide => 200.0,
+                            LayoutMode::Medium => 160.0,
+                            LayoutMode::Narrow => 120.0,
+                        };
                         ui.horizontal(|ui| {
                             for img in img_paths.iter() {
                                 ui.add(

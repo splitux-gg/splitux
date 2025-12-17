@@ -86,6 +86,8 @@ pub fn navigate_instances_page(
             }
             NavDirection::Down => InstancesNav::None,
         },
+        // InstanceCard and StartButton navigation handled in app_input.rs
+        InstanceFocus::InstanceCard(_, _) | InstanceFocus::StartButton => InstancesNav::None,
     }
 }
 

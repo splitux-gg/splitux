@@ -27,7 +27,10 @@ pub struct Splitux {
 
     pub monitors: Vec<Monitor>,
     pub input_devices: Vec<InputDevice>,
+    pub device_display_names: Vec<String>, // Display names with duplicate suffixes
     pub device_monitor: Option<DeviceMonitor>,
+    pub permission_status: crate::input::PermissionStatus, // Input device permission check
+    pub permission_banner_dismissed: bool, // User dismissed the permission warning
     pub instances: Vec<Instance>,
     pub instance_add_dev: Option<usize>,
     pub instance_focus: InstanceFocus,
@@ -76,16 +79,67 @@ pub struct Splitux {
     pub settings_focus: SettingsFocus,
     pub settings_button_index: usize, // 0=Save, 1=Restore
     pub settings_option_index: usize, // Index of focused option in settings
+    pub settings_scroll_to_focus: bool, // Set true when focus changes to trigger scroll
 
     // Audio state
     pub audio_system: AudioSystem,
     pub audio_devices: Vec<AudioSink>,
+
+    // Profile preferences state
+    /// Previous profile selections per instance (for detecting changes)
+    pub prev_profile_selections: Vec<usize>,
+    /// Warnings for profiles with missing preferred controllers
+    pub controller_warnings: Vec<String>,
+    /// Audio preferences from profiles (instance index -> sink name)
+    pub profile_audio_prefs: HashMap<usize, String>,
+
+    /// Session-only audio overrides (instance index -> sink name or None for mute)
+    /// These do NOT persist to profile preferences, only apply to current launch
+    pub audio_session_overrides: HashMap<usize, Option<String>>,
+
+    // Profile management state (Settings page)
+    /// Index of profile being edited/renamed (None = not editing)
+    pub profile_edit_index: Option<usize>,
+    /// Text buffer for profile rename operation
+    pub profile_rename_buffer: String,
+    /// Show confirmation dialog for profile deletion
+    pub profile_delete_confirm: Option<usize>,
+    /// Which profile has preferences expanded (None = all collapsed)
+    pub profile_prefs_expanded: Option<usize>,
+    /// Sub-focus within expanded profile (0 = header/toggle, 1 = controller, 2 = audio)
+    pub profile_prefs_focus: usize,
+    /// Which profile's controller combo is forced open (by gamepad A press)
+    pub profile_ctrl_combo_open: Option<usize>,
+    /// Which profile's audio combo is forced open (by gamepad A press)
+    pub profile_audio_combo_open: Option<usize>,
+    /// Selected index within open dropdown (0 = None, 1+ = devices)
+    pub profile_dropdown_selection_idx: usize,
+
+    // Device naming state
+    /// Index of device being renamed (None = not renaming)
+    pub device_rename_index: Option<usize>,
+    /// Text buffer for device rename operation
+    pub device_rename_buffer: String,
+
+    // Panel collapse/resize state
+    pub games_panel_collapsed: bool,
+    pub games_panel_width: f32,
+    pub devices_panel_collapsed: bool,
+    pub devices_panel_width: f32,
 }
 
 impl Splitux {
     pub fn new(monitors: Vec<Monitor>, handler_lite: Option<Handler>) -> Self {
         let options = load_cfg();
         let input_devices = scan_input_devices(&options.pad_filter_type);
+        let device_display_names =
+            crate::input::generate_display_names(&input_devices, &options.device_aliases);
+
+        // Extract panel layout state before options is moved
+        let games_panel_collapsed = options.layout.games_panel.collapsed;
+        let games_panel_width = options.layout.games_panel.custom_width.unwrap_or(160.0);
+        let devices_panel_collapsed = options.layout.devices_panel.collapsed;
+        let devices_panel_width = options.layout.devices_panel.custom_width.unwrap_or(200.0);
         let handlers = match handler_lite {
             Some(_) => Vec::new(),
             None => scan_handlers(),
@@ -131,7 +185,10 @@ impl Splitux {
             infotext: String::new(),
             monitors,
             input_devices,
+            device_display_names,
             device_monitor,
+            permission_status: crate::input::check_permissions(),
+            permission_banner_dismissed: false,
             instances: Vec::new(),
             instance_add_dev: None,
             instance_focus: InstanceFocus::default(),
@@ -171,10 +228,37 @@ impl Splitux {
             settings_focus: SettingsFocus::default(),
             settings_button_index: 0,
             settings_option_index: 0,
+            settings_scroll_to_focus: false,
 
             // Audio state
             audio_system,
             audio_devices,
+
+            // Profile preferences state
+            prev_profile_selections: Vec::new(),
+            controller_warnings: Vec::new(),
+            profile_audio_prefs: HashMap::new(),
+            audio_session_overrides: HashMap::new(),
+
+            // Profile management state
+            profile_edit_index: None,
+            profile_rename_buffer: String::new(),
+            profile_delete_confirm: None,
+            profile_prefs_expanded: None,
+            profile_prefs_focus: 0,
+            profile_ctrl_combo_open: None,
+            profile_audio_combo_open: None,
+            profile_dropdown_selection_idx: 0,
+
+            // Device naming state
+            device_rename_index: None,
+            device_rename_buffer: String::new(),
+
+            // Panel collapse/resize state (loaded from config above)
+            games_panel_collapsed,
+            games_panel_width,
+            devices_panel_collapsed,
+            devices_panel_width,
         };
 
         app.spawn_task("Checking for updates", move || {
@@ -224,37 +308,81 @@ impl eframe::App for Splitux {
                 self.display_panel_top(ui);
             });
 
+        // Left panel - Games list (collapsible/resizable)
         if !self.is_lite() {
+            let collapsed = self.games_panel_collapsed;
+            let (width, width_range) = if collapsed {
+                (36.0, 36.0..=36.0)
+            } else {
+                (self.games_panel_width, 120.0..=280.0)
+            };
+
             egui::SidePanel::left("games_panel")
-                .resizable(false)
-                .exact_width(160.0)
+                .resizable(!collapsed)
+                .default_width(width)
+                .width_range(width_range)
                 .frame(egui::Frame::NONE
                     .fill(super::theme::colors::BG_MID)
-                    .inner_margin(egui::Margin::same(8))
+                    .inner_margin(if collapsed {
+                        egui::Margin::symmetric(4, 8)
+                    } else {
+                        egui::Margin::same(8)
+                    })
                     .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
                 .show_separator_line(false)
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
                     }
-                    self.display_panel_left(ui);
+                    if collapsed {
+                        self.display_collapsed_games_panel(ui);
+                    } else {
+                        // Track width changes for persistence
+                        let panel_width = ui.available_width() + 16.0; // Account for margins
+                        if (panel_width - self.games_panel_width).abs() > 2.0 {
+                            self.games_panel_width = panel_width;
+                        }
+                        self.display_panel_left(ui);
+                    }
                 });
         }
 
+        // Right panel - Devices (collapsible/resizable, only on Instances page)
         if self.cur_page == MenuPage::Instances {
+            let collapsed = self.devices_panel_collapsed;
+            let (width, width_range) = if collapsed {
+                (36.0, 36.0..=36.0)
+            } else {
+                (self.devices_panel_width, 150.0..=320.0)
+            };
+
             egui::SidePanel::right("devices_panel")
-                .resizable(false)
-                .exact_width(200.0)
+                .resizable(!collapsed)
+                .default_width(width)
+                .width_range(width_range)
                 .frame(egui::Frame::NONE
                     .fill(super::theme::colors::BG_MID)
-                    .inner_margin(egui::Margin { left: 16, right: 8, top: 8, bottom: 8 })
+                    .inner_margin(if collapsed {
+                        egui::Margin::symmetric(4, 8)
+                    } else {
+                        egui::Margin { left: 16, right: 8, top: 8, bottom: 8 }
+                    })
                     .stroke(egui::Stroke::new(1.0, super::theme::colors::BG_LIGHT)))
                 .show_separator_line(false)
                 .show(ctx, |ui| {
                     if self.task.is_some() {
                         ui.disable();
                     }
-                    self.display_panel_right(ui, ctx);
+                    if collapsed {
+                        self.display_collapsed_devices_panel(ui);
+                    } else {
+                        // Track width changes for persistence
+                        let panel_width = ui.available_width() + 24.0; // Account for margins
+                        if (panel_width - self.devices_panel_width).abs() > 2.0 {
+                            self.devices_panel_width = panel_width;
+                        }
+                        self.display_panel_right(ui, ctx);
+                    }
                 });
         }
 
@@ -266,6 +394,13 @@ impl eframe::App for Splitux {
             if self.task.is_some() {
                 ui.disable();
             }
+
+            // Show permission banner at top if needed (only on Games/Instances pages)
+            if matches!(self.cur_page, MenuPage::Games | MenuPage::Instances) {
+                ui.add_space(8.0);
+                self.display_permission_banner(ui);
+            }
+
             match self.cur_page {
                 MenuPage::Games => self.display_page_games(ui),
                 MenuPage::Registry => self.display_page_registry(ui),
@@ -379,6 +514,7 @@ impl Splitux {
                         );
                         self.input_devices.push(device);
                         self.input_devices.sort_by_key(|d| d.path().to_string());
+                        self.refresh_device_display_names();
                     }
                 }
                 DeviceEvent::Removed(path) => {
@@ -407,9 +543,95 @@ impl Splitux {
                         }
 
                         self.input_devices.remove(idx);
+                        self.refresh_device_display_names();
                     }
                 }
             }
         }
+    }
+
+    /// Regenerate display names for all input devices (handles duplicates)
+    pub fn refresh_device_display_names(&mut self) {
+        self.device_display_names =
+            crate::input::generate_display_names(&self.input_devices, &self.options.device_aliases);
+    }
+
+    /// Get display name for a device by index
+    pub fn device_display_name(&self, idx: usize) -> &str {
+        self.device_display_names
+            .get(idx)
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| self.input_devices.get(idx).map(|d| d.fancyname()).unwrap_or("Unknown"))
+    }
+
+    /// Show permission warning banner if needed, returns true if banner was shown
+    pub fn display_permission_banner(&mut self, ui: &mut egui::Ui) -> bool {
+        // Don't show if dismissed or no permission issues
+        if self.permission_banner_dismissed || self.permission_status.denied_count == 0 {
+            return false;
+        }
+
+        use egui::RichText;
+
+        let banner_color = egui::Color32::from_rgb(180, 120, 40); // Orange/amber warning
+        egui::Frame::NONE
+            .fill(banner_color.gamma_multiply(0.3))
+            .stroke(egui::Stroke::new(1.0, banner_color))
+            .rounding(4.0)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("⚠").size(18.0).color(banner_color));
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Controller access requires setup")
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} input device(s) not accessible. Click 'Fix' to install udev rules.",
+                                self.permission_status.denied_count
+                            ))
+                            .small()
+                            .color(egui::Color32::LIGHT_GRAY),
+                        );
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Dismiss button (use simple X for font compatibility)
+                        if ui.small_button("X").on_hover_text("Dismiss").clicked() {
+                            self.permission_banner_dismissed = true;
+                        }
+
+                        ui.add_space(8.0);
+
+                        // Fix button - installs udev rules via pkexec
+                        let fix_btn = ui.button("Fix Permissions");
+                        if fix_btn.on_hover_text("Install udev rules (requires password)").clicked() {
+                            println!("[splitux] Attempting to install udev rules via pkexec...");
+                            match crate::input::install_udev_rules() {
+                                Ok(true) => {
+                                    println!("[splitux] Udev rules installed successfully");
+                                    // Refresh permission status
+                                    self.permission_status = crate::input::check_permissions();
+                                    self.infotext = "Udev rules installed! Reconnect your controllers.".to_string();
+                                }
+                                Ok(false) => {
+                                    println!("[splitux] User cancelled pkexec dialog");
+                                    self.infotext = "Installation cancelled.".to_string();
+                                }
+                                Err(e) => {
+                                    println!("[splitux] Failed to install udev rules: {}", e);
+                                    self.infotext = format!("Failed: {}", e);
+                                }
+                            }
+                        }
+                    });
+                });
+            });
+
+        ui.add_space(8.0);
+        true
     }
 }

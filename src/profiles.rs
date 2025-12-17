@@ -177,6 +177,78 @@ pub fn scan_profiles(include_guest: bool) -> Vec<String> {
     out
 }
 
+/// Rename a profile (moves directory and updates Steam settings)
+pub fn rename_profile(old_name: &str, new_name: &str) -> Result<(), Box<dyn Error>> {
+    // Validate new name (alphanumeric, underscores, hyphens only)
+    if !new_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Err("Profile name must contain only letters, numbers, underscores, or hyphens".into());
+    }
+    if new_name.is_empty() || new_name.len() > 32 {
+        return Err("Profile name must be 1-32 characters".into());
+    }
+
+    let old_path = PATH_PARTY.join("profiles").join(old_name);
+    let new_path = PATH_PARTY.join("profiles").join(new_name);
+
+    if !old_path.exists() {
+        return Err(format!("Profile '{}' does not exist", old_name).into());
+    }
+    if new_path.exists() {
+        return Err(format!("A profile named '{}' already exists", new_name).into());
+    }
+
+    // Move the directory
+    std::fs::rename(&old_path, &new_path)?;
+
+    // Update Steam settings with new account name and regenerated IDs
+    let path_steam = new_path.join("steam/steam_settings");
+    if path_steam.exists() {
+        let steam_id = generate_steam_id(new_name);
+        let listen_port = generate_listen_port(new_name);
+
+        let usersettings = format!(
+            "[user::general]\naccount_name={new_name}\naccount_steamid={steam_id}"
+        );
+        std::fs::write(path_steam.join("configs.user.ini"), usersettings)?;
+
+        // Update listen port in main settings
+        let mainsettings = format!(
+            r#"[main::general]
+new_app_ticket=1
+gc_token=1
+matchmaking_server_list_actual_type=0
+matchmaking_server_details_via_source_query=0
+
+[main::connectivity]
+disable_lan_only=0
+disable_networking=0
+listen_port={listen_port}
+offline=0
+disable_lobby_creation=0
+disable_source_query=0
+share_leaderboards_over_network=0
+"#
+        );
+        std::fs::write(path_steam.join("configs.main.ini"), mainsettings)?;
+    }
+
+    println!("[splitux] Profile renamed: {} -> {}", old_name, new_name);
+    Ok(())
+}
+
+/// Delete a profile (removes entire directory)
+pub fn delete_profile(name: &str) -> Result<(), Box<dyn Error>> {
+    let path = PATH_PARTY.join("profiles").join(name);
+
+    if !path.exists() {
+        return Err(format!("Profile '{}' does not exist", name).into());
+    }
+
+    std::fs::remove_dir_all(&path)?;
+    println!("[splitux] Profile deleted: {}", name);
+    Ok(())
+}
+
 pub fn remove_guest_profiles() -> Result<(), Box<dyn Error>> {
     let path_profiles = PATH_PARTY.join("profiles");
     let entries = std::fs::read_dir(&path_profiles)?;

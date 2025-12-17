@@ -1,6 +1,7 @@
 pub mod components;
 pub mod focus;
 pub mod pages;
+pub mod responsive;
 pub mod theme;
 
 // =============================================================================

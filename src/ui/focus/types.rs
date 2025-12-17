@@ -12,12 +12,27 @@ pub enum FocusPane {
     InfoPane,   // Right side - scrollable info area with buttons
 }
 
-/// Legacy: Focus regions for Instances page
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
+/// Focus regions for Instances page
+#[derive(Eq, PartialEq, Debug, Clone, Default)]
 pub enum InstanceFocus {
     #[default]
-    Devices,       // Device/instance cards
-    LaunchOptions, // Launch options bar at bottom
+    Devices,                              // Device panel on right side
+    InstanceCard(usize, InstanceCardFocus), // Focus within instance card i
+    LaunchOptions,                        // Launch options bar at bottom
+    StartButton,                          // Start Game button
+}
+
+/// Focus elements within an instance card
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
+pub enum InstanceCardFocus {
+    #[default]
+    Profile,        // Profile dropdown
+    SetMaster,      // Set Master button
+    Monitor,        // Monitor dropdown (if gamescope SDL enabled)
+    InviteDevice,   // Invite Device button
+    Device(usize),  // Specific device in the device list
+    AudioOverride,  // Audio session override dropdown
+    AudioPreference, // Audio preference dropdown (named profiles only)
 }
 
 /// Focus regions for Registry page

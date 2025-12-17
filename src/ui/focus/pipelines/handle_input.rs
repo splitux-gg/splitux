@@ -114,7 +114,7 @@ fn handle_instances_direction(ctx: &NavContext, direction: NavDirection) -> Vec<
     let max_options = if ctx.instances_count == 2 { 2 } else { 1 };
 
     let result = navigate_instances_page(
-        ctx.instance_focus,
+        ctx.instance_focus.clone(),
         direction,
         ctx.launch_option_index,
         max_options,
@@ -123,8 +123,9 @@ fn handle_instances_direction(ctx: &NavContext, direction: NavDirection) -> Vec<
 
     match result {
         InstancesNav::SwitchFocus(new_focus) => {
+            let is_launch_options = new_focus == InstanceFocus::LaunchOptions;
             let mut actions = vec![NavAction::SetInstanceFocus(new_focus)];
-            if new_focus == InstanceFocus::LaunchOptions {
+            if is_launch_options {
                 actions.push(NavAction::SetLaunchOptionIndex(0));
             }
             actions

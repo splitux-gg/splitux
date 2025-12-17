@@ -56,13 +56,86 @@ pub struct InputDevice {
     has_button_held: bool,
     // Track analog stick state for navigation (with deadzone/cooldown)
     stick_nav_cooldown: std::time::Instant,
+    // Current stick positions (updated by events, persisted between polls)
+    stick_x: i32,
+    stick_y: i32,
+    scroll_y: i32, // Right stick Y
+    // Track stick hold state for repeat behavior
+    stick_hold_start: Option<std::time::Instant>, // When stick was first pushed (None = not held)
+    stick_hold_direction: Option<StickDirection>, // Current held direction
+    stick_last_repeat: std::time::Instant,        // Time of last repeat event
     // Axis range info (center and threshold for stick navigation)
     stick_center: i32,
     stick_threshold: i32,
     // Unique identifier (Bluetooth MAC or USB serial) for distinguishing identical controllers
     uniq: String,
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum StickDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 impl InputDevice {
+    /// Handle stick direction with hold-to-repeat behavior
+    fn handle_stick_direction(
+        &mut self,
+        new_dir: Option<StickDirection>,
+        initial_delay_ms: u128,
+        repeat_rate_ms: u128,
+    ) -> Option<PadButton> {
+        let now = std::time::Instant::now();
+
+        match (new_dir, self.stick_hold_direction) {
+            // Started holding a new direction
+            (Some(dir), None) | (Some(dir), Some(_)) if new_dir != self.stick_hold_direction => {
+                self.stick_hold_start = Some(now);
+                self.stick_hold_direction = Some(dir);
+                self.stick_last_repeat = now;
+                Some(Self::direction_to_button(dir))
+            }
+            // Still holding the same direction - check for repeat
+            (Some(dir), Some(held_dir)) if dir == held_dir => {
+                if let Some(hold_start) = self.stick_hold_start {
+                    let hold_duration = now.duration_since(hold_start).as_millis();
+                    let since_last_repeat = now.duration_since(self.stick_last_repeat).as_millis();
+
+                    // After initial delay, use repeat rate
+                    if hold_duration > initial_delay_ms && since_last_repeat > repeat_rate_ms {
+                        self.stick_last_repeat = now;
+                        Some(Self::direction_to_button(dir))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            // Released stick (back to center)
+            (None, Some(_)) => {
+                self.stick_hold_start = None;
+                self.stick_hold_direction = None;
+                None
+            }
+            // Already at center, nothing held
+            (None, None) => None,
+            // Catch-all
+            _ => None,
+        }
+    }
+
+    fn direction_to_button(dir: StickDirection) -> PadButton {
+        match dir {
+            StickDirection::Up => PadButton::Up,
+            StickDirection::Down => PadButton::Down,
+            StickDirection::Left => PadButton::Left,
+            StickDirection::Right => PadButton::Right,
+        }
+    }
+
     pub fn name(&self) -> &str {
         self.dev.name().unwrap_or_else(|| "")
     }
@@ -74,13 +147,19 @@ impl InputDevice {
             DeviceType::Other => "",
         }
     }
+    /// Returns the actual evdev device name (e.g., "Microsoft X-Box One S pad")
     pub fn fancyname(&self) -> &str {
+        self.name()
+    }
+
+    /// Returns a short type prefix for the controller type
+    pub fn type_prefix(&self) -> &str {
         match self.dev.input_id().vendor() {
-            0x045e => "Xbox Controller",
-            0x054c => "PS Controller",
-            0x057e => "NT Pro Controller",
-            0x28de => "Steam Input",
-            _ => self.name(),
+            0x045e => "Xbox",
+            0x054c => "PS",
+            0x057e => "Switch",
+            0x28de => "Steam",
+            _ => "",
         }
     }
     pub fn path(&self) -> &str {
@@ -110,9 +189,11 @@ impl InputDevice {
     pub fn poll(&mut self) -> Option<PadButton> {
         let mut btn: Option<PadButton> = None;
 
-        // Cooldown for analog stick navigation (150ms between inputs)
-        const STICK_NAV_COOLDOWN_MS: u128 = 150;
+        // Hold-to-repeat timing constants
+        const INITIAL_DELAY_MS: u128 = 300; // Delay before first repeat
+        const REPEAT_RATE_MS: u128 = 80;    // Time between repeats
 
+        // Process events - update stored stick positions
         if let Ok(events) = self.dev.fetch_events() {
             for event in events {
                 let summary = event.destructure();
@@ -123,6 +204,16 @@ impl InputDevice {
                     }
                     EventSummary::Key(_, _, 0) => {
                         self.has_button_held = false;
+                    }
+                    // Update stored stick positions (persisted between polls)
+                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_X, val) => {
+                        self.stick_x = val;
+                    }
+                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_Y, val) => {
+                        self.stick_y = val;
+                    }
+                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_RY, val) => {
+                        self.scroll_y = val;
                     }
                     _ => {}
                 }
@@ -151,63 +242,6 @@ impl InputDevice {
                     EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0Y, 1) => {
                         Some(PadButton::Down)
                     }
-                    // Left analog stick (with deadzone and cooldown)
-                    // Uses per-device center and threshold detected at scan time
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_X, val) => {
-                        let is_left = val < self.stick_center - self.stick_threshold;
-                        let is_right = val > self.stick_center + self.stick_threshold;
-
-                        if self.stick_nav_cooldown.elapsed().as_millis() > STICK_NAV_COOLDOWN_MS {
-                            if is_left {
-                                self.stick_nav_cooldown = std::time::Instant::now();
-                                Some(PadButton::Left)
-                            } else if is_right {
-                                self.stick_nav_cooldown = std::time::Instant::now();
-                                Some(PadButton::Right)
-                            } else {
-                                btn
-                            }
-                        } else {
-                            btn
-                        }
-                    }
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_Y, val) => {
-                        let is_up = val < self.stick_center - self.stick_threshold;
-                        let is_down = val > self.stick_center + self.stick_threshold;
-
-                        if self.stick_nav_cooldown.elapsed().as_millis() > STICK_NAV_COOLDOWN_MS {
-                            if is_up {
-                                self.stick_nav_cooldown = std::time::Instant::now();
-                                Some(PadButton::Up)
-                            } else if is_down {
-                                self.stick_nav_cooldown = std::time::Instant::now();
-                                Some(PadButton::Down)
-                            } else {
-                                btn
-                            }
-                        } else {
-                            btn
-                        }
-                    }
-                    // Right analog stick Y-axis for scrolling
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_RY, val) => {
-                        let is_up = val < self.stick_center - self.stick_threshold;
-                        let is_down = val > self.stick_center + self.stick_threshold;
-
-                        if self.stick_nav_cooldown.elapsed().as_millis() > STICK_NAV_COOLDOWN_MS {
-                            if is_up {
-                                self.stick_nav_cooldown = std::time::Instant::now();
-                                Some(PadButton::ScrollUp)
-                            } else if is_down {
-                                self.stick_nav_cooldown = std::time::Instant::now();
-                                Some(PadButton::ScrollDown)
-                            } else {
-                                btn
-                            }
-                        } else {
-                            btn
-                        }
-                    }
                     // Keyboard
                     EventSummary::Key(_, KeyCode::KEY_A, 1) => Some(PadButton::AKey),
                     EventSummary::Key(_, KeyCode::KEY_R, 1) => Some(PadButton::RKey),
@@ -219,6 +253,50 @@ impl InputDevice {
                 };
             }
         }
+
+        // Process stick input with hold-to-repeat (check stored positions every poll)
+        // Prioritize any button press from the event loop
+        if btn.is_some() {
+            return btn;
+        }
+
+        // Determine current stick direction from stored position
+        let is_left = self.stick_x < self.stick_center - self.stick_threshold;
+        let is_right = self.stick_x > self.stick_center + self.stick_threshold;
+        let is_up = self.stick_y < self.stick_center - self.stick_threshold;
+        let is_down = self.stick_y > self.stick_center + self.stick_threshold;
+
+        let new_dir = if is_up {
+            Some(StickDirection::Up)
+        } else if is_down {
+            Some(StickDirection::Down)
+        } else if is_left {
+            Some(StickDirection::Left)
+        } else if is_right {
+            Some(StickDirection::Right)
+        } else {
+            None
+        };
+
+        if let Some(result) = self.handle_stick_direction(new_dir, INITIAL_DELAY_MS, REPEAT_RATE_MS) {
+            return Some(result);
+        }
+
+        // Handle right stick Y-axis for scrolling (simple cooldown)
+        let scroll_up = self.scroll_y < self.stick_center - self.stick_threshold;
+        let scroll_down = self.scroll_y > self.stick_center + self.stick_threshold;
+
+        const SCROLL_COOLDOWN_MS: u128 = 100;
+        if self.stick_nav_cooldown.elapsed().as_millis() > SCROLL_COOLDOWN_MS {
+            if scroll_up {
+                self.stick_nav_cooldown = std::time::Instant::now();
+                return Some(PadButton::ScrollUp);
+            } else if scroll_down {
+                self.stick_nav_cooldown = std::time::Instant::now();
+                return Some(PadButton::ScrollDown);
+            }
+        }
+
         btn
     }
 }
@@ -294,6 +372,12 @@ pub fn scan_input_devices(filter: &PadFilterType) -> Vec<InputDevice> {
                 device_type,
                 has_button_held: false,
                 stick_nav_cooldown: std::time::Instant::now(),
+                stick_x: stick_center,
+                stick_y: stick_center,
+                scroll_y: stick_center,
+                stick_hold_start: None,
+                stick_hold_direction: None,
+                stick_last_repeat: std::time::Instant::now(),
                 stick_center,
                 stick_threshold,
                 uniq,
@@ -458,8 +542,291 @@ pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
         device_type,
         has_button_held: false,
         stick_nav_cooldown: std::time::Instant::now(),
+        stick_x: stick_center,
+        stick_y: stick_center,
+        scroll_y: stick_center,
+        stick_hold_start: None,
+        stick_hold_direction: None,
+        stick_last_repeat: std::time::Instant::now(),
         stick_center,
         stick_threshold,
         uniq,
     })
+}
+
+/// Find a device index by its unique identifier (Bluetooth MAC or USB serial)
+/// Returns None if no device matches or the uniq is empty
+pub fn find_device_by_uniq(devices: &[InputDevice], uniq: &str) -> Option<usize> {
+    if uniq.is_empty() {
+        return None;
+    }
+    devices.iter().position(|d| d.uniq == uniq && !d.uniq.is_empty())
+}
+
+/// Get the Bluetooth alias for a device by its MAC address
+/// Returns None if not a Bluetooth device or no alias is set
+fn get_bluetooth_alias(mac_address: &str) -> Option<String> {
+    // MAC address format check (e.g., "e4:17:d8:27:2d:f0")
+    if mac_address.len() != 17 || mac_address.chars().filter(|&c| c == ':').count() != 5 {
+        return None;
+    }
+
+    // Try to get alias from bluetoothctl
+    let output = std::process::Command::new("bluetoothctl")
+        .args(["info", mac_address])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the Alias line
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.starts_with("Alias:") {
+            let alias = line.trim_start_matches("Alias:").trim();
+            // Only return if alias differs from the generic device name
+            // (Bluetooth sets Alias = Name by default if user hasn't customized it)
+            if !alias.is_empty() {
+                return Some(alias.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Generate display names for all devices
+/// Priority: 1) User-defined alias, 2) Bluetooth alias, 3) evdev name
+/// Adds "(1)", "(2)" suffixes for duplicates without unique aliases
+/// Returns a Vec of display names in the same order as the input devices
+pub fn generate_display_names(
+    devices: &[InputDevice],
+    user_aliases: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    use std::collections::HashMap;
+
+    // First pass: get display names with priority
+    let base_names: Vec<String> = devices
+        .iter()
+        .map(|dev| {
+            let uniq = dev.uniq();
+            // 1) Check user-defined alias first
+            if let Some(alias) = user_aliases.get(uniq) {
+                return alias.clone();
+            }
+            // 2) Try Bluetooth alias
+            if let Some(alias) = get_bluetooth_alias(uniq) {
+                return alias;
+            }
+            // 3) Fall back to evdev name
+            dev.fancyname().to_string()
+        })
+        .collect();
+
+    // Count occurrences of each base name
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
+    for name in &base_names {
+        *name_counts.entry(name.clone()).or_insert(0) += 1;
+    }
+
+    // Track which index we're on for each duplicate name
+    let mut name_indices: HashMap<String, usize> = HashMap::new();
+
+    base_names
+        .into_iter()
+        .map(|name| {
+            let count = *name_counts.get(&name).unwrap_or(&1);
+
+            if count > 1 {
+                // Multiple devices with same name - add suffix
+                let idx = name_indices.entry(name.clone()).or_insert(0);
+                *idx += 1;
+                format!("{} ({})", name, idx)
+            } else {
+                name
+            }
+        })
+        .collect()
+}
+
+/// Check if a device is already assigned to any instance
+pub fn is_device_assigned(device_idx: usize, instances: &[crate::instance::Instance]) -> bool {
+    instances.iter().any(|inst| inst.devices.contains(&device_idx))
+}
+
+/// Result of checking input device permissions
+#[derive(Debug, Clone, Default)]
+pub struct PermissionStatus {
+    /// Number of devices we couldn't access due to permissions
+    pub denied_count: usize,
+    /// Example paths that were denied (for error messages)
+    pub denied_paths: Vec<String>,
+    /// Whether udev rules appear to be installed
+    pub rules_installed: bool,
+}
+
+/// Check for permission issues with gamepad devices specifically
+pub fn check_permissions() -> PermissionStatus {
+    let mut status = PermissionStatus::default();
+
+    // Check if our udev rules are installed
+    status.rules_installed =
+        std::path::Path::new("/etc/udev/rules.d/99-splitux-gamepads.rules").exists();
+
+    // Use udevadm to find actual joystick/gamepad devices
+    if let Ok(output) = std::process::Command::new("udevadm")
+        .args(["info", "--export-db"])
+        .output()
+    {
+        let db = String::from_utf8_lossy(&output.stdout);
+        let mut current_node: Option<String> = None;
+        let mut is_joystick = false;
+
+        for line in db.lines() {
+            if line.starts_with("P: ") {
+                // New device entry - check previous one
+                if is_joystick {
+                    if let Some(ref node) = current_node {
+                        let path = format!("/dev/{}", node);
+                        match std::fs::File::open(&path) {
+                            Ok(_) => {} // Access OK
+                            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                                status.denied_count += 1;
+                                if status.denied_paths.len() < 3 {
+                                    status.denied_paths.push(path);
+                                }
+                            }
+                            Err(_) => {} // Other errors are fine
+                        }
+                    }
+                }
+                current_node = None;
+                is_joystick = false;
+            } else if line.starts_with("N: ") && line.contains("input/event") {
+                // Device node name (e.g., "input/event259")
+                current_node = Some(line[3..].to_string());
+            } else if line == "E: ID_INPUT_JOYSTICK=1" {
+                is_joystick = true;
+            }
+        }
+
+        // Check last device
+        if is_joystick {
+            if let Some(ref node) = current_node {
+                let path = format!("/dev/{}", node);
+                match std::fs::File::open(&path) {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        status.denied_count += 1;
+                        if status.denied_paths.len() < 3 {
+                            status.denied_paths.push(path);
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+
+    status
+}
+
+/// Embedded udev rules content
+pub const UDEV_RULES: &str = r#"# Splitux - Gamepad access rules
+# Install: sudo cp 99-splitux-gamepads.rules /etc/udev/rules.d/
+# Reload: sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# Generic rule: Allow access to any device with gamepad/joystick capabilities
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0666"
+
+# 8BitDo controllers (various models)
+SUBSYSTEM=="input", ATTRS{idVendor}=="2dc8", MODE="0666"
+
+# Sony DualShock 3/4 and DualSense
+SUBSYSTEM=="input", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0268", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="05c4", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="09cc", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0ce6", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0df2", MODE="0666"
+
+# Microsoft Xbox controllers
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="028e", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="028f", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02d1", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02dd", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02e3", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02ea", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="0b12", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="0b13", MODE="0666"
+
+# Nintendo Switch Pro Controller and Joy-Cons
+SUBSYSTEM=="input", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2009", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2006", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2007", MODE="0666"
+
+# Logitech, Steam, Google Stadia, PowerA, HORI, Razer, GuliKit
+SUBSYSTEM=="input", ATTRS{idVendor}=="046d", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="28de", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="18d1", ATTRS{idProduct}=="9400", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="20d6", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="0f0d", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="1532", ENV{ID_INPUT_JOYSTICK}=="1", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="342d", MODE="0666"
+"#;
+
+/// Install udev rules using pkexec (graphical sudo prompt)
+/// Returns Ok(true) if installed, Ok(false) if user cancelled, Err on failure
+pub fn install_udev_rules() -> Result<bool, String> {
+    use std::io::Write;
+    use std::process::Command;
+
+    // Check if pkexec is available
+    if Command::new("which").arg("pkexec").output().map(|o| !o.status.success()).unwrap_or(true) {
+        return Err("pkexec not found. Install polkit or run: sudo cp /tmp/99-splitux-gamepads.rules /etc/udev/rules.d/".to_string());
+    }
+
+    // Write rules to a temp file
+    let temp_path = "/tmp/99-splitux-gamepads.rules";
+    println!("[splitux] Writing udev rules to {}", temp_path);
+    let mut file = std::fs::File::create(temp_path)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    file.write_all(UDEV_RULES.as_bytes())
+        .map_err(|e| format!("Failed to write rules: {}", e))?;
+    drop(file); // Ensure file is flushed and closed
+
+    // Use pkexec to copy to /etc/udev/rules.d/ and reload
+    let script = format!(
+        "cp {} /etc/udev/rules.d/ && udevadm control --reload-rules && udevadm trigger",
+        temp_path
+    );
+    println!("[splitux] Running: pkexec sh -c '{}'", script);
+
+    let output = Command::new("pkexec")
+        .args(["sh", "-c", &script])
+        .output()
+        .map_err(|e| format!("Failed to run pkexec: {}", e))?;
+
+    println!("[splitux] pkexec exit code: {:?}", output.status.code());
+    if !output.stdout.is_empty() {
+        println!("[splitux] pkexec stdout: {}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        println!("[splitux] pkexec stderr: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(temp_path);
+
+    if output.status.success() {
+        Ok(true)
+    } else if output.status.code() == Some(126) || output.status.code() == Some(127) {
+        // 126 = user cancelled, 127 = command not found
+        Ok(false)
+    } else {
+        Err(format!(
+            "Installation failed (exit {}): {}",
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
 }

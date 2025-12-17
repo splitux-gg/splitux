@@ -1,0 +1,351 @@
+//! Instance page input handling
+
+use crate::app::app::{InstanceFocus, MenuPage, Splitux};
+use crate::input::*;
+use crate::ui::focus::types::InstanceCardFocus;
+
+impl Splitux {
+    pub(crate) fn handle_devices_instance_menu(&mut self) {
+        let mut i = 0;
+        while i < self.input_devices.len() {
+            if !self.input_devices[i].enabled() {
+                i += 1;
+                continue;
+            }
+            match self.input_devices[i].poll() {
+                Some(PadButton::ABtn) | Some(PadButton::ZKey) | Some(PadButton::RightClick) => {
+                    match &self.instance_focus {
+                        InstanceFocus::LaunchOptions => {
+                            let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                            match self.launch_option_index {
+                                0 if self.instances.len() == 2 => {
+                                    self.options.vertical_two_player = !self.options.vertical_two_player;
+                                }
+                                idx if idx == max_options - 1 => {
+                                    self.options.input_holding = !self.options.input_holding;
+                                }
+                                _ => {}
+                            }
+                            i += 1;
+                            continue;
+                        }
+                        InstanceFocus::StartButton => {
+                            if self.instances.len() > 0 {
+                                self.prepare_game_launch();
+                            }
+                            i += 1;
+                            continue;
+                        }
+                        InstanceFocus::InstanceCard(_, _) => {
+                            self.activate_focused = true;
+                            i += 1;
+                            continue;
+                        }
+                        InstanceFocus::Devices => {}
+                    }
+
+                    // Normal device handling
+                    if self.input_devices[i].device_type() != DeviceType::Gamepad
+                        && !self.options.input_holding
+                    {
+                        i += 1;
+                        continue;
+                    }
+                    if !self.options.allow_multiple_instances_on_same_device
+                        && self.is_device_in_any_instance(i)
+                    {
+                        i += 1;
+                        continue;
+                    }
+                    if self.input_devices[i].device_type() != DeviceType::Gamepad
+                        && self.is_device_in_any_instance(i)
+                    {
+                        i += 1;
+                        continue;
+                    }
+
+                    match self.instance_add_dev {
+                        Some(inst) => {
+                            if !self.is_device_in_instance(inst, i) {
+                                self.instance_add_dev = None;
+                                self.instances[inst].devices.push(i);
+                            } else {
+                                i += 1;
+                                continue;
+                            }
+                        }
+                        None => {
+                            self.instances.push(crate::instance::Instance {
+                                devices: vec![i],
+                                profname: String::new(),
+                                profselection: 0,
+                                monitor: 0,
+                                width: 0,
+                                height: 0,
+                            });
+                        }
+                    }
+                }
+                Some(PadButton::BBtn) | Some(PadButton::XKey) => {
+                    match &self.instance_focus {
+                        InstanceFocus::LaunchOptions | InstanceFocus::StartButton => {
+                            if self.instances.len() > 0 {
+                                self.instance_focus = InstanceFocus::InstanceCard(
+                                    self.instances.len() - 1,
+                                    InstanceCardFocus::Profile
+                                );
+                            } else {
+                                self.instance_focus = InstanceFocus::Devices;
+                            }
+                        }
+                        InstanceFocus::InstanceCard(_, _) => {
+                            self.instance_focus = InstanceFocus::Devices;
+                        }
+                        InstanceFocus::Devices => {
+                            if self.instance_add_dev != None {
+                                self.instance_add_dev = None;
+                            } else if self.is_device_in_any_instance(i) {
+                                self.remove_device(i);
+                            } else if self.instances.len() < 1 {
+                                self.cur_page = MenuPage::Games;
+                                self.instance_focus = InstanceFocus::Devices;
+                            }
+                        }
+                    }
+                }
+                Some(PadButton::YBtn) | Some(PadButton::AKey) => {
+                    if self.instance_add_dev == None {
+                        if let Some((instance, _)) = self.find_device_in_instance(i) {
+                            self.instance_add_dev = Some(instance);
+                        }
+                    }
+                }
+                Some(PadButton::StartBtn) => {
+                    if self.instances.len() > 0 && self.is_device_in_any_instance(i) {
+                        self.prepare_game_launch();
+                    }
+                }
+                Some(PadButton::Up) => {
+                    self.handle_instance_up();
+                }
+                Some(PadButton::Down) => {
+                    self.handle_instance_down();
+                }
+                Some(PadButton::Left) => {
+                    self.handle_instance_left();
+                }
+                Some(PadButton::Right) => {
+                    self.handle_instance_right();
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    fn handle_instance_up(&mut self) {
+        match &self.instance_focus {
+            InstanceFocus::LaunchOptions => {
+                if self.instances.len() > 0 {
+                    self.instance_focus = InstanceFocus::InstanceCard(
+                        self.instances.len() - 1,
+                        InstanceCardFocus::AudioOverride
+                    );
+                } else {
+                    self.instance_focus = InstanceFocus::Devices;
+                }
+            }
+            InstanceFocus::StartButton => {
+                self.instance_focus = InstanceFocus::LaunchOptions;
+            }
+            InstanceFocus::InstanceCard(idx, element) => {
+                let idx = *idx;
+                let new_element = match element {
+                    InstanceCardFocus::Profile => {
+                        if idx > 0 {
+                            self.instance_focus = InstanceFocus::InstanceCard(
+                                idx - 1,
+                                InstanceCardFocus::AudioOverride
+                            );
+                            return;
+                        } else {
+                            self.instance_focus = InstanceFocus::Devices;
+                            return;
+                        }
+                    }
+                    InstanceCardFocus::SetMaster => InstanceCardFocus::Profile,
+                    InstanceCardFocus::Monitor => InstanceCardFocus::SetMaster,
+                    InstanceCardFocus::InviteDevice => {
+                        if self.options.gamescope_sdl_backend {
+                            InstanceCardFocus::Monitor
+                        } else {
+                            InstanceCardFocus::SetMaster
+                        }
+                    }
+                    InstanceCardFocus::Device(0) => InstanceCardFocus::InviteDevice,
+                    InstanceCardFocus::Device(d) => InstanceCardFocus::Device(d - 1),
+                    InstanceCardFocus::AudioOverride => {
+                        let dev_count = self.instances.get(idx).map(|inst| inst.devices.len()).unwrap_or(0);
+                        if dev_count > 0 {
+                            InstanceCardFocus::Device(dev_count - 1)
+                        } else {
+                            InstanceCardFocus::InviteDevice
+                        }
+                    }
+                    InstanceCardFocus::AudioPreference => InstanceCardFocus::AudioOverride,
+                };
+                self.instance_focus = InstanceFocus::InstanceCard(idx, new_element);
+            }
+            InstanceFocus::Devices => {}
+        }
+    }
+
+    fn handle_instance_down(&mut self) {
+        match &self.instance_focus {
+            InstanceFocus::Devices => {
+                if self.instances.len() > 0 {
+                    self.instance_focus = InstanceFocus::InstanceCard(0, InstanceCardFocus::Profile);
+                }
+            }
+            InstanceFocus::LaunchOptions => {
+                self.instance_focus = InstanceFocus::StartButton;
+            }
+            InstanceFocus::StartButton => {}
+            InstanceFocus::InstanceCard(idx, element) => {
+                let idx = *idx;
+                let dev_count = self.instances.get(idx).map(|inst| inst.devices.len()).unwrap_or(0);
+                let new_element = match element {
+                    InstanceCardFocus::Profile => InstanceCardFocus::SetMaster,
+                    InstanceCardFocus::SetMaster => {
+                        if self.options.gamescope_sdl_backend {
+                            InstanceCardFocus::Monitor
+                        } else {
+                            InstanceCardFocus::InviteDevice
+                        }
+                    }
+                    InstanceCardFocus::Monitor => InstanceCardFocus::InviteDevice,
+                    InstanceCardFocus::InviteDevice => {
+                        if dev_count > 0 {
+                            InstanceCardFocus::Device(0)
+                        } else {
+                            InstanceCardFocus::AudioOverride
+                        }
+                    }
+                    InstanceCardFocus::Device(d) => {
+                        if *d + 1 < dev_count {
+                            InstanceCardFocus::Device(d + 1)
+                        } else {
+                            InstanceCardFocus::AudioOverride
+                        }
+                    }
+                    InstanceCardFocus::AudioOverride => InstanceCardFocus::AudioPreference,
+                    InstanceCardFocus::AudioPreference => {
+                        if idx + 1 < self.instances.len() {
+                            self.instance_focus = InstanceFocus::InstanceCard(
+                                idx + 1,
+                                InstanceCardFocus::Profile
+                            );
+                            return;
+                        } else {
+                            self.instance_focus = InstanceFocus::LaunchOptions;
+                            self.launch_option_index = 0;
+                            return;
+                        }
+                    }
+                };
+                self.instance_focus = InstanceFocus::InstanceCard(idx, new_element);
+            }
+        }
+    }
+
+    fn handle_instance_left(&mut self) {
+        match &self.instance_focus {
+            InstanceFocus::LaunchOptions => {
+                if self.launch_option_index > 0 {
+                    self.launch_option_index -= 1;
+                }
+            }
+            InstanceFocus::InstanceCard(idx, element) => {
+                if *idx > 0 {
+                    self.instance_focus = InstanceFocus::InstanceCard(idx - 1, element.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_instance_right(&mut self) {
+        match &self.instance_focus {
+            InstanceFocus::LaunchOptions => {
+                let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                if self.launch_option_index < max_options - 1 {
+                    self.launch_option_index += 1;
+                }
+            }
+            InstanceFocus::InstanceCard(idx, element) => {
+                if *idx + 1 < self.instances.len() {
+                    self.instance_focus = InstanceFocus::InstanceCard(idx + 1, element.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Process keyboard navigation for instance page
+    pub(crate) fn process_instance_nav_key(&mut self, btn: PadButton) {
+        match btn {
+            PadButton::Up => self.handle_instance_up(),
+            PadButton::Down => self.handle_instance_down(),
+            PadButton::Left => self.handle_instance_left(),
+            PadButton::Right => self.handle_instance_right(),
+            _ => {}
+        }
+    }
+
+    /// Process keyboard activation for instance page
+    pub(crate) fn process_instance_activate_key(&mut self) {
+        match &self.instance_focus {
+            InstanceFocus::LaunchOptions => {
+                let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                match self.launch_option_index {
+                    0 if self.instances.len() == 2 => {
+                        self.options.vertical_two_player = !self.options.vertical_two_player;
+                    }
+                    idx if idx == max_options - 1 => {
+                        self.options.input_holding = !self.options.input_holding;
+                    }
+                    _ => {}
+                }
+            }
+            InstanceFocus::StartButton => {
+                if self.instances.len() > 0 {
+                    self.prepare_game_launch();
+                }
+            }
+            InstanceFocus::InstanceCard(_, _) => {
+                self.activate_focused = true;
+            }
+            InstanceFocus::Devices => {}
+        }
+    }
+
+    /// Process keyboard back for instance page
+    pub(crate) fn process_instance_back_key(&mut self) {
+        match &self.instance_focus {
+            InstanceFocus::LaunchOptions | InstanceFocus::StartButton => {
+                if self.instances.len() > 0 {
+                    self.instance_focus = InstanceFocus::InstanceCard(
+                        self.instances.len() - 1,
+                        InstanceCardFocus::Profile
+                    );
+                } else {
+                    self.instance_focus = InstanceFocus::Devices;
+                }
+            }
+            InstanceFocus::InstanceCard(_, _) => {
+                self.instance_focus = InstanceFocus::Devices;
+            }
+            InstanceFocus::Devices => {}
+        }
+    }
+}

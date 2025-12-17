@@ -4,6 +4,7 @@ use super::app::{RegistryFocus, Splitux};
 use super::theme;
 use crate::handler::scan_handlers;
 use crate::registry::{download_handler, fetch_registry, RegistryEntry};
+use crate::ui::responsive::LayoutMode;
 use eframe::egui::{self, RichText, Ui};
 
 impl Splitux {
@@ -73,106 +74,166 @@ impl Splitux {
 
         // Calculate available height for the scroll area
         let available_height = ui.available_height();
+        let layout_mode = LayoutMode::from_ui(ui);
+        let is_narrow = layout_mode.is_narrow();
 
-        // Two-panel layout using columns
-        ui.columns(2, |columns| {
-            // Left column: handler list
-            columns[0].vertical(|ui| {
-                // Search box
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label("Search:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.registry_search)
-                            .desired_width(140.0)
-                            .hint_text("Filter..."),
-                    );
-                });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                // Handler list with explicit height
-                let is_list_focused = self.registry_focus == RegistryFocus::HandlerList;
-                let scroll_height = (available_height - 80.0).max(200.0);
-                egui::ScrollArea::vertical()
-                    .max_height(scroll_height)
-                    .show(ui, |ui| {
-                        for (original_idx, entry) in &filtered_handlers {
-                            let is_selected = self.registry_selected == Some(*original_idx);
-                            let is_installed = entry.is_installed();
-                            let show_focus = is_selected && is_list_focused;
-
-                            let frame = if is_selected {
-                                egui::Frame::NONE
-                                    .fill(theme::colors::SELECTION_BG)
-                                    .corner_radius(6)
-                                    .inner_margin(egui::Margin::symmetric(6, 4))
-                                    .stroke(if show_focus {
-                                        theme::focus_stroke()
-                                    } else {
-                                        egui::Stroke::new(1.0, theme::colors::ACCENT_DIM)
-                                    })
-                            } else {
-                                egui::Frame::NONE
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .corner_radius(6)
-                                    .inner_margin(egui::Margin::symmetric(6, 4))
-                            };
-
-                            let frame_resp = frame.show(ui, |ui| {
-                                let response = ui.horizontal(|ui| {
-                                    // Icon from registry CDN
-                                    let icon_url = entry.icon_url();
-                                    ui.add(
-                                        egui::Image::new(&icon_url)
-                                            .max_width(18.0)
-                                            .corner_radius(3),
-                                    );
-                                    ui.add_space(4.0);
-
-                                    // Name with installed indicator
-                                    let mut name_text = RichText::new(&entry.name);
-                                    if is_installed {
-                                        name_text = name_text.color(theme::colors::SUCCESS);
-                                    }
-                                    let label = ui.add(
-                                        egui::Label::new(name_text)
-                                            .selectable(false)
-                                            .sense(egui::Sense::click()),
-                                    );
-                                    label
-                                }).inner;
-
-                                if response.clicked() {
-                                    self.registry_selected = Some(*original_idx);
-                                }
-                            });
-                            // Auto-scroll to keep focused handler visible
-                            if show_focus {
-                                frame_resp.response.scroll_to_me(Some(egui::Align::Center));
-                            }
-                            ui.add_space(2.0);
-                        }
-                    });
+        // Responsive layout - stacked in narrow mode, columns in wide/medium
+        if is_narrow {
+            // Single column stacked layout
+            // Search box
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("🔍");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.registry_search)
+                        .desired_width(ui.available_width() - 30.0)
+                        .hint_text("Filter..."),
+                );
             });
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
 
-            // Right column: selected handler details
-            columns[1].vertical(|ui| {
-                ui.add_space(8.0);
+            // Handler list (compact height in narrow mode)
+            let is_list_focused = self.registry_focus == RegistryFocus::HandlerList;
+            let scroll_height = 150.0;
+            egui::ScrollArea::vertical()
+                .id_salt("handler_list_narrow")
+                .max_height(scroll_height)
+                .show(ui, |ui| {
+                    self.display_registry_handler_list(ui, &filtered_handlers, is_list_focused);
+                });
 
-                if let Some(selected_idx) = self.registry_selected {
-                    if let Some(entry) = handlers.get(selected_idx) {
-                        self.display_registry_handler_details(ui, entry);
+            ui.add_space(8.0);
+            ui.separator();
+
+            // Details below (scrollable)
+            egui::ScrollArea::vertical()
+                .id_salt("handler_details_narrow")
+                .max_height(available_height - scroll_height - 100.0)
+                .show(ui, |ui| {
+                    if let Some(selected_idx) = self.registry_selected {
+                        if let Some(entry) = handlers.get(selected_idx) {
+                            self.display_registry_handler_details(ui, entry);
+                        }
+                    } else {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(RichText::new("Select a handler").italics().color(theme::colors::TEXT_MUTED));
+                        });
                     }
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(40.0);
-                        ui.label(RichText::new("Select a handler from the list").italics().color(theme::colors::TEXT_MUTED));
+                });
+        } else {
+            // Two-column layout
+            ui.columns(2, |columns| {
+                // Left column: handler list
+                columns[0].vertical(|ui| {
+                    // Search box
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Search:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.registry_search)
+                                .desired_width(140.0)
+                                .hint_text("Filter..."),
+                        );
                     });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // Handler list with explicit height
+                    let is_list_focused = self.registry_focus == RegistryFocus::HandlerList;
+                    let scroll_height = (available_height - 80.0).max(200.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(scroll_height)
+                        .show(ui, |ui| {
+                            self.display_registry_handler_list(ui, &filtered_handlers, is_list_focused);
+                        });
+                });
+
+                // Right column: selected handler details
+                columns[1].vertical(|ui| {
+                    ui.add_space(8.0);
+
+                    if let Some(selected_idx) = self.registry_selected {
+                        if let Some(entry) = handlers.get(selected_idx) {
+                            self.display_registry_handler_details(ui, entry);
+                        }
+                    } else {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.label(RichText::new("Select a handler from the list").italics().color(theme::colors::TEXT_MUTED));
+                        });
+                    }
+                });
+            });
+        }
+    }
+
+    /// Helper to display the handler list (used by both layouts)
+    fn display_registry_handler_list(
+        &mut self,
+        ui: &mut Ui,
+        filtered_handlers: &[(usize, &RegistryEntry)],
+        is_list_focused: bool,
+    ) {
+        for (original_idx, entry) in filtered_handlers {
+            let is_selected = self.registry_selected == Some(*original_idx);
+            let is_installed = entry.is_installed();
+            let show_focus = is_selected && is_list_focused;
+
+            let frame = if is_selected {
+                egui::Frame::NONE
+                    .fill(theme::colors::SELECTION_BG)
+                    .corner_radius(6)
+                    .inner_margin(egui::Margin::symmetric(6, 4))
+                    .stroke(if show_focus {
+                        theme::focus_stroke()
+                    } else {
+                        egui::Stroke::new(1.0, theme::colors::ACCENT_DIM)
+                    })
+            } else {
+                egui::Frame::NONE
+                    .fill(egui::Color32::TRANSPARENT)
+                    .corner_radius(6)
+                    .inner_margin(egui::Margin::symmetric(6, 4))
+            };
+
+            let frame_resp = frame.show(ui, |ui| {
+                let response = ui.horizontal(|ui| {
+                    // Icon from registry CDN
+                    let icon_url = entry.icon_url();
+                    ui.add(
+                        egui::Image::new(&icon_url)
+                            .max_width(18.0)
+                            .corner_radius(3),
+                    );
+                    ui.add_space(4.0);
+
+                    // Name with installed indicator
+                    let mut name_text = RichText::new(&entry.name);
+                    if is_installed {
+                        name_text = name_text.color(theme::colors::SUCCESS);
+                    }
+                    let label = ui.add(
+                        egui::Label::new(name_text)
+                            .selectable(false)
+                            .sense(egui::Sense::click()),
+                    );
+                    label
+                }).inner;
+
+                if response.clicked() {
+                    self.registry_selected = Some(*original_idx);
                 }
             });
-        });
+            // Auto-scroll to keep focused handler visible
+            if show_focus {
+                frame_resp.response.scroll_to_me(Some(egui::Align::Center));
+            }
+            ui.add_space(2.0);
+        }
     }
 
     fn display_registry_handler_details(&mut self, ui: &mut Ui, entry: &RegistryEntry) {

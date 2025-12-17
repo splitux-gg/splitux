@@ -31,6 +31,7 @@ impl Splitux {
         } else {
             self.instances.clear();
             self.input_devices = scan_input_devices(&self.options.pad_filter_type);
+            self.refresh_device_display_names();
             self.monitors = get_monitors_sdl();
             self.profiles = scan_profiles(true);
             self.instance_add_dev = None;
@@ -62,8 +63,44 @@ impl Splitux {
         let monitors = self.monitors.clone();
         let dev_infos: Vec<DeviceInfo> = self.input_devices.iter().map(|p| p.info()).collect();
 
-        let cfg = self.options.clone();
+        // Resolve audio assignments: session overrides take precedence over profile preferences
+        let mut cfg = self.options.clone();
+        for i in 0..self.instances.len() {
+            // Check session override first
+            if let Some(override_opt) = self.audio_session_overrides.get(&i) {
+                match override_opt {
+                    Some(sink_name) => {
+                        cfg.audio.default_assignments.insert(i, sink_name.clone());
+                        println!(
+                            "[splitux] Applied session audio override for instance {}: {}",
+                            i, sink_name
+                        );
+                    }
+                    None => {
+                        // Explicit mute - remove from assignments
+                        cfg.audio.default_assignments.remove(&i);
+                        println!(
+                            "[splitux] Instance {} audio muted (session override)",
+                            i
+                        );
+                    }
+                }
+                continue;
+            }
+
+            // Fall back to profile preference
+            if let Some(sink_name) = self.profile_audio_prefs.get(&i) {
+                cfg.audio.default_assignments.insert(i, sink_name.clone());
+                println!(
+                    "[splitux] Applied profile audio preference for instance {}: {}",
+                    i, sink_name
+                );
+            }
+        }
         let _ = save_cfg(&cfg);
+
+        // Capture master profile for use in launch thread
+        let master_profile = cfg.master_profile.clone();
 
         self.cur_page = MenuPage::Games;
         self.spawn_task(
@@ -77,10 +114,14 @@ impl Splitux {
                     return;
                 }
 
-                // Copy original saves to all profiles before launch
+                // Initialize profile saves with master-based inheritance
                 if !handler.original_save_path.is_empty() {
-                    if let Err(err) = save_sync::copy_original_saves_to_all_profiles(&handler, &instances) {
-                        println!("[splitux] Warning: Failed to copy original saves: {}", err);
+                    if let Err(err) = save_sync::initialize_profile_saves(
+                        &handler,
+                        &instances,
+                        master_profile.as_deref(),
+                    ) {
+                        println!("[splitux] Warning: Failed to initialize saves: {}", err);
                         // Continue anyway - this is non-fatal
                     }
                 }
@@ -92,9 +133,13 @@ impl Splitux {
                     msg("Launch Error", &format!("{err}"));
                 }
 
-                // Sync saves back from the first named profile after game exits
+                // Sync master profile's saves back to original location
                 if handler.save_sync_back {
-                    if let Err(err) = save_sync::sync_saves_back(&handler, &instances) {
+                    if let Err(err) = save_sync::sync_master_saves_back(
+                        &handler,
+                        &instances,
+                        master_profile.as_deref(),
+                    ) {
                         println!("[splitux] Error syncing saves back: {}", err);
                         msg("Save Sync Error", &format!("Failed to sync saves back: {err}"));
                     }

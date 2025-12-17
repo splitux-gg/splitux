@@ -17,6 +17,7 @@ mod paths;
 #[allow(dead_code)]
 mod photon; // Legacy - kept as reference during migration validation
 mod platform;
+mod profile_prefs;
 mod profiles;
 mod proton;
 mod registry;

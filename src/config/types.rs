@@ -30,6 +30,26 @@ pub struct PhotonAppIds {
     pub voice_app_id: String,
 }
 
+/// State for a collapsible/resizable UI panel
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct PanelState {
+    /// Whether the panel is collapsed
+    #[serde(default)]
+    pub collapsed: bool,
+    /// Custom width set by user (None = use default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_width: Option<f32>,
+}
+
+/// UI layout state (panel positions, sizes, collapse state)
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct LayoutState {
+    #[serde(default)]
+    pub games_panel: PanelState,
+    #[serde(default)]
+    pub devices_panel: PanelState,
+}
+
 /// Audio routing configuration for per-instance audio output
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct AudioConfig {
@@ -73,6 +93,16 @@ pub struct SplituxConfig {
     /// Audio routing configuration
     #[serde(default)]
     pub audio: AudioConfig,
+    /// Master profile name - syncs saves to/from original game location
+    /// The machine owner typically sets their profile as master
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub master_profile: Option<String>,
+    /// UI layout preferences (panel collapse state, widths)
+    #[serde(default)]
+    pub layout: LayoutState,
+    /// Custom device names (maps device unique ID -> user-assigned name)
+    #[serde(default)]
+    pub device_aliases: HashMap<String, String>,
 }
 
 fn default_enable_kwin_script() -> bool {
@@ -96,6 +126,9 @@ impl Default for SplituxConfig {
             disable_mount_gamedirs: false,
             photon_app_ids: PhotonAppIds::default(),
             audio: AudioConfig::default(),
+            master_profile: None,
+            layout: LayoutState::default(),
+            device_aliases: HashMap::new(),
         }
     }
 }

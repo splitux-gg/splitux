@@ -1,5 +1,5 @@
 mod app;
-mod app_input;
+mod input;
 mod app_instances;
 mod app_launch;
 mod app_panels;
