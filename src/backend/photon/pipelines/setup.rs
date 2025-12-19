@@ -4,26 +4,35 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::app::load_photon_ids;
+use crate::handler::Handler;
+use crate::instance::Instance;
 use crate::paths::PATH_PARTY;
 
 use super::super::operations::{
     bepinex_backend_available, create_instance_overlay, generate_instance_config,
-    setup_shared_files, PhotonAppIds,
+    setup_shared_files,
 };
 use super::super::pure::detect_unity_backend;
-use super::super::types::{PhotonConfig, PHOTON_BASE_PORT};
+use super::super::types::PhotonConfig;
 
-/// Instance info needed for Photon setup
-pub struct PhotonInstance {
-    pub profile_name: String,
-}
+/// Base port for Photon networking (different range from Goldberg)
+const BASE_PORT: u16 = 47684;
 
 /// Create Photon overlays for all instances
 pub fn create_all_overlays(
-    instances: &[PhotonInstance],
+    instances: &[Instance],
     is_windows: bool,
     game_dir: &Path,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    // Check if Photon App IDs are configured
+    let photon_ids = load_photon_ids();
+    if photon_ids.pun_app_id.is_empty() {
+        return Err(
+            "Photon PUN App ID not configured. Go to Settings > Photon to set it up.".into(),
+        );
+    }
+
     // Detect Unity backend type
     let backend = detect_unity_backend(game_dir);
 
@@ -38,25 +47,16 @@ pub fn create_all_overlays(
 
     // Generate ports for each instance
     let instance_ports: Vec<u16> = (0..instances.len())
-        .map(|i| PHOTON_BASE_PORT + i as u16)
+        .map(|i| BASE_PORT + i as u16)
         .collect();
 
     let mut overlays = Vec::new();
 
     for (i, instance) in instances.iter().enumerate() {
-        let broadcast_ports: Vec<u16> = instance_ports
-            .iter()
-            .enumerate()
-            .filter(|(j, _)| *j != i)
-            .map(|(_, &port)| port)
-            .collect();
-
-        let config = PhotonConfig::new(
-            i,
-            instance.profile_name.clone(),
-            instance_ports[i],
-            broadcast_ports,
-        );
+        let config = PhotonConfig {
+            player_name: instance.profname.clone(),
+            listen_port: instance_ports[i],
+        };
 
         let overlay = create_instance_overlay(i, &config, is_windows, backend)?;
         overlays.push(overlay);
@@ -67,34 +67,22 @@ pub fn create_all_overlays(
 
 /// Generate Photon configs for all instances at launch time
 pub fn generate_all_configs(
-    instances: &[PhotonInstance],
-    config_path_pattern: &str,
-    shared_files: &[String],
-    photon_ids: &PhotonAppIds,
+    handler: &Handler,
+    instances: &[Instance],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Validate Photon App IDs
-    if photon_ids.pun_app_id.is_empty() {
-        return Err(
-            "Photon PUN App ID not configured. Go to Settings > Photon to set it up.".into(),
-        );
-    }
+    // Get Photon settings from new optional field (Phase 7)
+    let photon_settings = handler
+        .photon_ref()
+        .ok_or("Photon backend not enabled")?;
 
     // Set up shared files first (before instance configs)
-    if !shared_files.is_empty() {
-        let profile_names: Vec<String> = instances.iter().map(|i| i.profile_name.clone()).collect();
-        setup_shared_files(shared_files, &profile_names)?;
+    if !photon_settings.shared_files.is_empty() {
+        setup_shared_files(handler, instances)?;
     }
 
-    // Generate config for each instance
     for (i, instance) in instances.iter().enumerate() {
-        let profile_path = PATH_PARTY.join("profiles").join(&instance.profile_name);
-        generate_instance_config(
-            &profile_path,
-            config_path_pattern,
-            photon_ids,
-            i,
-            instances.len(),
-        )?;
+        let profile_path = PATH_PARTY.join("profiles").join(&instance.profname);
+        generate_instance_config(&profile_path, handler, i, instances.len())?;
     }
 
     Ok(())

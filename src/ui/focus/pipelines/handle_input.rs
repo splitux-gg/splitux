@@ -7,20 +7,32 @@ use crate::ui::focus::pure::{
     apply_index_delta, navigate_dropdown, navigate_games_page, navigate_instances_page,
     GamesPaneNav, InstancesNav,
 };
-use crate::ui::focus::types::{FocusPane, InstanceFocus, NavDirection};
+use crate::ui::focus::types::{FocusPane, InstanceFocus, NavDirection, RegistryFocus, SettingsFocus};
 use crate::ui::MenuPage;
 
 /// State snapshot needed for navigation decisions
 pub struct NavContext {
     pub page: MenuPage,
+    // Games page state
     pub focus_pane: FocusPane,
-    pub instance_focus: InstanceFocus,
     pub action_bar_index: usize,
     pub info_pane_index: usize,
     pub selected_handler: usize,
     pub handlers_count: usize,
+    // Instances page state
+    pub instance_focus: InstanceFocus,
     pub launch_option_index: usize,
     pub instances_count: usize,
+    // Registry page state
+    pub registry_focus: RegistryFocus,
+    pub registry_selected: Option<usize>,
+    pub registry_handler_count: usize,
+    // Settings page state
+    pub settings_focus: SettingsFocus,
+    pub settings_option_index: usize,
+    pub settings_button_index: usize,
+    pub settings_max_options: usize,
+    // Dropdown state (shared across pages)
     pub dropdown_open: bool,
     pub dropdown_selection: usize,
     pub dropdown_total: usize,
@@ -31,21 +43,39 @@ pub struct NavContext {
 pub enum NavAction {
     /// No action needed
     None,
+    // Games page actions
     /// Update focus pane
     SetFocusPane(FocusPane),
-    /// Update instance focus area
-    SetInstanceFocus(InstanceFocus),
     /// Update action bar selection
     SetActionBarIndex(usize),
     /// Update info pane selection
     SetInfoPaneIndex(usize),
     /// Update selected handler (game list)
     SetSelectedHandler(usize),
+    // Instances page actions
+    /// Update instance focus area
+    SetInstanceFocus(InstanceFocus),
     /// Update launch option selection
     SetLaunchOptionIndex(usize),
+    // Registry page actions
+    /// Update registry focus area
+    SetRegistryFocus(RegistryFocus),
+    /// Update registry selected handler
+    SetRegistrySelected(Option<usize>),
+    // Settings page actions
+    /// Update settings focus area
+    SetSettingsFocus(SettingsFocus),
+    /// Update settings option index
+    SetSettingsOptionIndex(usize),
+    /// Update settings button index
+    SetSettingsButtonIndex(usize),
+    /// Trigger scroll to focus
+    ScrollToFocus,
+    // Shared actions
     /// Update dropdown selection
     SetDropdownSelection(usize),
-    /// Navigate to a different page
+    /// Navigate to a different page - reserved for future use
+    #[allow(dead_code)]
     ChangePage(MenuPage),
 }
 
@@ -60,7 +90,8 @@ pub fn handle_direction(ctx: &NavContext, direction: NavDirection) -> Vec<NavAct
     match ctx.page {
         MenuPage::Games => handle_games_direction(ctx, direction),
         MenuPage::Instances => handle_instances_direction(ctx, direction),
-        _ => vec![NavAction::None],
+        MenuPage::Registry => handle_registry_direction(ctx, direction),
+        MenuPage::Settings => handle_settings_direction(ctx, direction),
     }
 }
 
@@ -138,29 +169,106 @@ fn handle_instances_direction(ctx: &NavContext, direction: NavDirection) -> Vec<
     }
 }
 
-/// Process tab navigation (LB/RB buttons)
-pub fn handle_tab(ctx: &NavContext, next: bool) -> NavAction {
-    match ctx.page {
-        MenuPage::Games => NavAction::ChangePage(MenuPage::Settings),
-        MenuPage::Settings => NavAction::ChangePage(MenuPage::Games),
-        _ => NavAction::None, // Don't tab from Instances
+fn handle_registry_direction(ctx: &NavContext, direction: NavDirection) -> Vec<NavAction> {
+    match ctx.registry_focus {
+        RegistryFocus::HandlerList => match direction {
+            NavDirection::Up => {
+                if let Some(sel) = ctx.registry_selected {
+                    if sel > 0 {
+                        vec![NavAction::SetRegistrySelected(Some(sel - 1))]
+                    } else {
+                        vec![NavAction::None]
+                    }
+                } else if ctx.registry_handler_count > 0 {
+                    vec![NavAction::SetRegistrySelected(Some(0))]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Down => {
+                if let Some(sel) = ctx.registry_selected {
+                    if sel + 1 < ctx.registry_handler_count {
+                        vec![NavAction::SetRegistrySelected(Some(sel + 1))]
+                    } else {
+                        vec![NavAction::None]
+                    }
+                } else if ctx.registry_handler_count > 0 {
+                    vec![NavAction::SetRegistrySelected(Some(0))]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Right => {
+                if ctx.registry_selected.is_some() {
+                    vec![NavAction::SetRegistryFocus(RegistryFocus::InstallButton)]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Left => vec![NavAction::None],
+        },
+        RegistryFocus::InstallButton => match direction {
+            NavDirection::Left => vec![NavAction::SetRegistryFocus(RegistryFocus::HandlerList)],
+            _ => vec![NavAction::None],
+        },
     }
 }
 
-/// Process back button (B)
-pub fn handle_back(ctx: &NavContext, is_lite_mode: bool) -> NavAction {
-    if ctx.dropdown_open {
-        return NavAction::None; // Dropdown close handled separately
-    }
-
-    if ctx.page == MenuPage::Instances && ctx.instance_focus == InstanceFocus::LaunchOptions {
-        return NavAction::SetInstanceFocus(InstanceFocus::Devices);
-    }
-
-    if is_lite_mode {
-        NavAction::ChangePage(MenuPage::Instances)
-    } else {
-        NavAction::ChangePage(MenuPage::Games)
+fn handle_settings_direction(ctx: &NavContext, direction: NavDirection) -> Vec<NavAction> {
+    match ctx.settings_focus {
+        SettingsFocus::Options => match direction {
+            NavDirection::Up => {
+                if ctx.settings_option_index > 0 {
+                    vec![
+                        NavAction::SetSettingsOptionIndex(ctx.settings_option_index - 1),
+                        NavAction::ScrollToFocus,
+                    ]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Down => {
+                if ctx.settings_option_index < ctx.settings_max_options {
+                    vec![
+                        NavAction::SetSettingsOptionIndex(ctx.settings_option_index + 1),
+                        NavAction::ScrollToFocus,
+                    ]
+                } else {
+                    vec![
+                        NavAction::SetSettingsFocus(SettingsFocus::BottomButtons),
+                        NavAction::SetSettingsButtonIndex(0),
+                    ]
+                }
+            }
+            // Left/Right in Options area - pass through as key events (handled by caller)
+            NavDirection::Left | NavDirection::Right => vec![NavAction::None],
+        },
+        SettingsFocus::BottomButtons => match direction {
+            NavDirection::Up => {
+                vec![
+                    NavAction::SetSettingsFocus(SettingsFocus::Options),
+                    NavAction::ScrollToFocus,
+                ]
+            }
+            NavDirection::Left => {
+                if ctx.settings_button_index > 0 {
+                    vec![NavAction::SetSettingsButtonIndex(ctx.settings_button_index - 1)]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Right => {
+                if ctx.settings_button_index < 1 {
+                    vec![NavAction::SetSettingsButtonIndex(ctx.settings_button_index + 1)]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Down => {
+                // Wrap around to first button
+                vec![NavAction::SetSettingsButtonIndex((ctx.settings_button_index + 1) % 2)]
+            }
+        },
     }
 }
 

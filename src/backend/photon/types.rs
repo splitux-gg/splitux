@@ -30,31 +30,10 @@ impl UnityBackend {
 /// Configuration for a Photon instance
 #[derive(Debug, Clone)]
 pub struct PhotonConfig {
-    /// Instance index (0-based)
-    pub instance_idx: usize,
     /// Player name for this instance
     pub player_name: String,
     /// Listen port for local networking
     pub listen_port: u16,
-    /// Ports of other instances for discovery
-    pub broadcast_ports: Vec<u16>,
-}
-
-impl PhotonConfig {
-    /// Create a new Photon config
-    pub fn new(
-        instance_idx: usize,
-        player_name: String,
-        listen_port: u16,
-        broadcast_ports: Vec<u16>,
-    ) -> Self {
-        Self {
-            instance_idx,
-            player_name,
-            listen_port,
-            broadcast_ports,
-        }
-    }
 }
 
 /// Base port for Photon networking (different range from Goldberg)

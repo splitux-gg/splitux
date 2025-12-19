@@ -5,30 +5,32 @@
 use std::fs;
 use std::path::Path;
 
-use super::super::types::PHOTON_BASE_PORT;
+use crate::app::load_photon_ids;
+use crate::handler::Handler;
 
-/// Photon App IDs for LocalMultiplayer mod
-#[derive(Debug, Clone, Default)]
-pub struct PhotonAppIds {
-    pub pun_app_id: String,
-    pub voice_app_id: String,
-}
+use super::super::types::PHOTON_BASE_PORT;
 
 /// Generate the LocalMultiplayer config for an instance
 ///
 /// This writes the config file to the profile's windata directory at the path
-/// specified in the config_path parameter.
+/// specified in handler.photon.config_path
 pub fn generate_instance_config(
     profile_path: &Path,
-    config_path_pattern: &str,
-    photon_ids: &PhotonAppIds,
+    handler: &Handler,
     instance_idx: usize,
     total_instances: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let photon_ids = load_photon_ids();
+
+    // Get Photon settings from new optional field (Phase 7)
+    let photon_settings = handler
+        .photon_ref()
+        .ok_or("Photon backend not enabled")?;
+
+    // Get config path from handler settings
+    let config_path_pattern = &photon_settings.config_path;
     if config_path_pattern.is_empty() {
-        return Err(
-            "Handler must specify photon_settings.config_path for Photon backend".into(),
-        );
+        return Err("Handler must specify photon.config_path for Photon backend".into());
     }
 
     // Build the full path within the profile's windata directory

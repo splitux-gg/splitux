@@ -10,7 +10,10 @@
 
 use super::Backend;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use crate::handler::Handler;
+use crate::instance::Instance;
 
 mod operations;
 mod pipelines;
@@ -18,12 +21,9 @@ mod pure;
 mod types;
 
 // Re-export types for external use
-pub use types::{FacepunchConfig, RuntimePatch};
+pub use types::RuntimePatch;
 
-// Internal re-exports (used within this module)
-pub use operations::create_instance_overlay;
-
-// Phase 9.5: Re-exports for external use
+// Re-exports for external use
 pub use operations::get_linux_bepinex_env;
 
 /// Facepunch settings from handler YAML (dot-notation: facepunch.*)
@@ -40,12 +40,6 @@ pub struct FacepunchSettings {
     /// Bypass Photon Steam authentication (AuthType=255)
     #[serde(default)]
     pub photon_bypass: bool,
-}
-
-impl FacepunchSettings {
-    pub fn is_default(&self) -> bool {
-        !self.spoof_identity && !self.force_valid && !self.photon_bypass
-    }
 }
 
 /// Facepunch backend implementation
@@ -72,40 +66,24 @@ impl Backend for Facepunch {
         true
     }
 
-    fn create_overlay(
-        &self,
-        instance_idx: usize,
-        _handler_path: &PathBuf,
-        game_root: &PathBuf,
-        is_windows: bool,
-    ) -> Result<PathBuf, Box<dyn Error>> {
-        use crate::backend::photon::{bepinex_backend_available, detect_unity_backend};
-
-        // Detect Unity backend
-        let backend = detect_unity_backend(game_root);
-
-        // Check if BepInEx is available for this backend
-        if !bepinex_backend_available(backend) {
-            return Err(format!(
-                "BepInEx resources not found for {} backend. Run ./splitux.sh build",
-                backend.display_name()
-            )
-            .into());
-        }
-
-        // Create a config for this instance
-        // Note: Real usage should provide proper Steam IDs via generate_steam_id
-        let config = FacepunchConfig::new(
-            instance_idx,
-            format!("Player{}", instance_idx + 1),
-            76561198000000000 + instance_idx as u64,
-        );
-
-        create_instance_overlay(instance_idx, &config, is_windows, backend)
+    /// Facepunch has highest priority (overlays go at front of stack)
+    fn priority(&self) -> u8 {
+        10
     }
-}
 
-/// Check if handler uses Facepunch backend
-pub fn uses_facepunch(settings: &FacepunchSettings, runtime_patches: &[RuntimePatch]) -> bool {
-    !settings.is_default() || !runtime_patches.is_empty()
+    fn create_all_overlays(
+        &self,
+        _handler: &Handler,
+        instances: &[Instance],
+        is_windows: bool,
+        game_root: &Path,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        pipelines::create_all_overlays(
+            &self.settings,
+            &self.runtime_patches,
+            instances,
+            is_windows,
+            game_root,
+        )
+    }
 }

@@ -10,7 +10,6 @@ mod cache;
 mod locate;
 
 // Re-export submodule functions for direct access if needed
-pub use locate::{find_game_path, get_install_dir_name};
 
 /// Steam platform implementation
 pub struct SteamPlatform {

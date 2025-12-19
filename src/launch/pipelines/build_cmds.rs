@@ -3,10 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::app::{load_photon_ids, PadFilterType, PartyConfig};
+use crate::app::{PadFilterType, PartyConfig};
 use crate::backend;
 use crate::backend::facepunch::get_linux_bepinex_env;
-use crate::backend::photon::{generate_all_configs as photon_generate_configs, PhotonAppIds, PhotonInstance};
+use crate::backend::photon::generate_all_configs as photon_generate_configs;
 use crate::bwrap;
 use crate::gamescope;
 use crate::handler::{Handler, SDL2Override};
@@ -47,23 +47,7 @@ pub fn launch_cmds(
 
     // Generate Photon configs at launch time (needs instance count)
     if h.has_photon() && h.is_saved_handler() {
-        if let Some(photon_settings) = h.photon_ref() {
-            let photon_instances: Vec<PhotonInstance> = instances
-                .iter()
-                .map(|i| PhotonInstance { profile_name: i.profname.clone() })
-                .collect();
-            let app_ids = load_photon_ids();
-            let photon_ids = PhotonAppIds {
-                pun_app_id: app_ids.pun_app_id,
-                voice_app_id: app_ids.voice_app_id,
-            };
-            photon_generate_configs(
-                &photon_instances,
-                &photon_settings.config_path,
-                &photon_settings.shared_files,
-                &photon_ids,
-            )?;
-        }
+        photon_generate_configs(h, instances)?;
     }
 
     // Mount game directories with overlays
@@ -115,6 +99,12 @@ pub fn launch_cmds(
         // Proton environment (for Windows games)
         if win {
             proton::setup_env(&mut cmd, h, cfg, i);
+
+            // BepInEx doorstop requires native winhttp.dll override
+            // Without this, Wine uses its builtin and BepInEx never loads
+            if h.has_photon() || h.has_facepunch() {
+                cmd.env("WINEDLLOVERRIDES", "winhttp=n,b");
+            }
         }
 
         // Steam Input configuration

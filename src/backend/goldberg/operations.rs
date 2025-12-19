@@ -8,4 +8,3 @@ mod write_settings;
 
 pub use create_overlay::create_instance_overlay;
 pub use find_dlls::find_steam_api_dlls;
-pub use write_settings::write_steam_settings;

@@ -5,19 +5,19 @@
 use std::path::{Path, PathBuf};
 
 use crate::backend::photon::{bepinex_backend_available, detect_unity_backend};
+use crate::handler::RuntimePatch;
+use crate::instance::Instance;
+use crate::profiles::generate_steam_id;
 
 use super::super::operations::create_instance_overlay;
 use super::super::types::FacepunchConfig;
-
-/// Instance info needed for Facepunch setup
-pub struct FacepunchInstance {
-    pub profile_name: String,
-    pub steam_id: u64,
-}
+use super::super::FacepunchSettings;
 
 /// Create Facepunch overlays for all instances
 pub fn create_all_overlays(
-    instances: &[FacepunchInstance],
+    settings: &FacepunchSettings,
+    runtime_patches: &[RuntimePatch],
+    instances: &[Instance],
     is_windows: bool,
     game_dir: &Path,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -36,7 +36,13 @@ pub fn create_all_overlays(
     let mut overlays = Vec::new();
 
     for (i, instance) in instances.iter().enumerate() {
-        let config = FacepunchConfig::new(i, instance.profile_name.clone(), instance.steam_id);
+        let config = FacepunchConfig {
+            player_index: i,
+            account_name: instance.profname.clone(),
+            steam_id: generate_steam_id(&instance.profname),
+            settings: settings.clone(),
+            runtime_patches: runtime_patches.to_vec(),
+        };
 
         let overlay = create_instance_overlay(i, &config, is_windows, backend)?;
         overlays.push(overlay);

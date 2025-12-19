@@ -50,10 +50,25 @@ pub fn create_instance_overlay(
 
     // 4. Write splitux.cfg
     let config_content = generate_config_content(config);
-    let config_path = overlay_dir.join("BepInEx").join("config").join("splitux.cfg");
-    fs::write(&config_path, &config_content)?;
+    let bepinex_config_dir = overlay_dir.join("BepInEx").join("config");
+    fs::write(bepinex_config_dir.join("splitux.cfg"), &config_content)?;
 
-    // 5. Install SplituxFacepunch plugin
+    // 5. Write BepInEx.cfg to disable console logging (prevents CStreamWriter crash on Linux)
+    // This is critical for native Linux games - BepInEx's LinuxConsoleDriver crashes
+    // with CStreamWriter if console logging is enabled
+    let bepinex_cfg = r#"[Logging.Console]
+Enabled = false
+
+[Logging.Disk]
+Enabled = true
+LogLevels = All
+
+[Chainloader]
+HideManagerGameObject = true
+"#;
+    fs::write(bepinex_config_dir.join("BepInEx.cfg"), bepinex_cfg)?;
+
+    // 6. Install SplituxFacepunch plugin
     install_splitux_plugin(&overlay_dir)?;
 
     println!(

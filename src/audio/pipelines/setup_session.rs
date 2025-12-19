@@ -1,7 +1,7 @@
 //! Audio session setup pipeline
 
-use crate::audio::operations::{cleanup_all_splitux_sinks, create_virtual_sink};
-use crate::audio::types::{AudioContext, AudioResult, VirtualSink};
+use crate::audio::operations::{cleanup_all_splitux_sinks, create_mute_sink, create_virtual_sink};
+use crate::audio::types::{AudioContext, AudioResult, VirtualSink, AUDIO_MUTED_SENTINEL};
 
 /// Set up audio routing for a game session
 ///
@@ -17,19 +17,37 @@ pub fn setup_audio_session(ctx: &AudioContext) -> AudioResult<(Vec<VirtualSink>,
 
     for (instance_idx, maybe_target) in ctx.assignments.iter().enumerate() {
         if let Some(target_sink) = maybe_target {
-            // Create virtual sink routed to the target physical device
-            match create_virtual_sink(ctx.system, instance_idx, target_sink) {
-                Ok(virtual_sink) => {
-                    sink_env_vars.push(virtual_sink.sink_name.clone());
-                    virtual_sinks.push(virtual_sink);
+            // Check if this is an explicit mute request
+            if target_sink == AUDIO_MUTED_SENTINEL {
+                // Create mute sink (null sink with no loopback - audio goes nowhere)
+                match create_mute_sink(ctx.system, instance_idx) {
+                    Ok(virtual_sink) => {
+                        sink_env_vars.push(virtual_sink.sink_name.clone());
+                        virtual_sinks.push(virtual_sink);
+                    }
+                    Err(e) => {
+                        println!(
+                            "[splitux] audio - Warning: Failed to create mute sink for instance {}: {}",
+                            instance_idx, e
+                        );
+                        sink_env_vars.push(String::new());
+                    }
                 }
-                Err(e) => {
-                    // Log error but continue - audio failure shouldn't block game launch
-                    println!(
-                        "[splitux] audio - Warning: Failed to create virtual sink for instance {}: {}",
-                        instance_idx, e
-                    );
-                    sink_env_vars.push(String::new());
+            } else {
+                // Create virtual sink routed to the target physical device
+                match create_virtual_sink(ctx.system, instance_idx, target_sink) {
+                    Ok(virtual_sink) => {
+                        sink_env_vars.push(virtual_sink.sink_name.clone());
+                        virtual_sinks.push(virtual_sink);
+                    }
+                    Err(e) => {
+                        // Log error but continue - audio failure shouldn't block game launch
+                        println!(
+                            "[splitux] audio - Warning: Failed to create virtual sink for instance {}: {}",
+                            instance_idx, e
+                        );
+                        sink_env_vars.push(String::new());
+                    }
                 }
             }
         } else {

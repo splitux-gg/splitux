@@ -9,14 +9,6 @@ use crate::paths::PATH_RES;
 
 use super::super::types::UnityBackend;
 
-/// Check if BepInEx resources are available (either Mono or IL2CPP)
-pub fn bepinex_available() -> bool {
-    let bepinex_path = PATH_RES.join("bepinex");
-    let mono_exists = bepinex_path.join("mono").join("core").exists();
-    let il2cpp_exists = bepinex_path.join("il2cpp").join("core").exists();
-    mono_exists || il2cpp_exists
-}
-
 /// Check if specific BepInEx backend is available
 pub fn bepinex_backend_available(backend: UnityBackend) -> bool {
     let bepinex_path = PATH_RES.join("bepinex");

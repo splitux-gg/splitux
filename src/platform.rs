@@ -2,8 +2,6 @@
 //!
 //! Platforms represent different game distribution services:
 //! - Steam: Valve's platform, uses steamlocate for path resolution
-//! - GOG: CD Projekt's DRM-free platform (future)
-//! - Epic: Epic Games Store (future)
 //! - Manual: Direct path specification
 
 use std::error::Error;
@@ -50,12 +48,6 @@ pub enum PlatformConfig {
     #[serde(rename = "steam")]
     Steam { steam_appid: u32 },
 
-    #[serde(rename = "gog")]
-    Gog { gog_id: String },
-
-    #[serde(rename = "epic")]
-    Epic { epic_app_name: String },
-
     #[serde(rename = "manual")]
     Manual {
         #[serde(default)]
@@ -79,20 +71,7 @@ impl PlatformConfig {
             PlatformConfig::Manual { path_gameroot } => {
                 Box::new(ManualPlatform::new(path_gameroot.clone()))
             }
-            PlatformConfig::Gog { .. } => {
-                // Future: Box::new(GogPlatform::new(gog_id.clone()))
-                unimplemented!("GOG platform not yet implemented")
-            }
-            PlatformConfig::Epic { .. } => {
-                // Future: Box::new(EpicPlatform::new(epic_app_name.clone()))
-                unimplemented!("Epic platform not yet implemented")
-            }
         }
-    }
-
-    /// Check if this is a Steam platform
-    pub fn is_steam(&self) -> bool {
-        matches!(self, PlatformConfig::Steam { .. })
     }
 
     /// Get Steam app ID if this is a Steam platform

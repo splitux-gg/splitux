@@ -21,16 +21,3 @@ pub fn find_game_path(app_id: u32) -> Result<PathBuf, Box<dyn Error>> {
 
     Err(format!("Steam app {} not found or not installed", app_id).into())
 }
-
-/// Get the Steam installation directory
-pub fn steam_dir() -> Result<PathBuf, Box<dyn Error>> {
-    let steam_dir = steamlocate::SteamDir::locate()?;
-    Ok(steam_dir.path().to_path_buf())
-}
-
-/// Get the app's install directory name (for display/naming purposes)
-pub fn get_install_dir_name(app_id: u32) -> Option<String> {
-    let steam_dir = steamlocate::SteamDir::locate().ok()?;
-    let (app, _) = steam_dir.find_app(app_id).ok()??;
-    Some(app.install_dir)
-}

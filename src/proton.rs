@@ -49,7 +49,7 @@ pub fn setup_env(
     cmd.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", &*PATH_STEAM);
 
     // Steam App IDs (required for some games/Proton features)
-    if let Some(appid) = handler.steam_appid {
+    if let Some(appid) = handler.get_steam_appid() {
         cmd.env("SteamAppId", appid.to_string());
         cmd.env("SteamGameId", appid.to_string());
     }

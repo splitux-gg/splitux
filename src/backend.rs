@@ -8,13 +8,12 @@
 //! Multiple backends can coexist (e.g., Goldberg + Facepunch).
 
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::handler::Handler;
 use crate::instance::Instance;
-use crate::profiles::generate_steam_id;
 
 /// Multiplayer backend type (for backward compatibility with old YAML format)
 #[derive(Clone, Serialize, Deserialize, Default, PartialEq, Debug)]
@@ -29,17 +28,6 @@ pub enum MultiplayerBackend {
     Photon,
 }
 
-impl MultiplayerBackend {
-    /// Get human-readable display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            MultiplayerBackend::None => "None",
-            MultiplayerBackend::Goldberg => "Goldberg (Steam)",
-            MultiplayerBackend::Photon => "Photon (BepInEx)",
-        }
-    }
-}
-
 /// Capability-based trait for multiplayer backends
 pub trait Backend {
     /// Backend name for identification
@@ -48,20 +36,21 @@ pub trait Backend {
     /// Does this backend require filesystem overlays per instance?
     fn requires_overlay(&self) -> bool;
 
-    /// Create overlay directory for a specific instance
-    /// Returns the overlay path to be added to fuse-overlayfs lowerdir
-    fn create_overlay(
-        &self,
-        instance_idx: usize,
-        handler_path: &PathBuf,
-        game_root: &PathBuf,
-        is_windows: bool,
-    ) -> Result<PathBuf, Box<dyn Error>>;
-
-    /// Cleanup temporary files after game session (optional)
-    fn cleanup(&self) -> Result<(), Box<dyn Error>> {
-        Ok(())
+    /// Priority level for overlay stacking (higher = closer to top of overlay stack)
+    /// Default is 0 (normal priority). Facepunch uses 10 (high priority).
+    fn priority(&self) -> u8 {
+        0
     }
+
+    /// Create overlay directories for all instances (batch operation)
+    /// Returns a vector of overlay paths, one per instance.
+    fn create_all_overlays(
+        &self,
+        handler: &Handler,
+        instances: &[Instance],
+        is_windows: bool,
+        game_root: &Path,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>>;
 }
 
 // Backend module implementations
@@ -74,10 +63,32 @@ pub use facepunch::FacepunchSettings;
 pub use goldberg::GoldbergSettings;
 pub use photon::PhotonSettings;
 
-// Import top-level modules for overlay creation (avoiding conflicts with backend submodules)
-use crate::facepunch as facepunch_mod;
-use crate::goldberg as goldberg_mod;
-use crate::photon as photon_mod;
+// Use the modular backend implementations
+use self::facepunch as facepunch_mod;
+use self::goldberg as goldberg_mod;
+use self::photon as photon_mod;
+
+/// Collect enabled backends from handler as trait objects, sorted by priority
+fn collect_enabled_backends(handler: &Handler) -> Vec<Box<dyn Backend>> {
+    let mut backends: Vec<Box<dyn Backend>> = Vec::new();
+
+    // Collect enabled backends
+    if let Some(settings) = handler.goldberg_ref() {
+        backends.push(Box::new(goldberg_mod::Goldberg::new(settings.clone())));
+    }
+    if handler.photon_ref().is_some() {
+        backends.push(Box::new(photon_mod::Photon::new()));
+    }
+    if let Some(settings) = handler.facepunch_ref() {
+        let patches = handler.runtime_patches.clone();
+        backends.push(Box::new(facepunch_mod::Facepunch::new(settings.clone(), patches)));
+    }
+
+    // Sort by priority (highest first)
+    backends.sort_by(|a, b| b.priority().cmp(&a.priority()));
+
+    backends
+}
 
 /// Create overlay directories for all instances based on the handler's backend
 ///
@@ -96,118 +107,36 @@ pub fn create_backend_overlays(
     is_windows: bool,
 ) -> Result<Vec<Vec<PathBuf>>, Box<dyn Error>> {
     let num_instances = instances.len();
+    let game_root = PathBuf::from(handler.get_game_rootpath()?);
 
     // Initialize per-instance overlay lists
     let mut instance_overlays: Vec<Vec<PathBuf>> = (0..num_instances).map(|_| Vec::new()).collect();
 
-    // Check for Goldberg backend (new optional field)
-    if handler.has_goldberg() {
-        let goldberg_overlays = create_goldberg_overlays(handler, instances, is_windows)?;
-        for (i, overlay) in goldberg_overlays.into_iter().enumerate() {
-            if i < num_instances {
-                instance_overlays[i].push(overlay);
-            }
-        }
+    // Collect and process backends via trait dispatch
+    let backends = collect_enabled_backends(handler);
+
+    if backends.len() > 1 {
+        let names: Vec<&str> = backends.iter().map(|b| b.name()).collect();
+        println!("[splitux] Multiple backends enabled: {:?}", names);
     }
 
-    // Check for Photon backend (new optional field)
-    if handler.has_photon() {
-        let photon_overlays = create_photon_overlays(handler, instances, is_windows)?;
-        for (i, overlay) in photon_overlays.into_iter().enumerate() {
-            if i < num_instances {
-                instance_overlays[i].push(overlay);
+    for backend in &backends {
+        if backend.requires_overlay() {
+            let overlays = backend.create_all_overlays(handler, instances, is_windows, &game_root)?;
+
+            for (i, overlay) in overlays.into_iter().enumerate() {
+                if i < num_instances {
+                    // Higher priority backends are processed first (due to sorting),
+                    // so their overlays go at the front
+                    if backend.priority() > 0 {
+                        instance_overlays[i].insert(0, overlay);
+                    } else {
+                        instance_overlays[i].push(overlay);
+                    }
+                }
             }
-        }
-    }
-
-    // Check for Facepunch backend (new optional field, can coexist with others)
-    if handler.has_facepunch() {
-        let game_root = PathBuf::from(handler.get_game_rootpath()?);
-        let facepunch_overlays = facepunch_mod::create_all_overlays(handler, instances, is_windows, &game_root)?;
-
-        // Facepunch overlays have highest priority (insert at front)
-        for (i, fp_overlay) in facepunch_overlays.into_iter().enumerate() {
-            if i < num_instances {
-                instance_overlays[i].insert(0, fp_overlay);
-            }
-        }
-
-        if handler.has_goldberg() || handler.has_photon() {
-            println!("[splitux] Merging Facepunch overlays with other backends");
         }
     }
 
     Ok(instance_overlays)
-}
-
-/// Create Goldberg Steam Emulator overlays for all instances
-fn create_goldberg_overlays(
-    handler: &Handler,
-    instances: &[Instance],
-    is_windows: bool,
-) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    // Get Goldberg settings from new optional field
-    let goldberg_settings = handler.goldberg_ref()
-        .ok_or("Goldberg backend not enabled")?;
-
-    let game_root = PathBuf::from(handler.get_game_rootpath()?);
-    let mut dlls = goldberg_mod::find_steam_api_dlls(&game_root)?;
-
-    // Filter out NetworkingSockets unless explicitly enabled
-    // Most games work better with disable_steam config patch instead
-    if !goldberg_settings.networking_sockets {
-        dlls.retain(|dll| dll.dll_type != goldberg_mod::SteamDllType::NetworkingSockets);
-    }
-
-    if dlls.is_empty() {
-        println!("[splitux] Warning: Goldberg backend enabled but no Steam API DLLs found");
-        return Ok(vec![]);
-    }
-
-    // Generate unique ports for each instance
-    const BASE_PORT: u16 = 47584;
-    let instance_ports: Vec<u16> = (0..instances.len())
-        .map(|i| BASE_PORT + i as u16)
-        .collect();
-
-    // Build configs for each instance
-    let configs: Vec<goldberg_mod::GoldbergConfig> = instances
-        .iter()
-        .enumerate()
-        .map(|(i, instance)| {
-            // Broadcast ports = all other instances' ports
-            let broadcast_ports: Vec<u16> = instance_ports
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| *j != i)
-                .map(|(_, &port)| port)
-                .collect();
-
-            goldberg_mod::GoldbergConfig {
-                app_id: handler.steam_appid.unwrap_or(480),
-                steam_id: generate_steam_id(&instance.profname),
-                account_name: instance.profname.clone(),
-                listen_port: instance_ports[i],
-                broadcast_ports,
-            }
-        })
-        .collect();
-
-    goldberg_mod::create_all_overlays(
-        &dlls,
-        &configs,
-        is_windows,
-        &goldberg_settings.settings,
-        goldberg_settings.disable_networking,
-    )
-}
-
-/// Create Photon/BepInEx overlays for all instances
-fn create_photon_overlays(
-    handler: &Handler,
-    instances: &[Instance],
-    is_windows: bool,
-) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    let game_root = PathBuf::from(handler.get_game_rootpath()?);
-    photon_mod::create_all_overlays(handler, instances, is_windows, &game_root)
 }

@@ -2,6 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Sentinel value used in audio assignments to indicate explicit mute
+/// When this value is in the assignments, a null sink is created (no loopback)
+/// so audio goes nowhere instead of to the default output
+pub const AUDIO_MUTED_SENTINEL: &str = "__muted__";
+
 /// Which audio system to use for virtual sink management
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioSystem {
@@ -46,19 +51,6 @@ pub enum AudioDeviceType {
     Unknown,
 }
 
-impl AudioDeviceType {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            AudioDeviceType::Speaker => "Speakers",
-            AudioDeviceType::Headphone => "Headphones",
-            AudioDeviceType::Hdmi => "HDMI",
-            AudioDeviceType::Bluetooth => "Bluetooth",
-            AudioDeviceType::Virtual => "Virtual",
-            AudioDeviceType::Unknown => "Audio Output",
-        }
-    }
-}
-
 /// Audio output device (sink)
 #[derive(Clone, Debug)]
 pub struct AudioSink {
@@ -75,8 +67,6 @@ pub struct AudioSink {
 /// Virtual sink created for an instance (for cleanup tracking)
 #[derive(Clone, Debug)]
 pub struct VirtualSink {
-    /// Instance index this sink is for
-    pub instance_idx: usize,
     /// Virtual sink name (e.g., "splitux_instance_0")
     pub sink_name: String,
     /// IDs needed for cleanup (module IDs for PA, node IDs for PW)

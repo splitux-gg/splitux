@@ -37,6 +37,18 @@ impl Splitux {
         ui.add_space(4.0);
         ui.label("Configure how this game should be launched for split-screen play");
         ui.add_space(8.0);
+
+        // Platform info (read-only)
+        ui.horizontal(|ui| {
+            ui.label("Platform:");
+            ui.label(RichText::new(&h.platform_name()).strong());
+            if let Some(app_id) = h.platform_app_id() {
+                ui.label("|");
+                ui.label("App ID:");
+                ui.label(RichText::new(&app_id).strong());
+            }
+        });
+
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -127,18 +139,27 @@ impl Splitux {
             }
         });
 
-        h.steam_appid = match &self.installed_steamapps[selected_index] {
-            Some(app) => Some(app.app_id),
-            None => None,
-        };
+        // Update platform based on dropdown selection
+        match &self.installed_steamapps[selected_index] {
+            Some(app) => {
+                h.steam_appid = Some(app.app_id);
+                h.set_platform_steam(app.app_id);
+            }
+            None => {
+                h.steam_appid = None;
+                h.clear_platform();
+            }
+        }
 
-        if h.steam_appid == None {
+        if h.steam_appid.is_none() {
             ui.horizontal(|ui| {
                 ui.label("Game root folder:");
                 ui.add_enabled(false, egui::TextEdit::singleline(&mut h.path_gameroot));
                 if ui.button("...").clicked() {
                     if let Ok(path) = dir_dialog() {
-                        h.path_gameroot = path.to_string_lossy().to_string();
+                        let path_str = path.to_string_lossy().to_string();
+                        h.path_gameroot = path_str.clone();
+                        h.set_platform_manual(path_str);
                     }
                 }
             });

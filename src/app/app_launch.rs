@@ -4,6 +4,7 @@ use std::thread::sleep;
 
 use super::app::{InstanceFocus, MenuPage, Splitux};
 use super::config::save_cfg;
+use crate::audio::AUDIO_MUTED_SENTINEL;
 use crate::input::*;
 use crate::instance::*;
 use crate::launch::*;
@@ -77,8 +78,10 @@ impl Splitux {
                         );
                     }
                     None => {
-                        // Explicit mute - remove from assignments
-                        cfg.audio.default_assignments.remove(&i);
+                        // Explicit mute - use sentinel value so audio routes to null sink
+                        cfg.audio
+                            .default_assignments
+                            .insert(i, AUDIO_MUTED_SENTINEL.to_string());
                         println!(
                             "[splitux] Instance {} audio muted (session override)",
                             i

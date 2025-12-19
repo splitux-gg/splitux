@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+//! Focus and navigation types for gamepad UI navigation
 
 // =============================================================================
-// Legacy types (migrated from app/app.rs, will be phased out)
+// Page focus types
 // =============================================================================
 
-/// Legacy: Pane-based focus for Games page
+/// Pane-based focus for Games page
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum FocusPane {
     GameList,   // Left panel - game selection
@@ -52,7 +52,7 @@ pub enum SettingsFocus {
 }
 
 // =============================================================================
-// New navigation types (future focus system)
+// Navigation types
 // =============================================================================
 
 /// Direction of navigation input
@@ -64,53 +64,15 @@ pub enum NavDirection {
     Right,
 }
 
-/// Abstracted input from raw gamepad/keyboard
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NavInput {
-    Direction(NavDirection),
-    Accept,
-    Back,
-    TabPrev,
-    TabNext,
-}
-
-/// Page identifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PageId {
-    Games,
-    Registry,
-    Settings,
-    Instances,
-}
-
-/// Region within a page
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RegionId {
-    pub page: PageId,
-    pub region: u8,
-}
-
-/// Unique element identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FocusId {
-    pub region: RegionId,
-    pub element: String,
-}
-
-/// Result of processing navigation input
-#[derive(Debug, Clone, PartialEq)]
-pub enum NavResult {
-    FocusChanged(FocusId),
-    Activated(FocusId),
-    Back,
-    TabChanged(PageId),
-    None,
-}
-
-/// Focus/navigation state
-#[derive(Debug, Clone, Default)]
-pub struct FocusState {
-    pub current: Option<FocusId>,
-    pub page: Option<PageId>,
-    pub region_memory: HashMap<RegionId, String>,
+/// Unified dropdown state - tracks which dropdown is open across all pages
+/// Only one dropdown can be open at a time (correct for gamepad UX)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActiveDropdown {
+    /// Settings: profile controller preference (profile index)
+    ProfileController(usize),
+    /// Settings: profile audio preference (profile index)
+    ProfileAudio(usize),
+    /// Games page: profile selector (Y-button) - reserved for future use
+    #[allow(dead_code)]
+    GameProfile,
 }

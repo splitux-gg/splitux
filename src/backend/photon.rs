@@ -10,7 +10,10 @@
 
 use super::Backend;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use crate::handler::Handler;
+use crate::instance::Instance;
 
 mod operations;
 mod pipelines;
@@ -18,15 +21,14 @@ mod pure;
 mod types;
 
 // Re-export types for external use
-pub use types::{PhotonConfig, UnityBackend, PHOTON_BASE_PORT};
+pub use types::UnityBackend;
 
 // Re-export key functions for direct access
-pub use operations::{bepinex_backend_available, create_instance_overlay};
+pub use operations::bepinex_backend_available;
 pub use pure::detect_unity_backend;
 
-// Phase 9.5: Re-exports for external use
-pub use operations::PhotonAppIds;
-pub use pipelines::{generate_all_configs, PhotonInstance};
+// Re-export pipelines for external use
+pub use pipelines::generate_all_configs;
 
 /// Photon settings from handler YAML (dot-notation: photon.*)
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -41,20 +43,12 @@ pub struct PhotonSettings {
     pub shared_files: Vec<String>,
 }
 
-impl PhotonSettings {
-    pub fn is_empty(&self) -> bool {
-        self.config_path.is_empty() && self.shared_files.is_empty()
-    }
-}
-
 /// Photon backend implementation
-pub struct Photon {
-    pub settings: PhotonSettings,
-}
+pub struct Photon;
 
 impl Photon {
-    pub fn new(settings: PhotonSettings) -> Self {
-        Self { settings }
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -67,33 +61,13 @@ impl Backend for Photon {
         true
     }
 
-    fn create_overlay(
+    fn create_all_overlays(
         &self,
-        instance_idx: usize,
-        _handler_path: &PathBuf,
-        game_root: &PathBuf,
+        _handler: &Handler,
+        instances: &[Instance],
         is_windows: bool,
-    ) -> Result<PathBuf, Box<dyn Error>> {
-        // Detect Unity backend
-        let backend = detect_unity_backend(game_root);
-
-        // Check if BepInEx is available for this backend
-        if !bepinex_backend_available(backend) {
-            return Err(format!(
-                "BepInEx resources not found for {} backend. Run ./splitux.sh build",
-                backend.display_name()
-            )
-            .into());
-        }
-
-        // Create a config for this instance
-        let config = PhotonConfig::new(
-            instance_idx,
-            format!("Player{}", instance_idx + 1),
-            PHOTON_BASE_PORT + instance_idx as u16,
-            vec![], // Broadcast ports populated by caller
-        );
-
-        create_instance_overlay(instance_idx, &config, is_windows, backend)
+        game_root: &Path,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        pipelines::create_all_overlays(instances, is_windows, game_root)
     }
 }

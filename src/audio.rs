@@ -22,21 +22,17 @@ use std::process::Command;
 
 // Re-export types
 pub use types::{
-    AudioContext, AudioDeviceType, AudioResult, AudioSink, AudioSystem, AudioSystemPreference,
-    VirtualSink,
+    AudioContext, AudioDeviceType, AudioSink, AudioSystem, AudioSystemPreference,
+    VirtualSink, AUDIO_MUTED_SENTINEL,
 };
 
 // Re-export operations
-pub use operations::{cleanup_all_splitux_sinks, cleanup_sinks, create_virtual_sink, scan_sinks};
+pub use operations::scan_sinks;
 
 // Re-export pipelines
 pub use pipelines::{setup_audio_session, teardown_audio_session};
 
 // Re-export pure functions
-pub use pure::{
-    classify_device, generate_virtual_sink_description, generate_virtual_sink_name,
-    is_splitux_sink, parse_module_id,
-};
 
 /// Detect available audio system
 ///
@@ -58,16 +54,16 @@ pub fn detect_audio_system() -> AudioSystem {
         .unwrap_or(false);
 
     // Prefer pactl (universal), wpctl as fallback
-    if has_pactl {
-        println!("[splitux] audio - Detected PulseAudio/PipeWire-pulse (pactl available)");
+    let system = if has_pactl {
         AudioSystem::PulseAudio
     } else if has_wpctl {
-        println!("[splitux] audio - Detected PipeWire native (wpctl available)");
         AudioSystem::PipeWireNative
     } else {
-        println!("[splitux] audio - No audio system detected");
         AudioSystem::None
-    }
+    };
+
+    println!("[splitux] audio - Detected: {}", system.name());
+    system
 }
 
 /// Resolve user preference to actual audio system

@@ -10,7 +10,6 @@ use crate::util::{clear_tmp, copy_dir_recursive};
 use rfd::FileDialog;
 use std::error::Error;
 use std::fs::File;
-use std::path::PathBuf;
 
 use super::Handler;
 
@@ -97,9 +96,4 @@ pub fn import_handler() -> Result<(), Box<dyn Error>> {
     clear_tmp()?;
 
     Ok(())
-}
-
-/// Get the handlers directory path
-pub fn handlers_dir() -> PathBuf {
-    PATH_PARTY.join("handlers")
 }

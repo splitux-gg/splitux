@@ -111,6 +111,55 @@ fn parse_wpctl_sink_line(line: &str) -> Option<AudioSink> {
     })
 }
 
+/// Create a mute sink for an instance (null sink with no output)
+///
+/// Audio sent to this sink goes nowhere - used for explicit muting
+pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
+    let sink_name = generate_virtual_sink_name(instance_idx);
+    let description = format!("Splitux Instance {} (Muted)", instance_idx);
+
+    println!(
+        "[splitux] audio - Creating PipeWire mute sink '{}' (no output)",
+        sink_name
+    );
+
+    // Use pactl for compatibility
+    let null_sink_output = Command::new("pactl")
+        .args([
+            "load-module",
+            "module-null-sink",
+            &format!("sink_name={}", sink_name),
+            &format!(
+                "sink_properties=device.description=\"{}\"",
+                description.replace(' ', "\\ ")
+            ),
+        ])
+        .output()?;
+
+    if !null_sink_output.status.success() {
+        return Err(format!(
+            "Failed to create mute sink: {}",
+            String::from_utf8_lossy(&null_sink_output.stderr)
+        )
+        .into());
+    }
+
+    let module_id = crate::audio::pure::parse_module_id(&String::from_utf8_lossy(
+        &null_sink_output.stdout,
+    ))
+    .ok_or("Failed to parse mute sink module ID")?;
+
+    println!(
+        "[splitux] audio - Created PipeWire mute sink {} (module {})",
+        sink_name, module_id
+    );
+
+    Ok(VirtualSink {
+        sink_name,
+        cleanup_ids: vec![module_id],
+    })
+}
+
 /// Create a virtual sink for an instance using pw-cli
 ///
 /// Note: PipeWire virtual sink creation is more complex than PulseAudio.
@@ -201,7 +250,6 @@ pub fn create_virtual_sink(instance_idx: usize, target_sink: &str) -> AudioResul
     );
 
     Ok(VirtualSink {
-        instance_idx,
         sink_name,
         cleanup_ids,
     })

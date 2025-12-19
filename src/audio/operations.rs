@@ -30,6 +30,17 @@ pub fn create_virtual_sink(
     }
 }
 
+/// Create a mute sink for an instance (null sink with no output)
+///
+/// Audio sent to this sink goes nowhere - used for explicit muting
+pub fn create_mute_sink(system: AudioSystem, instance_idx: usize) -> AudioResult<VirtualSink> {
+    match system {
+        AudioSystem::PulseAudio => pulseaudio::create_mute_sink(instance_idx),
+        AudioSystem::PipeWireNative => pipewire::create_mute_sink(instance_idx),
+        AudioSystem::None => Err("No audio system available".into()),
+    }
+}
+
 /// Cleanup virtual sinks
 pub fn cleanup_sinks(system: AudioSystem, sinks: &[VirtualSink]) -> AudioResult<()> {
     match system {

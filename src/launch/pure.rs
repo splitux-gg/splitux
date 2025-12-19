@@ -2,4 +2,4 @@
 
 pub mod validation;
 
-pub use validation::{validate_executable, validate_runtime};
+pub use validation::validate_runtime;

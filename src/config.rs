@@ -3,7 +3,7 @@ pub mod types;
 
 // Re-export types
 pub use types::{
-    AudioConfig, PadFilterType, PartyConfig, PhotonAppIds, SplituxConfig, WindowManagerType,
+    PadFilterType, PartyConfig, WindowManagerType,
 };
 
 // Re-export operations

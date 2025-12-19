@@ -33,21 +33,3 @@ pub struct GoldbergConfig {
     pub broadcast_ports: Vec<u16>,
 }
 
-impl GoldbergConfig {
-    /// Create a new Goldberg config for an instance
-    pub fn new(
-        app_id: u32,
-        steam_id: u64,
-        account_name: String,
-        listen_port: u16,
-        broadcast_ports: Vec<u16>,
-    ) -> Self {
-        Self {
-            app_id,
-            steam_id,
-            account_name,
-            listen_port,
-            broadcast_ports,
-        }
-    }
-}

@@ -2,6 +2,8 @@
 
 use crate::app::app::{MenuPage, Splitux};
 use crate::input::*;
+use crate::ui::focus::pipelines::handle_input::handle_direction;
+use crate::ui::focus::types::NavDirection;
 use eframe::egui::{self, Key, Vec2};
 
 impl Splitux {
@@ -26,7 +28,6 @@ impl Splitux {
         let on_instances_page = self.cur_page == MenuPage::Instances;
         let has_handlers = !self.handlers.is_empty();
         let registry_needs_fetch = self.registry_index.is_none() && !self.registry_loading;
-        let registry_handler_count = self.registry_index.as_ref().map(|r| r.handlers.len()).unwrap_or(0);
 
         // Process keyboard navigation
         let kb_nav_consumed = self.process_keyboard_nav(
@@ -59,10 +60,9 @@ impl Splitux {
                 Some(PadButton::BBtn) => {
                     if dropdown_open {
                         self.profile_dropdown_open = false;
-                    } else if on_settings_page && (self.profile_ctrl_combo_open.is_some() || self.profile_audio_combo_open.is_some()) {
+                    } else if on_settings_page && self.active_dropdown.is_some() {
                         // Close profile preference dropdowns first
-                        self.profile_ctrl_combo_open = None;
-                        self.profile_audio_combo_open = None;
+                        self.active_dropdown = None;
                     } else if on_settings_page && self.profile_prefs_expanded.is_some() && self.profile_prefs_focus > 0 {
                         // Move focus back to profile header
                         self.profile_prefs_focus = 0;
@@ -111,28 +111,16 @@ impl Splitux {
                 Some(PadButton::SelectBtn) => key = Some(Key::Tab),
                 Some(PadButton::StartBtn) => start_pressed = true,
                 Some(PadButton::Up) => {
-                    self.handle_up(
-                        dropdown_open, profiles_len, on_games_page, on_registry_page,
-                        on_settings_page, on_instances_page, has_handlers, registry_handler_count, &mut key,
-                    );
+                    self.handle_direction_input(NavDirection::Up, &mut key);
                 }
                 Some(PadButton::Down) => {
-                    self.handle_down(
-                        dropdown_open, profiles_len, on_games_page, on_registry_page,
-                        on_settings_page, on_instances_page, has_handlers, registry_handler_count, &mut key,
-                    );
+                    self.handle_direction_input(NavDirection::Down, &mut key);
                 }
                 Some(PadButton::Left) => {
-                    self.handle_left(
-                        dropdown_open, on_games_page, on_registry_page,
-                        on_settings_page, on_instances_page, has_handlers, &mut key,
-                    );
+                    self.handle_direction_input(NavDirection::Left, &mut key);
                 }
                 Some(PadButton::Right) => {
-                    self.handle_right(
-                        dropdown_open, on_games_page, on_registry_page,
-                        on_settings_page, on_instances_page, has_handlers, &mut key,
-                    );
+                    self.handle_direction_input(NavDirection::Right, &mut key);
                 }
                 Some(PadButton::RB) => {
                     if let Some((new_page, needs_fetch)) = self.cycle_page_forward(registry_needs_fetch) {
@@ -214,5 +202,136 @@ impl Splitux {
             MenuPage::Settings => Some((MenuPage::Registry, registry_needs_fetch)),
             MenuPage::Instances => None,
         }
+    }
+
+    /// Unified direction input handler
+    ///
+    /// Uses new focus pipeline for all pages. State is captured via build_nav_context().
+    fn handle_direction_input(&mut self, direction: NavDirection, key: &mut Option<Key>) {
+        // Handle dropdown navigation first (uses new pipeline)
+        if self.profile_dropdown_open {
+            let ctx = self.build_nav_context();
+            let actions = handle_direction(&ctx, direction);
+            self.apply_nav_actions(actions);
+            return;
+        }
+
+        match self.cur_page {
+            MenuPage::Games => {
+                if !self.handlers.is_empty() {
+                    self.handle_games_direction_new(direction);
+                }
+            }
+            MenuPage::Instances => {
+                let ctx = self.build_nav_context();
+                let actions = handle_direction(&ctx, direction);
+                self.apply_nav_actions(actions);
+            }
+            MenuPage::Registry => {
+                let ctx = self.build_nav_context();
+                let actions = handle_direction(&ctx, direction);
+                self.apply_nav_actions(actions);
+            }
+            MenuPage::Settings => {
+                // Complex settings states still need legacy handling
+                if self.needs_legacy_settings_nav() {
+                    match direction {
+                        NavDirection::Up => self.handle_settings_up(),
+                        NavDirection::Down => self.handle_settings_down(),
+                        NavDirection::Left => self.handle_settings_left(key),
+                        NavDirection::Right => self.handle_settings_right(key),
+                    }
+                } else {
+                    let ctx = self.build_nav_context();
+                    let actions = handle_direction(&ctx, direction);
+                    self.apply_nav_actions(actions);
+                    // Settings left/right in Options still emits key events
+                    if matches!(direction, NavDirection::Left | NavDirection::Right)
+                        && self.settings_focus == crate::ui::focus::types::SettingsFocus::Options
+                    {
+                        *key = Some(match direction {
+                            NavDirection::Left => Key::ArrowLeft,
+                            NavDirection::Right => Key::ArrowRight,
+                            _ => unreachable!(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check if settings navigation needs legacy handling
+    ///
+    /// Returns true for complex settings states that the new pipeline doesn't handle:
+    /// - Profile preferences expanded (sub-items navigation)
+    /// - Profile preference dropdowns open
+    fn needs_legacy_settings_nav(&self) -> bool {
+        // Profile prefs expanded with sub-focus
+        if self.profile_prefs_expanded.is_some() {
+            return true;
+        }
+        // Settings-specific dropdown open
+        if self.active_dropdown.is_some() {
+            return true;
+        }
+        false
+    }
+
+    /// Games page direction handling using new pipeline
+    ///
+    /// Uses the new focus pipeline but adds special handling for:
+    /// - game_panel_bottom_focused (Add Game / Import buttons)
+    /// - games_panel_collapsed auto-expand
+    fn handle_games_direction_new(&mut self, direction: NavDirection) {
+        use crate::ui::focus::types::FocusPane;
+
+        // Special case: bottom panel navigation (not in new pipeline yet)
+        if self.game_panel_bottom_focused {
+            match direction {
+                NavDirection::Up => {
+                    if self.game_panel_bottom_index > 0 {
+                        self.game_panel_bottom_index -= 1;
+                    } else {
+                        self.game_panel_bottom_focused = false;
+                    }
+                }
+                NavDirection::Down => {
+                    if self.game_panel_bottom_index < 1 {
+                        self.game_panel_bottom_index += 1;
+                    }
+                }
+                NavDirection::Right => {
+                    self.focus_pane = FocusPane::ActionBar;
+                    self.action_bar_index = 0;
+                    self.game_panel_bottom_focused = false;
+                }
+                NavDirection::Left => {}
+            }
+            return;
+        }
+
+        // Special case: entering bottom panel from last handler
+        if self.focus_pane == FocusPane::GameList
+            && direction == NavDirection::Down
+            && self.selected_handler >= self.handlers.len().saturating_sub(1)
+        {
+            self.game_panel_bottom_focused = true;
+            self.game_panel_bottom_index = 0;
+            return;
+        }
+
+        // Special case: auto-expand games panel when navigating into it
+        if self.focus_pane == FocusPane::ActionBar
+            && direction == NavDirection::Left
+            && self.action_bar_index == 0
+            && self.games_panel_collapsed
+        {
+            self.games_panel_collapsed = false;
+        }
+
+        // Use new pipeline for standard navigation
+        let ctx = self.build_nav_context();
+        let actions = handle_direction(&ctx, direction);
+        self.apply_nav_actions(actions);
     }
 }

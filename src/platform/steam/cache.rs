@@ -97,11 +97,6 @@ pub fn hero_uri(app_id: u32) -> Option<String> {
     find_cache_file(app_id, "library_hero.jpg").map(|p| format!("file://{}", p.display()))
 }
 
-/// Get the header image (library_header.jpg) as a file:// URI
-pub fn header_uri(app_id: u32) -> Option<String> {
-    find_cache_file(app_id, "library_header.jpg").map(|p| format!("file://{}", p.display()))
-}
-
 /// Get the icon as a file:// URI
 pub fn icon_uri(app_id: u32) -> Option<String> {
     find_icon(app_id).map(|p| format!("file://{}", p.display()))

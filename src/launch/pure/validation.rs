@@ -1,7 +1,5 @@
 //! Launch validation functions (pure, no side effects)
 
-use std::path::Path;
-
 use crate::paths::PATH_STEAM;
 
 /// Validate that the Steam Runtime is available
@@ -21,15 +19,6 @@ pub fn validate_runtime(runtime: &str) -> Result<(), Box<dyn std::error::Error>>
         }
         "" => {} // No runtime specified, that's fine
         _ => {} // Unknown runtime, let it pass
-    }
-    Ok(())
-}
-
-/// Validate that the game executable exists
-pub fn validate_executable(game_dir: &Path, exec: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let full_path = game_dir.join(exec);
-    if !full_path.exists() {
-        return Err(format!("Executable not found: {}", full_path.display()).into());
     }
     Ok(())
 }

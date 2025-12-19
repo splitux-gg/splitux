@@ -41,7 +41,6 @@ pub fn scan_sinks() -> AudioResult<Vec<AudioSink>> {
 fn parse_pactl_sinks(output: &str, default_sink: &str) -> Vec<AudioSink> {
     let mut sinks = Vec::new();
     let mut current_name = String::new();
-    let mut current_description = String::new();
 
     for line in output.lines() {
         let line = line.trim();
@@ -49,7 +48,7 @@ fn parse_pactl_sinks(output: &str, default_sink: &str) -> Vec<AudioSink> {
         if line.starts_with("Name:") {
             current_name = line.strip_prefix("Name:").unwrap_or("").trim().to_string();
         } else if line.starts_with("Description:") {
-            current_description = line
+            let description = line
                 .strip_prefix("Description:")
                 .unwrap_or("")
                 .trim()
@@ -57,12 +56,12 @@ fn parse_pactl_sinks(output: &str, default_sink: &str) -> Vec<AudioSink> {
 
             // We have both name and description, create the sink
             if !current_name.is_empty() {
-                let device_type = classify_device(&current_name, &current_description);
+                let device_type = classify_device(&current_name, &description);
                 let is_default = current_name == default_sink;
 
                 sinks.push(AudioSink {
                     name: current_name.clone(),
-                    description: current_description.clone(),
+                    description,
                     device_type,
                     is_default,
                 });
@@ -71,6 +70,53 @@ fn parse_pactl_sinks(output: &str, default_sink: &str) -> Vec<AudioSink> {
     }
 
     sinks
+}
+
+/// Create a mute sink for an instance (null sink with no loopback)
+///
+/// Audio sent to this sink goes nowhere - used for explicit muting
+pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
+    let sink_name = generate_virtual_sink_name(instance_idx);
+    let description = format!("Splitux Instance {} (Muted)", instance_idx);
+
+    println!(
+        "[splitux] audio - Creating mute sink '{}' (no output)",
+        sink_name
+    );
+
+    // Create null sink only (no loopback = audio goes nowhere)
+    let null_sink_output = Command::new("pactl")
+        .args([
+            "load-module",
+            "module-null-sink",
+            &format!("sink_name={}", sink_name),
+            &format!(
+                "sink_properties=device.description=\"{}\"",
+                description.replace(' ', "\\ ")
+            ),
+        ])
+        .output()?;
+
+    if !null_sink_output.status.success() {
+        return Err(format!(
+            "Failed to create mute sink: {}",
+            String::from_utf8_lossy(&null_sink_output.stderr)
+        )
+        .into());
+    }
+
+    let module_id = parse_module_id(&String::from_utf8_lossy(&null_sink_output.stdout))
+        .ok_or("Failed to parse mute sink module ID")?;
+
+    println!(
+        "[splitux] audio - Created mute sink {} (module {})",
+        sink_name, module_id
+    );
+
+    Ok(VirtualSink {
+        sink_name,
+        cleanup_ids: vec![module_id],
+    })
 }
 
 /// Create a virtual sink for an instance, routed to the target physical sink
@@ -140,7 +186,6 @@ pub fn create_virtual_sink(instance_idx: usize, target_sink: &str) -> AudioResul
     );
 
     Ok(VirtualSink {
-        instance_idx,
         sink_name,
         cleanup_ids: vec![loopback_id, module_id], // Loopback first, then null sink
     })

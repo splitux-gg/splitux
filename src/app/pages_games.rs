@@ -1,4 +1,9 @@
-// Games page display functions
+//! Games page display functions
+//!
+//! Submodules:
+//! - `welcome` - Welcome screen when no games configured
+
+mod welcome;
 
 use super::app::{FocusPane, Splitux};
 use super::theme;
@@ -27,81 +32,6 @@ impl Splitux {
         self.display_game_info(ui);
     }
 
-    fn display_welcome_screen(&mut self, ui: &mut Ui) {
-        ui.add_space(8.0);
-        ui.heading("Welcome to Splitux");
-        ui.add_space(4.0);
-        ui.label("Local co-op split-screen gaming for Linux");
-        ui.add_space(12.0);
-        ui.separator();
-
-        // Quick Start Guide
-        ui.add_space(8.0);
-        ui.label(RichText::new("Getting Started").strong().size(16.0));
-        ui.add_space(8.0);
-
-        egui::Grid::new("quick_start_grid")
-            .num_columns(2)
-            .spacing([12.0, 8.0])
-            .show(ui, |ui| {
-                ui.label(RichText::new("1.").strong());
-                ui.label("Select a game from the sidebar, or add one with the + button");
-                ui.end_row();
-
-                ui.label(RichText::new("2.").strong());
-                ui.label("Click Play to enter the instance setup screen");
-                ui.end_row();
-
-                ui.label(RichText::new("3.").strong());
-                ui.label("Connect controllers and press A/Right-click to create instances");
-                ui.end_row();
-
-                ui.label(RichText::new("4.").strong());
-                ui.label("Press Start when ready to launch");
-                ui.end_row();
-            });
-
-        ui.add_space(16.0);
-        ui.separator();
-
-        // Controls Reference
-        ui.add_space(8.0);
-        ui.label(RichText::new("Controls").strong().size(16.0));
-        ui.add_space(8.0);
-
-        egui::Grid::new("controls_grid")
-            .num_columns(2)
-            .spacing([24.0, 8.0])
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_DPAD.png")).max_height(18.0));
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_STICK_L.png")).max_height(18.0));
-                });
-                ui.label("Navigate UI");
-                ui.end_row();
-
-                ui.horizontal(|ui| {
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_LB.png")).max_height(18.0));
-                    ui.add(egui::Image::new(egui::include_image!("../../res/BTN_RB.png")).max_height(18.0));
-                });
-                ui.label("Switch Tabs");
-                ui.end_row();
-
-                ui.add(egui::Image::new(egui::include_image!("../../res/BTN_STICK_R.png")).max_height(18.0));
-                ui.label("Scroll");
-                ui.end_row();
-
-                ui.add(egui::Image::new(egui::include_image!("../../res/BTN_A.png")).max_height(18.0));
-                ui.label("Select / Confirm");
-                ui.end_row();
-
-                ui.add(egui::Image::new(egui::include_image!("../../res/BTN_B.png")).max_height(18.0));
-                ui.label("Back");
-                ui.end_row();
-            });
-
-    }
-
     fn display_game_info(&mut self, ui: &mut Ui) {
         // Extract all handler data we need upfront to avoid borrow issues
         let icon = self.handlers[self.selected_handler].icon();
@@ -116,6 +46,9 @@ impl Splitux {
         let hero_image = self.handlers[self.selected_handler].hero_image();
         let logo_image = self.handlers[self.selected_handler].logo_image();
         let box_art = self.handlers[self.selected_handler].box_art();
+        let platform_name = self.handlers[self.selected_handler].platform_name();
+        let platform_app_id = self.handlers[self.selected_handler].platform_app_id();
+        let backend_display = self.handlers[self.selected_handler].backend_display();
 
         // Show Steam hero banner with logo overlay if available
         if let Some(hero_url) = hero_image {
@@ -294,6 +227,20 @@ impl Splitux {
                     if !is_medium {
                         ui.label("Native");
                     }
+                }
+                // Platform source (Steam/Manual) and app ID
+                if !is_medium {
+                    ui.add(egui::Separator::default().vertical());
+                    let platform_label = match platform_app_id.as_ref() {
+                        Some(app_id) => format!("{} ({})", platform_name, app_id),
+                        None => platform_name.clone(),
+                    };
+                    ui.label(platform_label);
+                }
+                // Backend type
+                if !is_medium {
+                    ui.add(egui::Separator::default().vertical());
+                    ui.label(&backend_display);
                 }
                 // Author and version (only in wide mode)
                 if !is_medium {
