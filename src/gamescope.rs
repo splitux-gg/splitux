@@ -34,6 +34,12 @@ pub fn setup_env(cmd: &mut Command) {
     // This prevents gamescope from capturing gamepad input for window focus.
     // The actual gamepad device is passed to Wine via bwrap --setenv below.
     cmd.env("SDL_JOYSTICK_DEVICE", "/dev/null");
+
+    // Disable SDL HiDPI scaling - we want pixel-exact window sizes
+    // Without this, SDL on HiDPI displays (like 4K TVs with scale > 1.0)
+    // will create windows at logical size (divided by scale) instead of
+    // the requested pixel size.
+    cmd.env("SDL_VIDEO_WAYLAND_SCALE", "1");
 }
 
 /// Add gamescope command-line arguments

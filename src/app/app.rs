@@ -131,6 +131,9 @@ pub struct Splitux {
     pub games_panel_width: f32,
     pub devices_panel_collapsed: bool,
     pub devices_panel_width: f32,
+
+    // Monitor polling state
+    pub last_monitor_poll: std::time::Instant,
 }
 
 impl Splitux {
@@ -267,6 +270,9 @@ impl Splitux {
             games_panel_width,
             devices_panel_collapsed,
             devices_panel_width,
+
+            // Monitor polling state
+            last_monitor_poll: std::time::Instant::now(),
         };
 
         app.spawn_task("Checking for updates", move || {

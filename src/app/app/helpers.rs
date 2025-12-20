@@ -2,7 +2,9 @@
 
 use super::Splitux;
 use crate::input::{open_device, DeviceEvent};
+use crate::monitor::get_monitors_sdl;
 use eframe::egui::{self, RichText};
+use std::time::Duration;
 
 impl Splitux {
     pub fn spawn_task<F>(&mut self, msg: &str, f: F)
@@ -88,6 +90,59 @@ impl Splitux {
                     }
                 }
             }
+        }
+    }
+
+    /// Poll for monitor changes (throttled to every 2 seconds)
+    /// Similar to device hotplug but for display outputs
+    pub(crate) fn poll_monitor_events(&mut self) {
+        const POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+        if self.last_monitor_poll.elapsed() < POLL_INTERVAL {
+            return;
+        }
+        self.last_monitor_poll = std::time::Instant::now();
+
+        let current_monitors = get_monitors_sdl();
+
+        // Check if monitors changed (different count or different properties)
+        let changed = if current_monitors.len() != self.monitors.len() {
+            true
+        } else {
+            current_monitors
+                .iter()
+                .zip(self.monitors.iter())
+                .any(|(new, old)| {
+                    new.name() != old.name()
+                        || new.width() != old.width()
+                        || new.height() != old.height()
+                })
+        };
+
+        if changed {
+            println!("[splitux] Monitor change detected:");
+            for monitor in &current_monitors {
+                println!(
+                    "[splitux]   {} ({}x{})",
+                    monitor.name(),
+                    monitor.width(),
+                    monitor.height()
+                );
+            }
+
+            // Update instances if their monitor index is now out of bounds
+            let max_monitor = current_monitors.len().saturating_sub(1);
+            for instance in &mut self.instances {
+                if instance.monitor > max_monitor {
+                    println!(
+                        "[splitux] Instance monitor {} out of bounds, resetting to {}",
+                        instance.monitor, max_monitor
+                    );
+                    instance.monitor = max_monitor;
+                }
+            }
+
+            self.monitors = current_monitors;
         }
     }
 

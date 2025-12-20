@@ -24,6 +24,9 @@ impl eframe::App for Splitux {
         // Poll for device hotplug events
         self.poll_device_events();
 
+        // Poll for monitor changes (hotplug, resolution changes)
+        self.poll_monitor_events();
+
         // Reset focus state at start of frame
         self.focus_manager.begin_frame();
 

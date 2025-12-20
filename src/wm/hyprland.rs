@@ -17,6 +17,7 @@ struct HyprMonitor {
     y: i32,
     width: u32,
     height: u32,
+    scale: f64,
 }
 
 pub struct HyprlandManager {
@@ -24,6 +25,16 @@ pub struct HyprlandManager {
     rules_added: bool,
     target_monitor: Option<String>,
     bar_manager: StatusBarManager,
+}
+
+/// Window info from Hyprland IPC
+struct WindowInfo {
+    address: String,
+    class: String,
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
 }
 
 impl HyprlandManager {
@@ -89,12 +100,14 @@ impl HyprlandManager {
         let mut result = Vec::new();
         if let Some(arr) = monitors.as_array() {
             for mon in arr {
+                let scale = mon["scale"].as_f64().unwrap_or(1.0);
                 result.push(HyprMonitor {
                     name: mon["name"].as_str().unwrap_or("").to_string(),
                     x: mon["x"].as_i64().unwrap_or(0) as i32,
                     y: mon["y"].as_i64().unwrap_or(0) as i32,
                     width: mon["width"].as_u64().unwrap_or(1920) as u32,
                     height: mon["height"].as_u64().unwrap_or(1080) as u32,
+                    scale,
                 });
             }
         }
@@ -156,8 +169,8 @@ impl HyprlandManager {
         self.hyprctl_batch(&commands)
     }
 
-    /// Get list of gamescope window addresses
-    fn get_gamescope_windows(&self) -> WmResult<Vec<(String, String)>> {
+    /// Get list of gamescope windows with their current geometry
+    fn get_gamescope_windows_info(&self) -> WmResult<Vec<WindowInfo>> {
         let response = self.hyprctl("j/clients")?;
         let clients: serde_json::Value = serde_json::from_str(&response)
             .map_err(|e| format!("Failed to parse clients: {}", e))?;
@@ -168,7 +181,16 @@ impl HyprlandManager {
                 let class = client["class"].as_str().unwrap_or("");
                 if class.to_lowercase().starts_with("gamescope") {
                     if let Some(addr) = client["address"].as_str() {
-                        windows.push((addr.to_string(), class.to_string()));
+                        let size = &client["size"];
+                        let at = &client["at"];
+                        windows.push(WindowInfo {
+                            address: addr.to_string(),
+                            class: class.to_string(),
+                            width: size[0].as_u64().unwrap_or(0) as u32,
+                            height: size[1].as_u64().unwrap_or(0) as u32,
+                            x: at[0].as_i64().unwrap_or(0) as i32,
+                            y: at[1].as_i64().unwrap_or(0) as i32,
+                        });
                     }
                 }
             }
@@ -176,9 +198,18 @@ impl HyprlandManager {
         Ok(windows)
     }
 
+    /// Get list of gamescope window addresses (legacy compatibility)
+    fn get_gamescope_windows(&self) -> WmResult<Vec<(String, String)>> {
+        Ok(self
+            .get_gamescope_windows_info()?
+            .into_iter()
+            .map(|w| (w.address, w.class))
+            .collect())
+    }
+
     /// Position windows using shared layout calculations
     fn position_windows(&self, ctx: &LayoutContext) -> WmResult<()> {
-        let windows = self.get_gamescope_windows()?;
+        let windows = self.get_gamescope_windows_info()?;
         if windows.is_empty() {
             return Err("No gamescope windows found".into());
         }
@@ -187,8 +218,8 @@ impl HyprlandManager {
         let hypr_mon = self.get_monitor_by_index(monitor_index)?;
 
         println!(
-            "[splitux] wm::hyprland - Target monitor: {} at {}x{}+{}+{}",
-            hypr_mon.name, hypr_mon.width, hypr_mon.height, hypr_mon.x, hypr_mon.y
+            "[splitux] wm::hyprland - Target monitor: {} at {}x{}+{}+{} (scale: {})",
+            hypr_mon.name, hypr_mon.width, hypr_mon.height, hypr_mon.x, hypr_mon.y, hypr_mon.scale
         );
 
         println!(
@@ -199,42 +230,75 @@ impl HyprlandManager {
         let player_count = windows.len().min(4);
         let mut commands = Vec::new();
 
-        for (i, (addr, class)) in windows.iter().enumerate() {
-            // Use shared layout calculation
+        // Convert physical coordinates to logical (accounting for scale)
+        // Hyprland uses logical coordinates in its IPC
+        let scale = hypr_mon.scale;
+        let logical_width = (hypr_mon.width as f64 / scale) as u32;
+        let logical_height = (hypr_mon.height as f64 / scale) as u32;
+        let logical_x = (hypr_mon.x as f64 / scale) as i32;
+        let logical_y = (hypr_mon.y as f64 / scale) as i32;
+
+        println!(
+            "[splitux] wm::hyprland - Logical dimensions: {}x{} at +{}+{}",
+            logical_width, logical_height, logical_x, logical_y
+        );
+
+        for (i, win) in windows.iter().enumerate() {
+            // Log the ACTUAL size gamescope created (in logical coords from Hyprland)
+            println!(
+                "[splitux] wm::hyprland - Window {} ({}) actual size: {}x{} at +{}+{}",
+                win.address, win.class, win.width, win.height, win.x, win.y
+            );
+
+            // Use shared layout calculation with LOGICAL dimensions
             let geom: WindowGeometry = calculate_geometry(
                 player_count,
                 i,
-                hypr_mon.x,
-                hypr_mon.y,
-                hypr_mon.width,
-                hypr_mon.height,
+                logical_x,
+                logical_y,
+                logical_width,
+                logical_height,
                 ctx.orientation,
             );
 
             println!(
-                "[splitux] wm::hyprland - Window {} ({}) -> {}x{}+{}+{}",
-                addr, class, geom.width, geom.height, geom.x, geom.y
+                "[splitux] wm::hyprland - Window {} target (logical): {}x{}+{}+{}",
+                win.address, geom.width, geom.height, geom.x, geom.y
             );
 
-            commands.push(format!(
-                "dispatch movewindowpixel exact {} {},address:{}",
-                geom.x, geom.y, addr
-            ));
-            commands.push(format!(
-                "dispatch resizewindowpixel exact {} {},address:{}",
-                geom.width, geom.height, addr
-            ));
+            // Only resize if the size is different
+            let needs_resize = win.width != geom.width || win.height != geom.height;
+            let needs_move = win.x != geom.x || win.y != geom.y;
+
+            if needs_move {
+                commands.push(format!(
+                    "dispatch movewindowpixel exact {} {},address:{}",
+                    geom.x, geom.y, win.address
+                ));
+            }
+            if needs_resize {
+                println!(
+                    "[splitux] wm::hyprland - Resizing from {}x{} to {}x{} (logical)",
+                    win.width, win.height, geom.width, geom.height
+                );
+                commands.push(format!(
+                    "dispatch resizewindowpixel exact {} {},address:{}",
+                    geom.width, geom.height, win.address
+                ));
+            }
         }
 
-        self.hyprctl_batch(&commands)?;
+        if !commands.is_empty() {
+            self.hyprctl_batch(&commands)?;
+        }
 
         // Apply visual properties to each window
         println!("[splitux] wm::hyprland - Applying visual properties...");
-        for (addr, _) in &windows {
-            if let Err(e) = self.apply_window_props(addr) {
+        for win in &windows {
+            if let Err(e) = self.apply_window_props(&win.address) {
                 println!(
                     "[splitux] wm::hyprland - Warning: Failed to apply props to {}: {}",
-                    addr, e
+                    win.address, e
                 );
             }
         }
