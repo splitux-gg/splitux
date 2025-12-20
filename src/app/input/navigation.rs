@@ -5,8 +5,8 @@
 //! - Settings page handlers (complex profile prefs/dropdown navigation)
 //! - Helper methods used by the pipeline
 
-use crate::app::app::{ActiveDropdown, FocusPane, RegistryFocus, SettingsFocus, Splitux};
-use eframe::egui::{self, Key};
+use crate::app::app::{ActiveDropdown, SettingsCategory, SettingsFocus, Splitux};
+use eframe::egui::Key;
 
 impl Splitux {
     // =========================================================================
@@ -41,6 +41,13 @@ impl Splitux {
         }
 
         match self.settings_focus {
+            SettingsFocus::CategoryList => {
+                // Move up in category list
+                let idx = self.settings_category.to_index();
+                if idx > 0 {
+                    self.settings_category = SettingsCategory::from_index(idx - 1);
+                }
+            }
             SettingsFocus::Options => {
                 // Check if we're in an expanded profile and need to navigate sub-items
                 if self.settings_option_index >= 21 {
@@ -69,18 +76,13 @@ impl Splitux {
                             self.profile_prefs_focus = 0;
                         }
                     }
+                } else {
+                    // At top of options, go back to category list
+                    self.settings_focus = SettingsFocus::CategoryList;
                 }
             }
             SettingsFocus::BottomButtons => {
-                self.settings_focus = SettingsFocus::Options;
-                self.settings_scroll_to_focus = true;
-                // If on an expanded profile, go to bottom sub-item
-                if self.settings_option_index >= 21 {
-                    let profile_idx = self.settings_option_index - 21;
-                    if self.profile_prefs_expanded == Some(profile_idx) {
-                        self.profile_prefs_focus = 2;
-                    }
-                }
+                self.settings_focus = SettingsFocus::CategoryList;
             }
         }
     }
@@ -109,6 +111,16 @@ impl Splitux {
 
         let max_options = self.settings_max_option_index();
         match self.settings_focus {
+            SettingsFocus::CategoryList => {
+                // Move down in category list, then to bottom buttons
+                let idx = self.settings_category.to_index();
+                if idx < 3 {
+                    self.settings_category = SettingsCategory::from_index(idx + 1);
+                } else {
+                    self.settings_focus = SettingsFocus::BottomButtons;
+                    self.settings_button_index = 0;
+                }
+            }
             SettingsFocus::Options => {
                 // Check if we're in an expanded profile and need to navigate sub-items
                 if self.settings_option_index >= 21 {
@@ -129,8 +141,8 @@ impl Splitux {
                     // Close any open dropdowns when leaving profile
                     self.active_dropdown = None;
                 } else {
-                    self.settings_focus = SettingsFocus::BottomButtons;
-                    self.settings_button_index = 0;
+                    // At bottom of options, go to category list
+                    self.settings_focus = SettingsFocus::CategoryList;
                 }
             }
             SettingsFocus::BottomButtons => {
@@ -141,12 +153,24 @@ impl Splitux {
 
     pub(super) fn handle_settings_left(&mut self, key: &mut Option<Key>) {
         match self.settings_focus {
+            SettingsFocus::CategoryList => {
+                // Collapse panel when pressing left on category list
+                self.settings_panel_collapsed = true;
+            }
             SettingsFocus::Options => {
-                *key = Some(Key::ArrowLeft);
+                // Return to category list or handle option left/right
+                if self.settings_option_index == 0 {
+                    self.settings_focus = SettingsFocus::CategoryList;
+                } else {
+                    *key = Some(Key::ArrowLeft);
+                }
             }
             SettingsFocus::BottomButtons => {
                 if self.settings_button_index > 0 {
                     self.settings_button_index -= 1;
+                } else {
+                    // Go back to category list
+                    self.settings_focus = SettingsFocus::CategoryList;
                 }
             }
         }
@@ -154,6 +178,12 @@ impl Splitux {
 
     pub(super) fn handle_settings_right(&mut self, key: &mut Option<Key>) {
         match self.settings_focus {
+            SettingsFocus::CategoryList => {
+                // Enter options panel
+                self.settings_focus = SettingsFocus::Options;
+                self.settings_option_index = 0;
+                self.settings_scroll_to_focus = true;
+            }
             SettingsFocus::Options => {
                 *key = Some(Key::ArrowRight);
             }
@@ -165,22 +195,4 @@ impl Splitux {
         }
     }
 
-    // =========================================================================
-    // Page focus reset
-    // =========================================================================
-
-    pub(super) fn reset_page_focus(&mut self, ctx: &egui::Context) {
-        self.focus_pane = FocusPane::GameList;
-        self.action_bar_index = 0;
-        self.info_pane_index = 0;
-        self.info_pane_scroll = 0.0;
-        self.game_panel_bottom_focused = false;
-        self.game_panel_bottom_index = 0;
-        self.registry_focus = RegistryFocus::HandlerList;
-        self.settings_focus = SettingsFocus::Options;
-        self.settings_button_index = 0;
-        self.settings_option_index = 0;
-        self.focus_manager.focus_first();
-        ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::NULL));
-    }
 }

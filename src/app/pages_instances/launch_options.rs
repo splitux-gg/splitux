@@ -3,6 +3,7 @@
 use crate::app::app::{InstanceFocus, Splitux};
 use crate::app::theme;
 use eframe::egui::{self, RichText, Ui};
+use egui_phosphor::regular as icons;
 
 impl Splitux {
     /// Display the bottom bar with launch options and start button
@@ -56,7 +57,7 @@ impl Splitux {
                             // Horizontal option
                             let h_selected = !self.options.vertical_two_player;
                             let h_text = if split_focused && h_selected {
-                                RichText::new("▶ Horizontal")
+                                RichText::new(format!("{} Horizontal", icons::CARET_RIGHT))
                                     .strong()
                                     .color(theme::colors::ACCENT)
                             } else if h_selected {
@@ -71,7 +72,7 @@ impl Splitux {
                             // Vertical option
                             let v_selected = self.options.vertical_two_player;
                             let v_text = if split_focused && v_selected {
-                                RichText::new("▶ Vertical")
+                                RichText::new(format!("{} Vertical", icons::CARET_RIGHT))
                                     .strong()
                                     .color(theme::colors::ACCENT)
                             } else if v_selected {

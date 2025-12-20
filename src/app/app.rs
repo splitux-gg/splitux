@@ -21,7 +21,7 @@ use crate::registry::RegistryIndex;
 use crate::util::*;
 
 // Re-export types from ui module (migrated)
-pub use crate::ui::{ActiveDropdown, FocusPane, InstanceFocus, MenuPage, RegistryFocus, SettingsFocus};
+pub use crate::ui::{ActiveDropdown, FocusPane, InstanceFocus, MenuPage, RegistryFocus, SettingsCategory, SettingsFocus};
 
 pub struct Splitux {
     pub installed_steamapps: Vec<Option<steamlocate::App>>,
@@ -82,6 +82,8 @@ pub struct Splitux {
 
     // Settings state
     pub settings_focus: SettingsFocus,
+    pub settings_category: SettingsCategory,     // Selected category in left panel
+    pub settings_panel_collapsed: bool,          // Left panel collapsed state
     pub settings_button_index: usize, // 0=Save, 1=Restore
     pub settings_option_index: usize, // Index of focused option in settings
     pub settings_scroll_to_focus: bool, // Set true when focus changes to trigger scroll
@@ -237,6 +239,8 @@ impl Splitux {
 
             // Settings state
             settings_focus: SettingsFocus::default(),
+            settings_category: SettingsCategory::default(),
+            settings_panel_collapsed: false,
             settings_button_index: 0,
             settings_option_index: 0,
             settings_scroll_to_focus: false,

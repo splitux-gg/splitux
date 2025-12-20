@@ -47,6 +47,12 @@ impl Splitux {
             }
         } else if on_settings_page {
             match self.settings_focus {
+                SettingsFocus::CategoryList => {
+                    // A on category = enter options
+                    self.settings_focus = SettingsFocus::Options;
+                    self.settings_option_index = 0;
+                    self.settings_scroll_to_focus = true;
+                }
                 SettingsFocus::Options => {
                     self.activate_focused = true;
                     *key = Some(Key::Enter);

@@ -41,6 +41,11 @@ pub struct PhotonSettings {
     /// Files that should be shared between all instances (relative to windata)
     #[serde(default)]
     pub shared_files: Vec<String>,
+
+    /// Plugin source for automatic fetching (e.g., from Thunderstore)
+    /// When specified, the plugin will be downloaded and cached automatically
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<crate::mods::PluginSource>,
 }
 
 /// Photon backend implementation
@@ -63,11 +68,11 @@ impl Backend for Photon {
 
     fn create_all_overlays(
         &self,
-        _handler: &Handler,
+        handler: &Handler,
         instances: &[Instance],
         is_windows: bool,
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-        pipelines::create_all_overlays(instances, is_windows, game_root)
+        pipelines::create_all_overlays(handler, instances, is_windows, game_root)
     }
 }

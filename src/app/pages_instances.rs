@@ -18,6 +18,8 @@ use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};
 use crate::ui::focus::types::InstanceCardFocus;
 use crate::ui::responsive::{combo_width, LayoutMode};
 use eframe::egui::{self, RichText, Ui};
+use egui_phosphor::fill as icons_fill;
+use egui_phosphor::regular as icons;
 
 /// Audio override dropdown action
 #[derive(Clone, PartialEq)]
@@ -177,7 +179,7 @@ impl Splitux {
                             let is_master = self.options.master_profile.as_ref() == Some(prof_name);
 
                             if is_master {
-                                ui.label(RichText::new("👑").size(16.0))
+                                ui.label(RichText::new(icons_fill::CROWN).size(16.0).color(egui::Color32::GOLD))
                                     .on_hover_text("Master profile - saves sync to/from original location");
                             } else if is_named && !card_mode.is_narrow() {
                                 let set_master_focused = is_element_focused(&current_focus, i, InstanceCardFocus::SetMaster);
@@ -364,10 +366,10 @@ impl Splitux {
                                         let is_preferred = prefs.preferred_controller.as_ref() == Some(&dev_uniq.to_string());
 
                                         if is_preferred {
-                                            ui.label(RichText::new("★").color(egui::Color32::GOLD))
+                                            ui.label(RichText::new(icons_fill::STAR).color(egui::Color32::GOLD))
                                                 .on_hover_text("This is the preferred controller for this profile");
                                         } else {
-                                            let pref_btn_text = if card_mode.is_narrow() { "☆" } else { "☆ Set Preferred" };
+                                            let pref_btn_text = if card_mode.is_narrow() { icons::STAR } else { icons::STAR };
                                             let mut set_pref_btn = egui::Button::new(pref_btn_text).min_size(egui::vec2(24.0, 24.0));
                                             if device_focused {
                                                 set_pref_btn = set_pref_btn.stroke(theme::focus_stroke());
@@ -387,7 +389,7 @@ impl Splitux {
                                 }
                             }
 
-                            let remove_text = if card_mode.is_narrow() { "×" } else { "Remove" };
+                            let remove_text = if card_mode.is_narrow() { icons::X } else { "Remove" };
                             let mut remove_btn = egui::Button::new(remove_text).min_size(egui::vec2(24.0, 24.0));
                             if device_focused {
                                 remove_btn = remove_btn.stroke(theme::focus_stroke());
@@ -407,11 +409,11 @@ impl Splitux {
 
                         ui.horizontal(|ui| {
                             if has_conflict {
-                                ui.label(RichText::new("⚠").size(14.0).color(egui::Color32::YELLOW))
+                                ui.label(RichText::new(icons::WARNING).size(14.0).color(egui::Color32::YELLOW))
                                     .on_hover_text("Audio conflict: multiple players using same device");
                             }
 
-                            ui.label("🔊");
+                            ui.label(icons::SPEAKER_HIGH);
 
                             if !card_mode.is_narrow() {
                                 match &effective {
@@ -446,7 +448,7 @@ impl Splitux {
                                     )
                                 })
                                 .collect();
-                            items.push(DropdownItem::new(AudioOverrideAction::Mute, "🔇 None (mute)", is_muted));
+                            items.push(DropdownItem::new(AudioOverrideAction::Mute, &format!("{} None (mute)", icons::SPEAKER_SLASH), is_muted));
                             if has_override {
                                 items.push(DropdownItem::new(AudioOverrideAction::Reset, "↩ Reset to profile", false));
                             }
@@ -499,7 +501,7 @@ impl Splitux {
                             if is_named_profile {
                                 if let Some(ref prof_name) = profile_name {
                                     let prefs = ProfilePreferences::load(prof_name);
-                                    let pref_text = if card_mode.is_narrow() { "★" } else { "Pref..." };
+                                    let pref_text = if card_mode.is_narrow() { icons_fill::STAR } else { "Pref..." };
                                     let pref_width = combo_width(ui, 60.0, 35.0);
 
                                     let audio_pref_focused = is_element_focused(&current_focus, i, InstanceCardFocus::AudioPreference);
@@ -591,7 +593,7 @@ impl Splitux {
                 .fill(egui::Color32::from_rgb(80, 60, 20))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("⚠").size(16.0));
+                        ui.label(RichText::new(icons::WARNING).size(16.0));
                         ui.label(RichText::new("Missing preferred controllers:").strong());
                     });
                     for warning in &self.controller_warnings {
@@ -606,7 +608,7 @@ impl Splitux {
                 .fill(egui::Color32::from_rgb(80, 60, 20))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("🔇").size(16.0));
+                        ui.label(RichText::new(icons::SPEAKER_SLASH).size(16.0));
                         ui.label(RichText::new("Missing preferred audio devices:").strong());
                     });
                     for warning in &self.audio_warnings {

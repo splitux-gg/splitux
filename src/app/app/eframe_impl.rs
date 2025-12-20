@@ -48,9 +48,13 @@ impl eframe::App for Splitux {
                 self.display_panel_top(ui);
             });
 
-        // Left panel - Games list (collapsible/resizable)
+        // Left panel - contextual navigation (collapsible/resizable)
+        // Shows different content based on current page
         if !self.is_lite() {
-            let collapsed = self.games_panel_collapsed;
+            let collapsed = match self.cur_page {
+                MenuPage::Settings => self.settings_panel_collapsed,
+                _ => self.games_panel_collapsed,
+            };
             let (width, width_range) = if collapsed {
                 (36.0, 36.0..=36.0)
             } else {

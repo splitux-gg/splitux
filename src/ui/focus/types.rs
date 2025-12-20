@@ -47,8 +47,49 @@ pub enum RegistryFocus {
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
 pub enum SettingsFocus {
     #[default]
-    Options,       // Settings options area (scrollable)
-    BottomButtons, // Save/Restore buttons at bottom
+    CategoryList,  // Left panel - category selection
+    Options,       // Center panel - options for selected category
+    BottomButtons, // Save/Restore buttons (in left panel)
+}
+
+/// Settings category for left panel navigation
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
+pub enum SettingsCategory {
+    #[default]
+    General,
+    Audio,
+    Profiles,
+    Controllers,
+}
+
+impl SettingsCategory {
+    pub fn from_index(idx: usize) -> Self {
+        match idx {
+            0 => Self::General,
+            1 => Self::Audio,
+            2 => Self::Profiles,
+            3 => Self::Controllers,
+            _ => Self::General,
+        }
+    }
+
+    pub fn to_index(self) -> usize {
+        match self {
+            Self::General => 0,
+            Self::Audio => 1,
+            Self::Profiles => 2,
+            Self::Controllers => 3,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Audio => "Audio",
+            Self::Profiles => "Profiles",
+            Self::Controllers => "Controllers",
+        }
+    }
 }
 
 // =============================================================================

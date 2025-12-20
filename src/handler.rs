@@ -290,6 +290,7 @@ impl Handler {
                 self.photon = Some(BackendPhotonSettings {
                     config_path: self.photon_settings.config_path.clone(),
                     shared_files: self.photon_settings.shared_files.clone(),
+                    plugin: None, // Legacy settings don't have plugin
                 });
             }
         }

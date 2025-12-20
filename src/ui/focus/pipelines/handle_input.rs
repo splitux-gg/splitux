@@ -7,7 +7,7 @@ use crate::ui::focus::pure::{
     apply_index_delta, navigate_dropdown, navigate_games_page, navigate_instances_page,
     GamesPaneNav, InstancesNav,
 };
-use crate::ui::focus::types::{FocusPane, InstanceFocus, NavDirection, RegistryFocus, SettingsFocus};
+use crate::ui::focus::types::{FocusPane, InstanceFocus, NavDirection, RegistryFocus, SettingsCategory, SettingsFocus};
 use crate::ui::MenuPage;
 
 /// State snapshot needed for navigation decisions
@@ -29,6 +29,7 @@ pub struct NavContext {
     pub registry_handler_count: usize,
     // Settings page state
     pub settings_focus: SettingsFocus,
+    pub settings_category: SettingsCategory,
     pub settings_option_index: usize,
     pub settings_button_index: usize,
     pub settings_max_options: usize,
@@ -65,6 +66,8 @@ pub enum NavAction {
     // Settings page actions
     /// Update settings focus area
     SetSettingsFocus(SettingsFocus),
+    /// Update settings category
+    SetSettingsCategory(SettingsCategory),
     /// Update settings option index
     SetSettingsOptionIndex(usize),
     /// Update settings button index
@@ -216,6 +219,37 @@ fn handle_registry_direction(ctx: &NavContext, direction: NavDirection) -> Vec<N
 
 fn handle_settings_direction(ctx: &NavContext, direction: NavDirection) -> Vec<NavAction> {
     match ctx.settings_focus {
+        SettingsFocus::CategoryList => match direction {
+            NavDirection::Up => {
+                if ctx.settings_category.to_index() > 0 {
+                    vec![NavAction::SetSettingsCategory(SettingsCategory::from_index(
+                        ctx.settings_category.to_index() - 1,
+                    ))]
+                } else {
+                    vec![NavAction::None]
+                }
+            }
+            NavDirection::Down => {
+                if ctx.settings_category.to_index() < 3 {
+                    vec![NavAction::SetSettingsCategory(SettingsCategory::from_index(
+                        ctx.settings_category.to_index() + 1,
+                    ))]
+                } else {
+                    vec![
+                        NavAction::SetSettingsFocus(SettingsFocus::BottomButtons),
+                        NavAction::SetSettingsButtonIndex(0),
+                    ]
+                }
+            }
+            NavDirection::Right => {
+                vec![
+                    NavAction::SetSettingsFocus(SettingsFocus::Options),
+                    NavAction::SetSettingsOptionIndex(0),
+                    NavAction::ScrollToFocus,
+                ]
+            }
+            NavDirection::Left => vec![NavAction::None], // Could collapse panel
+        },
         SettingsFocus::Options => match direction {
             NavDirection::Up => {
                 if ctx.settings_option_index > 0 {
@@ -224,7 +258,7 @@ fn handle_settings_direction(ctx: &NavContext, direction: NavDirection) -> Vec<N
                         NavAction::ScrollToFocus,
                     ]
                 } else {
-                    vec![NavAction::None]
+                    vec![NavAction::SetSettingsFocus(SettingsFocus::CategoryList)]
                 }
             }
             NavDirection::Down => {
@@ -234,27 +268,27 @@ fn handle_settings_direction(ctx: &NavContext, direction: NavDirection) -> Vec<N
                         NavAction::ScrollToFocus,
                     ]
                 } else {
-                    vec![
-                        NavAction::SetSettingsFocus(SettingsFocus::BottomButtons),
-                        NavAction::SetSettingsButtonIndex(0),
-                    ]
+                    vec![NavAction::SetSettingsFocus(SettingsFocus::CategoryList)]
                 }
             }
-            // Left/Right in Options area - pass through as key events (handled by caller)
-            NavDirection::Left | NavDirection::Right => vec![NavAction::None],
+            NavDirection::Left => {
+                if ctx.settings_option_index == 0 {
+                    vec![NavAction::SetSettingsFocus(SettingsFocus::CategoryList)]
+                } else {
+                    vec![NavAction::None] // Pass through as key event
+                }
+            }
+            NavDirection::Right => vec![NavAction::None], // Pass through as key event
         },
         SettingsFocus::BottomButtons => match direction {
             NavDirection::Up => {
-                vec![
-                    NavAction::SetSettingsFocus(SettingsFocus::Options),
-                    NavAction::ScrollToFocus,
-                ]
+                vec![NavAction::SetSettingsFocus(SettingsFocus::CategoryList)]
             }
             NavDirection::Left => {
                 if ctx.settings_button_index > 0 {
                     vec![NavAction::SetSettingsButtonIndex(ctx.settings_button_index - 1)]
                 } else {
-                    vec![NavAction::None]
+                    vec![NavAction::SetSettingsFocus(SettingsFocus::CategoryList)]
                 }
             }
             NavDirection::Right => {

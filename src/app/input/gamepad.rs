@@ -123,6 +123,8 @@ impl Splitux {
                     self.handle_direction_input(NavDirection::Right, &mut key);
                 }
                 Some(PadButton::RB) => {
+                    self.active_dropdown = None;
+                    self.profile_dropdown_open = false;
                     if let Some((new_page, needs_fetch)) = self.cycle_page_forward(registry_needs_fetch) {
                         self.cur_page = new_page;
                         fetch_registry_needed = needs_fetch;
@@ -130,6 +132,8 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::LB) => {
+                    self.active_dropdown = None;
+                    self.profile_dropdown_open = false;
                     if let Some((new_page, needs_fetch)) = self.cycle_page_backward(registry_needs_fetch) {
                         self.cur_page = new_page;
                         fetch_registry_needed = needs_fetch;
@@ -181,9 +185,8 @@ impl Splitux {
             self.start_game_setup();
             page_changed = true;
         }
-        if page_changed {
-            self.reset_page_focus(ctx);
-        }
+        // Focus state is preserved when switching pages (no reset)
+        let _ = page_changed;
     }
 
     fn cycle_page_forward(&self, registry_needs_fetch: bool) -> Option<(MenuPage, bool)> {
@@ -191,7 +194,7 @@ impl Splitux {
             MenuPage::Games => Some((MenuPage::Registry, registry_needs_fetch)),
             MenuPage::Registry => Some((MenuPage::Settings, false)),
             MenuPage::Settings => Some((MenuPage::Games, false)),
-            MenuPage::Instances => None,
+            MenuPage::Instances => Some((MenuPage::Registry, registry_needs_fetch)),
         }
     }
 
@@ -200,7 +203,7 @@ impl Splitux {
             MenuPage::Games => Some((MenuPage::Settings, false)),
             MenuPage::Registry => Some((MenuPage::Games, false)),
             MenuPage::Settings => Some((MenuPage::Registry, registry_needs_fetch)),
-            MenuPage::Instances => None,
+            MenuPage::Instances => Some((MenuPage::Settings, false)),
         }
     }
 

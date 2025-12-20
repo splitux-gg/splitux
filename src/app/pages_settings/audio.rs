@@ -4,6 +4,7 @@ use crate::app::app::Splitux;
 use crate::audio::{resolve_audio_system, scan_sinks, AudioSystem, AudioSystemPreference};
 use crate::ui::responsive::LayoutMode;
 use eframe::egui::{self, Ui};
+use egui_phosphor::regular as icons;
 
 impl Splitux {
     pub fn display_settings_audio(&mut self, ui: &mut Ui) {
@@ -85,12 +86,12 @@ impl Splitux {
                 .show(ui, |ui| {
                     for device in &self.audio_devices {
                         let icon = match device.device_type {
-                            crate::audio::AudioDeviceType::Speaker => "🔊",
-                            crate::audio::AudioDeviceType::Headphone => "🎧",
-                            crate::audio::AudioDeviceType::Hdmi => "📺",
-                            crate::audio::AudioDeviceType::Bluetooth => "📶",
-                            crate::audio::AudioDeviceType::Virtual => "🔈",
-                            crate::audio::AudioDeviceType::Unknown => "🔉",
+                            crate::audio::AudioDeviceType::Speaker => icons::SPEAKER_HIGH,
+                            crate::audio::AudioDeviceType::Headphone => icons::HEADPHONES,
+                            crate::audio::AudioDeviceType::Hdmi => icons::MONITOR,
+                            crate::audio::AudioDeviceType::Bluetooth => icons::BLUETOOTH,
+                            crate::audio::AudioDeviceType::Virtual => icons::SPEAKER_LOW,
+                            crate::audio::AudioDeviceType::Unknown => icons::SPEAKER_NONE,
                         };
                         let default_marker = if device.is_default { " (default)" } else { "" };
                         ui.label(format!("{} {}{}", icon, device.description, default_marker));

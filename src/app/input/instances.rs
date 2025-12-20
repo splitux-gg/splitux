@@ -198,6 +198,17 @@ impl Splitux {
                 Some(PadButton::Right) => {
                     self.handle_instance_right();
                 }
+                Some(PadButton::LB) => {
+                    self.active_dropdown = None;
+                    self.cur_page = MenuPage::Settings;
+                }
+                Some(PadButton::RB) => {
+                    self.active_dropdown = None;
+                    self.cur_page = MenuPage::Registry;
+                    if self.registry_index.is_none() && !self.registry_loading {
+                        self.fetch_registry();
+                    }
+                }
                 _ => {}
             }
             i += 1;

@@ -7,6 +7,8 @@ use crate::profiles::{delete_profile, rename_profile, scan_profiles};
 use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};
 use crate::util::{msg, yesno};
 use eframe::egui::{self, RichText, Ui};
+use egui_phosphor::fill as icons_fill;
+use egui_phosphor::regular as icons;
 
 /// Controller preference dropdown action
 #[derive(Clone)]
@@ -107,7 +109,7 @@ impl Splitux {
                         } else {
                             // Expand/collapse toggle
                             // Only activate via gamepad when sub_focus == 0 (on the header row)
-                            let expand_icon = if is_expanded { "▼" } else { "▶" };
+                            let expand_icon = if is_expanded { icons::CARET_DOWN } else { icons::CARET_RIGHT };
                             let gamepad_activate = is_focused && self.activate_focused && self.profile_prefs_focus == 0;
                             if ui.button(expand_icon)
                                 .on_hover_text(if is_expanded { "Collapse preferences" } else { "Edit preferences" })
@@ -124,7 +126,7 @@ impl Splitux {
                             }
 
                             // Profile name with master indicator
-                            let master_icon = if is_master { "★ " } else { "" };
+                            let master_icon = if is_master { format!("{} ", icons_fill::STAR) } else { String::new() };
                             ui.label(format!("{}{}", master_icon, profile_name));
 
                             ui.with_layout(
@@ -169,7 +171,7 @@ impl Splitux {
                             let ctrl_combo_open = self.active_dropdown == Some(ActiveDropdown::ProfileController(i));
 
                             ui.horizontal(|ui| {
-                                ui.label("🎮 Controller:");
+                                ui.label(format!("{} Controller:", icons::GAME_CONTROLLER));
 
                                 // Build items list (filtered to devices with uniq)
                                 let mut ctrl_items: Vec<DropdownItem<ControllerAction>> = vec![
@@ -226,7 +228,7 @@ impl Splitux {
                             let audio_combo_open = self.active_dropdown == Some(ActiveDropdown::ProfileAudio(i));
 
                             ui.horizontal(|ui| {
-                                ui.label("🔊 Audio:");
+                                ui.label(format!("{} Audio:", icons::SPEAKER_HIGH));
 
                                 // Build items list
                                 let mut audio_items: Vec<DropdownItem<AudioAction>> = vec![

@@ -4,6 +4,7 @@ use super::Splitux;
 use crate::input::{open_device, DeviceEvent};
 use crate::monitor::get_monitors_sdl;
 use eframe::egui::{self, RichText};
+use egui_phosphor::regular as icons;
 use std::time::Duration;
 
 impl Splitux {
@@ -180,7 +181,7 @@ impl Splitux {
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("⚠").size(18.0).color(banner_color));
+                    ui.label(RichText::new(icons::WARNING).size(18.0).color(banner_color));
                     ui.vertical(|ui| {
                         ui.label(
                             RichText::new("Controller access requires setup")

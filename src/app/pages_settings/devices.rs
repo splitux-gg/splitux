@@ -3,6 +3,7 @@
 use crate::app::app::Splitux;
 use crate::app::theme;
 use eframe::egui::{self, RichText, Ui};
+use egui_phosphor::regular as icons;
 use std::collections::HashSet;
 
 impl Splitux {
@@ -55,7 +56,7 @@ impl Splitux {
                 gamepads.push(GamepadInfo {
                     idx: None,
                     uniq: uniq.clone(),
-                    emoji: "🎮".to_string(),
+                    emoji: icons::GAME_CONTROLLER.to_string(),
                     hw_name: alias.clone(), // Use alias as hw_name for offline devices
                     is_online: false,
                 });

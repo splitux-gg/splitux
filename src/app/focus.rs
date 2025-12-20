@@ -13,7 +13,4 @@ impl FocusManager {
 
     /// Called at start of frame (no-op in current implementation)
     pub fn begin_frame(&mut self) {}
-
-    /// Called on page transitions (no-op in current implementation)
-    pub fn focus_first(&mut self) {}
 }

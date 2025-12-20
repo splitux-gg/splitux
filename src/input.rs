@@ -18,6 +18,7 @@ pub use pure::generate_display_names;
 pub use pipelines::{check_permissions, install_udev_rules, PermissionStatus};
 
 use crate::app::PadFilterType;
+use egui_phosphor::regular as icons;
 use evdev::*;
 
 pub struct InputDevice {
@@ -105,9 +106,9 @@ impl InputDevice {
     }
     pub fn emoji(&self) -> &str {
         match self.device_type() {
-            DeviceType::Gamepad => "🎮",
-            DeviceType::Keyboard => "🖮",
-            DeviceType::Mouse => "🖱",
+            DeviceType::Gamepad => icons::GAME_CONTROLLER,
+            DeviceType::Keyboard => icons::KEYBOARD,
+            DeviceType::Mouse => icons::MOUSE,
             DeviceType::Other => "",
         }
     }

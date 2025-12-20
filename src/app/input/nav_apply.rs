@@ -36,6 +36,7 @@ impl Splitux {
                 .unwrap_or(0),
             // Settings page state
             settings_focus: self.settings_focus,
+            settings_category: self.settings_category,
             settings_option_index: self.settings_option_index,
             settings_button_index: self.settings_button_index,
             settings_max_options: self.settings_max_option_index(),
@@ -86,6 +87,9 @@ impl Splitux {
                 // Settings page actions
                 NavAction::SetSettingsFocus(focus) => {
                     self.settings_focus = focus;
+                }
+                NavAction::SetSettingsCategory(cat) => {
+                    self.settings_category = cat;
                 }
                 NavAction::SetSettingsOptionIndex(idx) => {
                     self.settings_option_index = idx;

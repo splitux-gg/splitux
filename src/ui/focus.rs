@@ -6,4 +6,4 @@ pub mod types;
 // Re-exports
 
 // Legacy re-exports (for gradual migration)
-pub use types::{ActiveDropdown, FocusPane, InstanceFocus, RegistryFocus, SettingsFocus};
+pub use types::{ActiveDropdown, FocusPane, InstanceFocus, RegistryFocus, SettingsCategory, SettingsFocus};
