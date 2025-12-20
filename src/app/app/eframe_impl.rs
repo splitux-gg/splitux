@@ -10,7 +10,7 @@ impl eframe::App for Splitux {
             return;
         }
         match self.cur_page {
-            MenuPage::Instances => self.handle_devices_instance_menu(),
+            MenuPage::Instances => self.handle_devices_instance_menu(ctx, raw_input),
             _ => self.handle_gamepad_gui(ctx, raw_input),
         }
     }

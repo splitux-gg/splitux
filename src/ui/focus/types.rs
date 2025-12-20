@@ -75,4 +75,12 @@ pub enum ActiveDropdown {
     /// Games page: profile selector (Y-button) - reserved for future use
     #[allow(dead_code)]
     GameProfile,
+    /// Instances page: profile dropdown for instance
+    InstanceProfile(usize),
+    /// Instances page: monitor dropdown for instance
+    InstanceMonitor(usize),
+    /// Instances page: audio override dropdown for instance
+    InstanceAudioOverride(usize),
+    /// Instances page: audio preference dropdown for instance
+    InstanceAudioPreference(usize),
 }

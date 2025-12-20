@@ -1,11 +1,25 @@
 //! Instance page input handling
 
-use crate::app::app::{InstanceFocus, MenuPage, Splitux};
+use crate::app::app::{ActiveDropdown, InstanceFocus, MenuPage, Splitux};
 use crate::input::*;
 use crate::ui::focus::types::InstanceCardFocus;
+use eframe::egui;
 
 impl Splitux {
-    pub(crate) fn handle_devices_instance_menu(&mut self) {
+    /// Check if an instance dropdown is currently open
+    fn is_instance_dropdown_open(&self) -> bool {
+        matches!(
+            self.active_dropdown,
+            Some(ActiveDropdown::InstanceProfile(_))
+                | Some(ActiveDropdown::InstanceMonitor(_))
+                | Some(ActiveDropdown::InstanceAudioOverride(_))
+                | Some(ActiveDropdown::InstanceAudioPreference(_))
+        )
+    }
+
+    pub(crate) fn handle_devices_instance_menu(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.activate_focused = false;
+
         let mut i = 0;
         while i < self.input_devices.len() {
             if !self.input_devices[i].enabled() {
@@ -37,6 +51,7 @@ impl Splitux {
                             continue;
                         }
                         InstanceFocus::InstanceCard(_, _) => {
+                            // Set activate_focused - display code will handle the toggle
                             self.activate_focused = true;
                             i += 1;
                             continue;
@@ -99,7 +114,20 @@ impl Splitux {
                             }
                         }
                         InstanceFocus::InstanceCard(_, _) => {
-                            self.instance_focus = InstanceFocus::Devices;
+                            if self.is_instance_dropdown_open() {
+                                // Inject Escape key to close dropdown
+                                raw_input.events.push(egui::Event::Key {
+                                    key: egui::Key::Escape,
+                                    physical_key: None,
+                                    pressed: true,
+                                    repeat: false,
+                                    modifiers: egui::Modifiers::NONE,
+                                });
+                                // Clear our dropdown tracking
+                                self.active_dropdown = None;
+                            } else {
+                                self.instance_focus = InstanceFocus::Devices;
+                            }
                         }
                         InstanceFocus::Devices => {
                             if self.instance_add_dev != None {
@@ -126,10 +154,43 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::Up) => {
-                    self.handle_instance_up();
+                    if let Some(ref dropdown) = self.active_dropdown {
+                        // Navigate within dropdown - all use dropdown_selection_idx
+                        match dropdown {
+                            ActiveDropdown::InstanceProfile(_) |
+                            ActiveDropdown::InstanceMonitor(_) |
+                            ActiveDropdown::InstanceAudioOverride(_) |
+                            ActiveDropdown::InstanceAudioPreference(_) => {
+                                if self.dropdown_selection_idx > 0 {
+                                    self.dropdown_selection_idx -= 1;
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        println!("[splitux] Nav Up - focus before: {:?}", self.instance_focus);
+                        self.handle_instance_up();
+                        println!("[splitux] Nav Up - focus after: {:?}", self.instance_focus);
+                    }
                 }
                 Some(PadButton::Down) => {
-                    self.handle_instance_down();
+                    if let Some(ref dropdown) = self.active_dropdown {
+                        // Navigate within dropdown - all use dropdown_selection_idx
+                        let max_items = match dropdown {
+                            ActiveDropdown::InstanceProfile(_) => self.profiles.len(),
+                            ActiveDropdown::InstanceMonitor(_) => self.monitors.len(),
+                            ActiveDropdown::InstanceAudioOverride(_) => self.audio_devices.len() + 2, // devices + mute + reset
+                            ActiveDropdown::InstanceAudioPreference(_) => self.audio_devices.len() + 1, // devices + clear
+                            _ => 0,
+                        };
+                        if self.dropdown_selection_idx < max_items.saturating_sub(1) {
+                            self.dropdown_selection_idx += 1;
+                        }
+                    } else {
+                        println!("[splitux] Nav Down - focus before: {:?}", self.instance_focus);
+                        self.handle_instance_down();
+                        println!("[splitux] Nav Down - focus after: {:?}", self.instance_focus);
+                    }
                 }
                 Some(PadButton::Left) => {
                     self.handle_instance_left();

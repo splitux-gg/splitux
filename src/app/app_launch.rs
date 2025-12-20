@@ -109,6 +109,9 @@ impl Splitux {
         self.spawn_task(
             "Launching...\n\nDon't press any buttons or move any analog sticks or mice.",
             move || {
+                // Clean up any orphaned processes from previous sessions
+                cleanup_orphaned_processes();
+
                 sleep(std::time::Duration::from_secs_f32(1.5));
 
                 if let Err(err) = setup_profiles(&handler, &instances) {

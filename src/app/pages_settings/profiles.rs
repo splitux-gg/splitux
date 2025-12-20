@@ -4,8 +4,23 @@ use crate::app::app::{ActiveDropdown, Splitux};
 use crate::app::theme;
 use crate::profile_prefs::ProfilePreferences;
 use crate::profiles::{delete_profile, rename_profile, scan_profiles};
+use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};
 use crate::util::{msg, yesno};
 use eframe::egui::{self, RichText, Ui};
+
+/// Controller preference dropdown action
+#[derive(Clone)]
+enum ControllerAction {
+    Clear,
+    SetDevice { uniq: String, name: String },
+}
+
+/// Audio preference dropdown action
+#[derive(Clone)]
+enum AudioAction {
+    Clear,
+    SetDevice { name: String, description: String },
+}
 
 impl Splitux {
     pub fn display_settings_profiles(&mut self, ui: &mut Ui) {
@@ -148,104 +163,60 @@ impl Splitux {
                             let prefs = ProfilePreferences::load(profile_name);
                             let sub_focus = self.profile_prefs_focus;
                             let activate = self.activate_focused;
-                            let focus_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 200, 255));
 
                             // Controller preference (sub_focus = 1)
                             let ctrl_focused = is_focused && sub_focus == 1;
                             let ctrl_combo_open = self.active_dropdown == Some(ActiveDropdown::ProfileController(i));
 
-                            // Toggle combo open state when A pressed
-                            if ctrl_focused && activate && !ctrl_combo_open {
-                                self.active_dropdown = Some(ActiveDropdown::ProfileController(i));
-                                self.dropdown_selection_idx = 0; // Reset selection
-                            }
+                            ui.horizontal(|ui| {
+                                ui.label("🎮 Controller:");
 
-                            let ctrl_frame = if ctrl_focused {
-                                egui::Frame::NONE
-                                    .stroke(focus_stroke)
-                                    .inner_margin(4.0)
-                                    .corner_radius(4.0)
-                            } else {
-                                egui::Frame::NONE.inner_margin(4.0)
-                            };
-
-                            ctrl_frame.show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("🎮 Controller:");
-
-                                    let ctrl_text = prefs.preferred_controller_name
-                                        .as_ref()
-                                        .map(|n| {
-                                            let connected = self.input_devices.iter()
-                                                .any(|d| prefs.preferred_controller.as_ref() == Some(&d.uniq().to_string()));
-                                            if connected { n.clone() } else { format!("{} (offline)", n) }
-                                        })
-                                        .unwrap_or_else(|| "None".to_string());
-
-                                    // Button that shows current selection and opens popup
-                                    let btn = ui.add_sized(
-                                        [180.0, 24.0],
-                                        egui::Button::new(format!("{} ▼", ctrl_text))
-                                    );
-
-                                    if btn.clicked() {
-                                        self.active_dropdown = if ctrl_combo_open { None } else { Some(ActiveDropdown::ProfileController(i)) };
+                                // Build items list (filtered to devices with uniq)
+                                let mut ctrl_items: Vec<DropdownItem<ControllerAction>> = vec![
+                                    DropdownItem::new(ControllerAction::Clear, "None", !prefs.has_controller())
+                                ];
+                                for (dev_idx, device) in self.input_devices.iter().enumerate() {
+                                    let uniq = device.uniq();
+                                    if !uniq.is_empty() {
+                                        let display_name = self.device_display_name(dev_idx);
+                                        let is_selected = prefs.preferred_controller.as_ref() == Some(&uniq.to_string());
+                                        ctrl_items.push(DropdownItem::new(
+                                            ControllerAction::SetDevice { uniq: uniq.to_string(), name: display_name.to_string() },
+                                            display_name,
+                                            is_selected,
+                                        ));
                                     }
+                                }
 
-                                    // Show popup if open
-                                    if self.active_dropdown == Some(ActiveDropdown::ProfileController(i)) {
-                                        let popup_id = ui.make_persistent_id(format!("ctrl_popup_{}", i));
-                                        let selection_idx = self.dropdown_selection_idx;
-                                        let activate_selection = ctrl_focused && activate;
+                                // Button text with offline indicator
+                                let ctrl_text = prefs.preferred_controller_name
+                                    .as_ref()
+                                    .map(|n| {
+                                        let connected = self.input_devices.iter()
+                                            .any(|d| prefs.preferred_controller.as_ref() == Some(&d.uniq().to_string()));
+                                        if connected { n.clone() } else { format!("{} (offline)", n) }
+                                    })
+                                    .unwrap_or_else(|| "None".to_string());
 
-                                        egui::Popup::from_response(&btn)
-                                            .id(popup_id)
-                                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                            .show(|ui| {
-                                                ui.set_min_width(180.0);
+                                let ctrl_response = render_gamepad_dropdown(
+                                    ui, &format!("profile_ctrl_{}", i), &ctrl_text, 180.0,
+                                    &ctrl_items, ctrl_focused, ctrl_combo_open,
+                                    self.dropdown_selection_idx, ctrl_focused && activate,
+                                );
 
-                                                // "None" option (index 0)
-                                                let none_highlighted = selection_idx == 0;
-                                                let none_response = ui.selectable_label(
-                                                    !prefs.has_controller() || none_highlighted,
-                                                    if none_highlighted { "▶ None" } else { "  None" }
-                                                );
-                                                if none_response.clicked() || (activate_selection && none_highlighted) {
-                                                    let mut new_prefs = ProfilePreferences::load(profile_name);
-                                                    new_prefs.clear_controller();
-                                                    let _ = new_prefs.save(profile_name);
-                                                    self.active_dropdown = None;
-                                                }
-
-                                                ui.separator();
-
-                                                // Device options (index 1+)
-                                                let mut device_index = 1usize;
-                                                for (dev_idx, device) in self.input_devices.iter().enumerate() {
-                                                    let uniq = device.uniq();
-                                                    if !uniq.is_empty() {
-                                                        let display_name = self.device_display_name(dev_idx);
-                                                        let is_selected = prefs.preferred_controller.as_ref() == Some(&uniq.to_string());
-                                                        let is_highlighted = selection_idx == device_index;
-                                                        let label = if is_highlighted {
-                                                            format!("▶ {}", display_name)
-                                                        } else {
-                                                            format!("  {}", display_name)
-                                                        };
-
-                                                        let response = ui.selectable_label(is_selected || is_highlighted, label);
-                                                        if response.clicked() || (activate_selection && is_highlighted) {
-                                                            let mut new_prefs = ProfilePreferences::load(profile_name);
-                                                            new_prefs.set_controller(uniq, display_name);
-                                                            let _ = new_prefs.save(profile_name);
-                                                            self.active_dropdown = None;
-                                                        }
-                                                        device_index += 1;
-                                                    }
-                                                }
-                                            });
+                                // Handle response
+                                if let Some(action) = ctrl_response.selected {
+                                    let mut new_prefs = ProfilePreferences::load(profile_name);
+                                    match action {
+                                        ControllerAction::Clear => new_prefs.clear_controller(),
+                                        ControllerAction::SetDevice { uniq, name } => new_prefs.set_controller(&uniq, &name),
                                     }
-                                });
+                                    let _ = new_prefs.save(profile_name);
+                                    self.active_dropdown = None;
+                                } else if ctrl_response.toggled || (ctrl_focused && activate && !ctrl_combo_open) {
+                                    self.active_dropdown = if ctrl_combo_open { None } else { Some(ActiveDropdown::ProfileController(i)) };
+                                    if !ctrl_combo_open { self.dropdown_selection_idx = 0; }
+                                }
                             });
 
                             ui.add_space(2.0);
@@ -254,92 +225,51 @@ impl Splitux {
                             let audio_focused = is_focused && sub_focus == 2;
                             let audio_combo_open = self.active_dropdown == Some(ActiveDropdown::ProfileAudio(i));
 
-                            // Toggle combo open state when A pressed
-                            if audio_focused && activate && !audio_combo_open {
-                                self.active_dropdown = Some(ActiveDropdown::ProfileAudio(i));
-                                self.dropdown_selection_idx = 0; // Reset selection
-                            }
+                            ui.horizontal(|ui| {
+                                ui.label("🔊 Audio:");
 
-                            let audio_frame = if audio_focused {
-                                egui::Frame::NONE
-                                    .stroke(focus_stroke)
-                                    .inner_margin(4.0)
-                                    .corner_radius(4.0)
-                            } else {
-                                egui::Frame::NONE.inner_margin(4.0)
-                            };
+                                // Build items list
+                                let mut audio_items: Vec<DropdownItem<AudioAction>> = vec![
+                                    DropdownItem::new(AudioAction::Clear, "None", prefs.preferred_audio.is_none())
+                                ];
+                                for device in self.audio_devices.iter() {
+                                    let is_selected = prefs.preferred_audio.as_ref() == Some(&device.name);
+                                    audio_items.push(DropdownItem::new(
+                                        AudioAction::SetDevice { name: device.name.clone(), description: device.description.clone() },
+                                        &device.description,
+                                        is_selected,
+                                    ));
+                                }
 
-                            audio_frame.show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("🔊 Audio:");
+                                // Button text with offline indicator
+                                let audio_text = prefs.preferred_audio_name
+                                    .as_ref()
+                                    .map(|n| {
+                                        let connected = self.audio_devices.iter()
+                                            .any(|d| prefs.preferred_audio.as_ref() == Some(&d.name));
+                                        if connected { n.clone() } else { format!("{} (offline)", n) }
+                                    })
+                                    .unwrap_or_else(|| "None".to_string());
 
-                                    let audio_text = prefs.preferred_audio_name
-                                        .as_ref()
-                                        .map(|n| {
-                                            let connected = self.audio_devices.iter()
-                                                .any(|d| prefs.preferred_audio.as_ref() == Some(&d.name));
-                                            if connected { n.clone() } else { format!("{} (offline)", n) }
-                                        })
-                                        .unwrap_or_else(|| "None".to_string());
+                                let audio_response = render_gamepad_dropdown(
+                                    ui, &format!("profile_audio_{}", i), &audio_text, 180.0,
+                                    &audio_items, audio_focused, audio_combo_open,
+                                    self.dropdown_selection_idx, audio_focused && activate,
+                                );
 
-                                    // Button that shows current selection and opens popup
-                                    let btn = ui.add_sized(
-                                        [180.0, 24.0],
-                                        egui::Button::new(format!("{} ▼", audio_text))
-                                    );
-
-                                    if btn.clicked() {
-                                        self.active_dropdown = if audio_combo_open { None } else { Some(ActiveDropdown::ProfileAudio(i)) };
+                                // Handle response
+                                if let Some(action) = audio_response.selected {
+                                    let mut new_prefs = ProfilePreferences::load(profile_name);
+                                    match action {
+                                        AudioAction::Clear => new_prefs.clear_audio(),
+                                        AudioAction::SetDevice { name, description } => new_prefs.set_audio(&name, &description),
                                     }
-
-                                    // Show popup if open
-                                    if self.active_dropdown == Some(ActiveDropdown::ProfileAudio(i)) {
-                                        let popup_id = ui.make_persistent_id(format!("audio_popup_{}", i));
-                                        let selection_idx = self.dropdown_selection_idx;
-                                        let activate_selection = audio_focused && activate;
-
-                                        egui::Popup::from_response(&btn)
-                                            .id(popup_id)
-                                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                            .show(|ui| {
-                                                ui.set_min_width(180.0);
-
-                                                // "None" option (index 0)
-                                                let none_highlighted = selection_idx == 0;
-                                                let none_response = ui.selectable_label(
-                                                    prefs.preferred_audio.is_none() || none_highlighted,
-                                                    if none_highlighted { "▶ None" } else { "  None" }
-                                                );
-                                                if none_response.clicked() || (activate_selection && none_highlighted) {
-                                                    let mut new_prefs = ProfilePreferences::load(profile_name);
-                                                    new_prefs.clear_audio();
-                                                    let _ = new_prefs.save(profile_name);
-                                                    self.active_dropdown = None;
-                                                }
-
-                                                ui.separator();
-
-                                                // Audio device options (index 1+)
-                                                for (device_idx, device) in self.audio_devices.iter().enumerate() {
-                                                    let is_selected = prefs.preferred_audio.as_ref() == Some(&device.name);
-                                                    let is_highlighted = selection_idx == device_idx + 1;
-                                                    let label = if is_highlighted {
-                                                        format!("▶ {}", device.description)
-                                                    } else {
-                                                        format!("  {}", device.description)
-                                                    };
-
-                                                    let response = ui.selectable_label(is_selected || is_highlighted, label);
-                                                    if response.clicked() || (activate_selection && is_highlighted) {
-                                                        let mut new_prefs = ProfilePreferences::load(profile_name);
-                                                        new_prefs.set_audio(&device.name, &device.description);
-                                                        let _ = new_prefs.save(profile_name);
-                                                        self.active_dropdown = None;
-                                                    }
-                                                }
-                                            });
-                                    }
-                                });
+                                    let _ = new_prefs.save(profile_name);
+                                    self.active_dropdown = None;
+                                } else if audio_response.toggled || (audio_focused && activate && !audio_combo_open) {
+                                    self.active_dropdown = if audio_combo_open { None } else { Some(ActiveDropdown::ProfileAudio(i)) };
+                                    if !audio_combo_open { self.dropdown_selection_idx = 0; }
+                                }
                             });
                         });
                     }

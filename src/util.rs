@@ -216,6 +216,113 @@ pub fn clear_tmp() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Kill all gamescope-splitux processes
+/// These are always Splitux-spawned, so safe to kill unconditionally
+fn kill_orphaned_gamescope_splitux() -> Result<(), Box<dyn Error>> {
+    // pgrep truncates process names to 15 chars, so "gamescope-splitux" becomes "gamescope-split"
+    let output = Command::new("pgrep")
+        .args(["-x", "gamescope-split"])
+        .output()?;
+
+    if output.status.success() {
+        let pids = String::from_utf8_lossy(&output.stdout);
+        let count = pids.lines().filter(|l| !l.is_empty()).count();
+        if count > 0 {
+            println!(
+                "[splitux] Cleaning up {} orphaned gamescope-splitux process(es)",
+                count
+            );
+            Command::new("pkill")
+                .args(["-9", "-x", "gamescope-split"])
+                .status()?;
+            // Give processes time to terminate
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    Ok(())
+}
+
+/// Kill orphaned bwrap processes that were spawned by Splitux
+/// Identifies Splitux bwrap by checking cmdline for Splitux-specific paths
+fn kill_orphaned_splitux_bwrap() -> Result<(), Box<dyn Error>> {
+    // Get all bwrap PIDs
+    let output = Command::new("pgrep").args(["-x", "bwrap"]).output()?;
+
+    if !output.status.success() {
+        return Ok(()); // No bwrap processes
+    }
+
+    let pids_str = String::from_utf8_lossy(&output.stdout);
+
+    // Markers that identify Splitux-spawned bwrap processes
+    let splitux_markers = ["splitux/tmp", "splitux/profiles", "/splitux/"];
+
+    for pid in pids_str.lines() {
+        let pid = pid.trim();
+        if pid.is_empty() {
+            continue;
+        }
+
+        // Read cmdline to check for Splitux markers
+        let cmdline_path = format!("/proc/{}/cmdline", pid);
+        let Ok(cmdline_raw) = std::fs::read_to_string(&cmdline_path) else {
+            continue;
+        };
+        // cmdline uses null bytes as separators
+        let cmdline = cmdline_raw.replace('\0', " ");
+
+        let is_splitux_bwrap = splitux_markers.iter().any(|marker| cmdline.contains(marker));
+
+        if !is_splitux_bwrap {
+            continue;
+        }
+
+        // Check if it's orphaned (parent PID is 1)
+        let stat_path = format!("/proc/{}/stat", pid);
+        let Ok(stat) = std::fs::read_to_string(&stat_path) else {
+            continue;
+        };
+
+        // stat format: pid (comm) state ppid ...
+        // We need to find ppid which is after the closing parenthesis
+        let Some(paren_end) = stat.rfind(')') else {
+            continue;
+        };
+        let after_comm = &stat[paren_end + 1..];
+        let fields: Vec<&str> = after_comm.split_whitespace().collect();
+        // fields[0] is state, fields[1] is ppid
+        let Some(ppid) = fields.get(1) else {
+            continue;
+        };
+
+        if *ppid == "1" {
+            // Orphaned - safe to kill
+            println!("[splitux] Killing orphaned Splitux bwrap (PID {})", pid);
+            let _ = Command::new("kill").args(["-9", pid]).status();
+        }
+    }
+
+    Ok(())
+}
+
+/// Clean up all orphaned Splitux processes
+/// Safe to call at startup and before launches
+pub fn cleanup_orphaned_processes() {
+    println!("[splitux] Checking for orphaned processes...");
+
+    if let Err(e) = kill_orphaned_gamescope_splitux() {
+        println!(
+            "[splitux] Warning: Failed to clean gamescope-splitux: {}",
+            e
+        );
+    }
+
+    if let Err(e) = kill_orphaned_splitux_bwrap() {
+        println!("[splitux] Warning: Failed to clean orphaned bwrap: {}", e);
+    }
+}
+
 pub fn check_for_splitux_update() -> bool {
     // Try to get the latest release tag from GitHub
     if let Ok(client) = reqwest::blocking::Client::new()

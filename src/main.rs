@@ -131,6 +131,7 @@ fn main() -> eframe::Result {
 
     remove_guest_profiles().unwrap();
     clear_tmp().unwrap();
+    cleanup_orphaned_processes();
 
     let scrheight = monitors[0].height();
 

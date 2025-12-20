@@ -130,11 +130,14 @@ pub fn create_virtual_sink(instance_idx: usize, target_sink: &str) -> AudioResul
     );
 
     // Create null sink (virtual output that captures audio)
+    // Specify rate/channels to match loopback and avoid resampling
     let null_sink_output = Command::new("pactl")
         .args([
             "load-module",
             "module-null-sink",
             &format!("sink_name={}", sink_name),
+            "rate=48000",
+            "channels=2",
             &format!(
                 "sink_properties=device.description=\"{}\"",
                 description.replace(' ', "\\ ")
@@ -154,13 +157,24 @@ pub fn create_virtual_sink(instance_idx: usize, target_sink: &str) -> AudioResul
         .ok_or("Failed to parse null-sink module ID")?;
 
     // Create loopback to route null sink's monitor to the target physical sink
+    // Optimized settings to prevent crackling/grain:
+    // - 30ms latency: imperceptible but stable (1ms caused underruns)
+    // - 48kHz rate: matches null sink to avoid resampling
+    // - adjust_time=3: less frequent rate corrections
+    // - max_latency=60ms: prevents latency drift
     let loopback_output = Command::new("pactl")
         .args([
             "load-module",
             "module-loopback",
             &format!("source={}.monitor", sink_name),
             &format!("sink={}", target_sink),
-            "latency_msec=1", // Low latency for gaming
+            "source_dont_move=true",
+            "sink_dont_move=true",
+            "latency_msec=30",
+            "max_latency_msec=60",
+            "adjust_time=3",
+            "rate=48000",
+            "channels=2",
         ])
         .output()?;
 

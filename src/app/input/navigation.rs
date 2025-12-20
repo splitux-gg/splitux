@@ -95,6 +95,11 @@ impl Splitux {
                 }
                 ActiveDropdown::ProfileAudio(_) => 1 + self.audio_devices.len(),
                 ActiveDropdown::GameProfile => 1 + self.profiles.len(),
+                // Instance dropdowns are handled in instances.rs, not here
+                ActiveDropdown::InstanceProfile(_)
+                | ActiveDropdown::InstanceMonitor(_)
+                | ActiveDropdown::InstanceAudioOverride(_)
+                | ActiveDropdown::InstanceAudioPreference(_) => return,
             };
             if self.dropdown_selection_idx < max_items.saturating_sub(1) {
                 self.dropdown_selection_idx += 1;
