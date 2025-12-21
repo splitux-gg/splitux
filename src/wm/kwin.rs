@@ -1,7 +1,7 @@
 //! KWin window manager integration via D-Bus scripting API
 
 use crate::paths::PATH_RES;
-use crate::wm::{LayoutContext, LayoutOrientation, NestedSession, WindowManager, WmResult};
+use crate::wm::{LayoutContext, NestedSession, WindowManager, WmResult};
 use crate::monitor::Monitor;
 use std::path::PathBuf;
 use std::process::Command;
@@ -82,9 +82,12 @@ impl WindowManager for KWinManager {
     }
 
     fn setup(&mut self, ctx: &LayoutContext) -> WmResult<()> {
-        let script = match ctx.orientation {
-            LayoutOrientation::Vertical => "splitscreen_kwin_vertical.js",
-            LayoutOrientation::Horizontal => "splitscreen_kwin.js",
+        // For 2-player, check if using vertical preset; otherwise use horizontal script
+        // TODO: Generate dynamic KWin scripts from preset coordinates
+        let script = if ctx.preset.id == "2p_vertical" {
+            "splitscreen_kwin_vertical.js"
+        } else {
+            "splitscreen_kwin.js"
         };
         self.load_script(PATH_RES.join(script))
     }

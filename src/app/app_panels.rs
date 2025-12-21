@@ -277,14 +277,17 @@ impl Splitux {
                     })
             };
 
-            let response = frame
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(cat.label());
-                })
-                .response;
+            let frame_resp = frame.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(
+                    egui::Label::new(cat.label())
+                        .selectable(false)
+                        .sense(egui::Sense::click()),
+                )
+            });
 
-            if response.clicked() {
+            // Click on inner label or the frame
+            if frame_resp.response.clicked() || frame_resp.inner.clicked() {
                 self.settings_category = cat;
                 self.settings_focus = SettingsFocus::Options;
                 self.settings_option_index = 0;

@@ -8,14 +8,11 @@ mod gamescope;
 mod hyprland;
 mod kwin;
 mod layout;
+pub mod presets;
 
 pub use gamescope::GamescopeOnlyManager;
 pub use hyprland::HyprlandManager;
 pub use kwin::KWinManager;
-pub use layout::LayoutOrientation;
-// calculate_all_geometries is available for future use when WMs need centralized layout
-#[allow(unused_imports)]
-pub use layout::calculate_all_geometries;
 
 use crate::instance::Instance;
 use crate::monitor::Monitor;
@@ -31,7 +28,8 @@ pub struct LayoutContext {
     pub instances: Vec<Instance>,
     #[allow(dead_code)] // Used by calculate_all_geometries for multi-monitor layout
     pub monitors: Vec<Monitor>,
-    pub orientation: LayoutOrientation,
+    /// Layout preset for positioning windows
+    pub preset: &'static presets::LayoutPreset,
 }
 
 /// The core window manager trait

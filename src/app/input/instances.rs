@@ -28,12 +28,22 @@ impl Splitux {
             }
             match self.input_devices[i].poll() {
                 Some(PadButton::ABtn) | Some(PadButton::ZKey) | Some(PadButton::RightClick) => {
+                    // Handle custom layout mode first
+                    if self.layout_custom_mode {
+                        self.cycle_instance_in_region(self.instances.len());
+                        i += 1;
+                        continue;
+                    }
+
                     match &self.instance_focus {
                         InstanceFocus::LaunchOptions => {
-                            let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                            let player_count = self.instances.len();
+                            let has_carousel = player_count >= 2;
+                            let max_options = if has_carousel { 2 } else { 1 };
                             match self.launch_option_index {
-                                0 if self.instances.len() == 2 => {
-                                    self.options.vertical_two_player = !self.options.vertical_two_player;
+                                0 if has_carousel => {
+                                    // A button on carousel cycles to next preset
+                                    self.options.layout_presets.cycle_next(player_count);
                                 }
                                 idx if idx == max_options - 1 => {
                                     self.options.input_holding = !self.options.input_holding;
@@ -102,6 +112,13 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::BBtn) | Some(PadButton::XKey) => {
+                    // Handle custom layout mode - B exits
+                    if self.layout_custom_mode {
+                        self.exit_custom_layout_mode();
+                        i += 1;
+                        continue;
+                    }
+
                     match &self.instance_focus {
                         InstanceFocus::LaunchOptions | InstanceFocus::StartButton => {
                             if self.instances.len() > 0 {
@@ -142,6 +159,22 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::YBtn) | Some(PadButton::AKey) => {
+                    // Y button enters custom layout mode when on carousel
+                    if self.instance_focus == InstanceFocus::LaunchOptions
+                        && self.launch_option_index == 0
+                        && self.instances.len() >= 2
+                    {
+                        let player_count = self.instances.len();
+                        let preset_id = self
+                            .options
+                            .layout_presets
+                            .get_for_count(player_count)
+                            .to_string();
+                        self.enter_custom_layout_mode(player_count, &preset_id);
+                        i += 1;
+                        continue;
+                    }
+
                     if self.instance_add_dev == None {
                         if let Some((instance, _)) = self.find_device_in_instance(i) {
                             self.instance_add_dev = Some(instance);
@@ -154,6 +187,13 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::Up) => {
+                    // Handle custom layout mode navigation
+                    if self.layout_custom_mode {
+                        self.navigate_custom_layout_up();
+                        i += 1;
+                        continue;
+                    }
+
                     if let Some(ref dropdown) = self.active_dropdown {
                         // Navigate within dropdown - all use dropdown_selection_idx
                         match dropdown {
@@ -174,6 +214,13 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::Down) => {
+                    // Handle custom layout mode navigation
+                    if self.layout_custom_mode {
+                        self.navigate_custom_layout_down();
+                        i += 1;
+                        continue;
+                    }
+
                     if let Some(ref dropdown) = self.active_dropdown {
                         // Navigate within dropdown - all use dropdown_selection_idx
                         let max_items = match dropdown {
@@ -193,9 +240,19 @@ impl Splitux {
                     }
                 }
                 Some(PadButton::Left) => {
+                    if self.layout_custom_mode {
+                        self.navigate_custom_layout_left();
+                        i += 1;
+                        continue;
+                    }
                     self.handle_instance_left();
                 }
                 Some(PadButton::Right) => {
+                    if self.layout_custom_mode {
+                        self.navigate_custom_layout_right();
+                        i += 1;
+                        continue;
+                    }
                     self.handle_instance_right();
                 }
                 Some(PadButton::LB) => {
@@ -229,6 +286,7 @@ impl Splitux {
             }
             InstanceFocus::StartButton => {
                 self.instance_focus = InstanceFocus::LaunchOptions;
+                self.launch_option_index = 0; // Reset to carousel
             }
             InstanceFocus::InstanceCard(idx, element) => {
                 let idx = *idx;
@@ -333,7 +391,13 @@ impl Splitux {
     fn handle_instance_left(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                if self.launch_option_index > 0 {
+                let player_count = self.instances.len();
+                let has_carousel = player_count >= 2;
+
+                // If on carousel (index 0), cycle preset
+                if has_carousel && self.launch_option_index == 0 {
+                    self.options.layout_presets.cycle_prev(player_count);
+                } else if self.launch_option_index > 0 {
                     self.launch_option_index -= 1;
                 }
             }
@@ -349,8 +413,14 @@ impl Splitux {
     fn handle_instance_right(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                let max_options = if self.instances.len() == 2 { 2 } else { 1 };
-                if self.launch_option_index < max_options - 1 {
+                let player_count = self.instances.len();
+                let has_carousel = player_count >= 2;
+                let max_options = if has_carousel { 2 } else { 1 };
+
+                // If on carousel (index 0), cycle preset
+                if has_carousel && self.launch_option_index == 0 {
+                    self.options.layout_presets.cycle_next(player_count);
+                } else if self.launch_option_index < max_options - 1 {
                     self.launch_option_index += 1;
                 }
             }
@@ -378,10 +448,13 @@ impl Splitux {
     pub(crate) fn process_instance_activate_key(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                let max_options = if self.instances.len() == 2 { 2 } else { 1 };
+                let player_count = self.instances.len();
+                let has_carousel = player_count >= 2;
+                let max_options = if has_carousel { 2 } else { 1 };
                 match self.launch_option_index {
-                    0 if self.instances.len() == 2 => {
-                        self.options.vertical_two_player = !self.options.vertical_two_player;
+                    0 if has_carousel => {
+                        // Enter/A on carousel cycles to next preset
+                        self.options.layout_presets.cycle_next(player_count);
                     }
                     idx if idx == max_options - 1 => {
                         self.options.input_holding = !self.options.input_holding;

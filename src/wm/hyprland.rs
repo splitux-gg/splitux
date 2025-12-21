@@ -2,7 +2,7 @@
 
 use crate::monitor::Monitor;
 use crate::wm::bars::StatusBarManager;
-use crate::wm::layout::{calculate_geometry, WindowGeometry};
+use crate::wm::layout::{calculate_geometry_from_preset, WindowGeometry};
 use crate::wm::{LayoutContext, NestedSession, WindowManager, WmResult};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -227,7 +227,6 @@ impl HyprlandManager {
             windows.len()
         );
 
-        let player_count = windows.len().min(4);
         let mut commands = Vec::new();
 
         // Convert physical coordinates to logical (accounting for scale)
@@ -251,14 +250,13 @@ impl HyprlandManager {
             );
 
             // Use shared layout calculation with LOGICAL dimensions
-            let geom: WindowGeometry = calculate_geometry(
-                player_count,
+            let geom: WindowGeometry = calculate_geometry_from_preset(
+                ctx.preset,
                 i,
                 logical_x,
                 logical_y,
                 logical_width,
                 logical_height,
-                ctx.orientation,
             );
 
             println!(

@@ -9,7 +9,8 @@ use crate::handler::Handler;
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
 use crate::monitor::Monitor;
-use crate::wm::{LayoutContext, LayoutOrientation, WindowManager, WindowManagerBackend};
+use crate::wm::presets::{get_preset_by_id, get_presets_for_count};
+use crate::wm::{LayoutContext, WindowManager, WindowManagerBackend};
 
 use super::build_cmds::{launch_cmds, print_launch_cmds};
 
@@ -40,16 +41,26 @@ pub fn launch_game(
     };
 
     // Setup WM with layout context
-    let orientation = if cfg.vertical_two_player {
-        LayoutOrientation::Vertical
-    } else {
-        LayoutOrientation::Horizontal
-    };
+    let player_count = instances.len();
+    let preset_id = cfg.layout_presets.get_for_count(player_count);
+    let preset = get_preset_by_id(preset_id)
+        .or_else(|| get_presets_for_count(player_count).first().copied())
+        .expect("No layout preset available");
+
+    // Get custom instance order (or default sequential)
+    let instance_order = cfg.layout_presets.get_order(preset_id, player_count);
+
+    // Reorder instances according to custom order for layout positioning
+    // The order maps region -> instance, so we need to place instance at its target region
+    let ordered_instances: Vec<Instance> = instance_order
+        .iter()
+        .map(|&i| instances.get(i).cloned().unwrap_or_else(|| instances[0].clone()))
+        .collect();
 
     let ctx = LayoutContext {
-        instances: instances.clone(),
+        instances: ordered_instances,
         monitors: monitors.to_vec(),
-        orientation,
+        preset,
     };
 
     println!("[splitux] Setting up {} window manager", wm.name());

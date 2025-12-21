@@ -136,6 +136,11 @@ pub struct Splitux {
 
     // Monitor polling state
     pub last_monitor_poll: std::time::Instant,
+
+    // Layout customization state
+    pub layout_custom_mode: bool,        // True when in custom assignment mode
+    pub layout_focused_region: usize,    // Which region is currently focused
+    pub layout_edit_order: Vec<usize>,   // Live editing buffer for instance order
 }
 
 impl Splitux {
@@ -277,6 +282,11 @@ impl Splitux {
 
             // Monitor polling state
             last_monitor_poll: std::time::Instant::now(),
+
+            // Layout customization state
+            layout_custom_mode: false,
+            layout_focused_region: 0,
+            layout_edit_order: Vec::new(),
         };
 
         app.spawn_task("Checking for updates", move || {

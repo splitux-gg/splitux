@@ -20,6 +20,8 @@ pub fn load_cfg() -> SplituxConfig {
             if !config.enable_kwin_script && config.window_manager == WindowManagerType::Auto {
                 config.window_manager = WindowManagerType::GamescopeOnly;
             }
+            // Migrate vertical_two_player bool to layout_presets
+            config.migrate();
             return config;
         }
     }

@@ -1,4 +1,5 @@
 use crate::audio::AudioSystemPreference;
+use crate::wm::presets::LayoutPresets;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -81,8 +82,12 @@ pub struct SplituxConfig {
     pub input_holding: bool,
     pub proton_version: String,
     pub proton_separate_pfxs: bool,
-    #[serde(default)]
+    /// Legacy field - migrated to layout_presets on load
+    #[serde(default, skip_serializing)]
     pub vertical_two_player: bool,
+    /// Layout presets for each player count
+    #[serde(default)]
+    pub layout_presets: LayoutPresets,
     pub pad_filter_type: PadFilterType,
     #[serde(default)]
     pub allow_multiple_instances_on_same_device: bool,
@@ -121,6 +126,7 @@ impl Default for SplituxConfig {
             proton_version: "".to_string(),
             proton_separate_pfxs: true,
             vertical_two_player: false,
+            layout_presets: LayoutPresets::default(),
             pad_filter_type: PadFilterType::NoSteamInput,
             allow_multiple_instances_on_same_device: false,
             disable_mount_gamedirs: false,
@@ -129,6 +135,18 @@ impl Default for SplituxConfig {
             master_profile: None,
             layout: LayoutState::default(),
             device_aliases: HashMap::new(),
+        }
+    }
+}
+
+impl SplituxConfig {
+    /// Migrate legacy vertical_two_player bool to layout_presets
+    /// Call this after loading config from disk
+    pub fn migrate(&mut self) {
+        // If vertical_two_player was explicitly set to true and layout_presets
+        // is still at default, migrate the setting
+        if self.vertical_two_player && self.layout_presets.two_player == "2p_horizontal" {
+            self.layout_presets.two_player = "2p_vertical".to_string();
         }
     }
 }
