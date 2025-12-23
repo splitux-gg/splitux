@@ -447,6 +447,46 @@ download_gamescope() {
     info "gamescope-splitux downloaded"
 }
 
+download_gptokeyb() {
+    local gptk_out="$SCRIPT_DIR/res/gptokeyb"
+    local gptk_repo="splitux-gg/gptokeyb-splitux"
+    local gptk_release
+    gptk_release=$(curl -fsSL "https://api.github.com/repos/$gptk_repo/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+
+    if [[ -z "$gptk_release" ]]; then
+        warn "Failed to fetch latest gptokeyb-splitux release, using fallback v1.0.0"
+        gptk_release="v1.0.0"
+    fi
+
+    # Check if already available
+    if [[ -f "$gptk_out/bin/gptokeyb" ]]; then
+        info "gptokeyb-splitux already available"
+        return 0
+    fi
+
+    step "Downloading gptokeyb-splitux..."
+    local tmp_dir=$(mktemp -d)
+    local base_url="https://github.com/$gptk_repo/releases/download/$gptk_release"
+
+    if ! curl -fsSL "$base_url/gptokeyb-splitux-$gptk_release.tar.gz" -o "$tmp_dir/gptokeyb.tar.gz"; then
+        warn "Failed to download gptokeyb-splitux"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Extract to temp first, then move files to proper location
+    mkdir -p "$gptk_out/bin"
+    tar -xzf "$tmp_dir/gptokeyb.tar.gz" -C "$tmp_dir/"
+    # Rename gptokeyb2 to gptokeyb for compatibility and move to bin/
+    [[ -f "$tmp_dir/gptokeyb2" ]] && mv "$tmp_dir/gptokeyb2" "$gptk_out/bin/gptokeyb"
+    # Copy interpose library if present
+    [[ -f "$tmp_dir/lib/libinterpose.so" ]] && cp "$tmp_dir/lib/libinterpose.so" "$gptk_out/bin/"
+    chmod +x "$gptk_out/bin/"*
+
+    rm -rf "$tmp_dir"
+    info "gptokeyb-splitux downloaded"
+}
+
 copy_steam_client_libs() {
     local gbe_out="$SCRIPT_DIR/res/goldberg"
     local steam_dir="$HOME/.local/share/Steam"
@@ -604,6 +644,8 @@ do_build() {
     local bep_pid=$!
     download_gamescope &
     local gsc_pid=$!
+    download_gptokeyb &
+    local gptk_pid=$!
     download_facepunch &
     local fp_pid=$!
 
@@ -614,6 +656,7 @@ do_build() {
     wait $gbe_pid 2>/dev/null || warn "Goldberg download may have failed"
     wait $bep_pid 2>/dev/null || warn "BepInEx download may have failed"
     wait $gsc_pid 2>/dev/null || warn "gamescope-splitux download may have failed"
+    wait $gptk_pid 2>/dev/null || warn "gptokeyb-splitux download may have failed"
     wait $fp_pid 2>/dev/null || warn "SplituxFacepunch download may have failed"
 
     # Setup build directory
@@ -635,6 +678,17 @@ do_build() {
         info "gamescope-splitux installed to build/bin/"
     else
         warn "gamescope-splitux not found - input holding support will be unavailable"
+    fi
+
+    # Copy gptokeyb from downloaded binaries
+    if [[ -f "$SCRIPT_DIR/res/gptokeyb/bin/gptokeyb" ]]; then
+        cp "$SCRIPT_DIR/res/gptokeyb/bin/gptokeyb" "$BUILD_DIR/bin/"
+        # Copy interpose library if present
+        cp "$SCRIPT_DIR/res/gptokeyb/bin/libinterpose"*.so "$BUILD_DIR/bin/" 2>/dev/null || true
+        chmod +x "$BUILD_DIR/bin/"*
+        info "gptokeyb installed to build/bin/"
+    else
+        warn "gptokeyb not found - controller-to-keyboard support will be unavailable"
     fi
 
     info "Build complete: $BUILD_DIR/"
@@ -690,6 +744,7 @@ do_clean() {
     rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
     rm -rf "$SCRIPT_DIR/res/bepinex/mono" "$SCRIPT_DIR/res/bepinex/mono-linux" "$SCRIPT_DIR/res/bepinex/il2cpp"
     rm -rf "$SCRIPT_DIR/res/gamescope-splitux"
+    rm -rf "$SCRIPT_DIR/res/gptokeyb/bin"
     cargo clean 2>/dev/null || true
     info "Clean complete"
 }
