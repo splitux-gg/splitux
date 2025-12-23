@@ -82,6 +82,20 @@ Backends are auto-detected by presence of config fields. Multiple backends can c
 - **Window Manager**: Hyprland or KDE Plasma
 - **Dependencies**: Gamescope, Bubblewrap, fuse-overlayfs, SDL2
 
+### GitHub Releases
+
+All builds are available on the [Releases](https://github.com/splitux-gg/splitux/releases) page:
+
+| Release | Description | When to Use |
+|---------|-------------|-------------|
+| **Latest** | Stable tagged releases (`v1.0.0`, etc.) | Production use |
+| **Nightly** | Built daily at 4 AM UTC from `main` | Latest features, may be unstable |
+
+Available formats:
+- `.AppImage` - Portable, no installation required
+- `.flatpak` - Sandboxed with automatic dependencies
+- `.tar.gz` / `.zip` - Native installation
+
 ### AppImage (Recommended)
 
 The easiest way to run Splitux. No installation required.
@@ -96,6 +110,25 @@ curl -LO https://github.com/splitux-gg/splitux/releases/download/nightly/Splitux
 # Make executable and run
 chmod +x Splitux-*.AppImage
 ./Splitux-*.AppImage
+```
+
+**Add to app launcher:**
+```bash
+# Move to a permanent location
+mkdir -p ~/.local/bin
+mv Splitux-*.AppImage ~/.local/bin/Splitux.AppImage
+
+# Create desktop entry
+cat > ~/.local/share/applications/splitux.desktop << 'EOF'
+[Desktop Entry]
+Name=Splitux
+Comment=Local co-op split-screen gaming for Linux
+Exec=$HOME/.local/bin/Splitux.AppImage
+Icon=splitux
+Terminal=false
+Type=Application
+Categories=Game;
+EOF
 ```
 
 ### Flatpak
@@ -116,6 +149,8 @@ flatpak install --user Splitux*.flatpak
 flatpak run gg.splitux.Splitux
 ```
 
+Flatpak automatically adds Splitux to your app launcher after installation.
+
 ### Tarball (Native)
 
 Traditional installation for maximum performance.
@@ -126,8 +161,11 @@ curl -LO https://github.com/splitux-gg/splitux/releases/latest/download/splitux-
 tar -xzf splitux-linux-x86_64.tar.gz
 cd splitux
 
-# Run
+# Run directly
 ./splitux
+
+# Or install to ~/.local (adds to app launcher)
+./install.sh
 ```
 
 **Note:** The tarball requires these dependencies to be installed on your system:

@@ -67,3 +67,17 @@ pub static BIN_GSC_SPLITUX: LazyLock<PathBuf> = LazyLock::new(|| {
     let bin = env::current_exe().unwrap().parent().unwrap().join("bin");
     bin.join("gamescope-splitux")
 });
+
+pub static BIN_GPTOKEYB: LazyLock<PathBuf> = LazyLock::new(|| {
+    let bin_candidates = [PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")];
+
+    for candidate in &bin_candidates {
+        let bin = candidate.join("gptokeyb");
+        if bin.exists() {
+            return bin;
+        }
+    }
+
+    let bin = env::current_exe().unwrap().parent().unwrap().join("bin");
+    bin.join("gptokeyb")
+});

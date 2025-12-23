@@ -249,10 +249,13 @@ impl HyprlandManager {
                 win.address, win.class, win.width, win.height, win.x, win.y
             );
 
+            // Map window index to region index using custom layout order
+            let region_idx = ctx.instance_to_region.get(i).copied().unwrap_or(i);
+
             // Use shared layout calculation with LOGICAL dimensions
             let geom: WindowGeometry = calculate_geometry_from_preset(
                 ctx.preset,
-                i,
+                region_idx,
                 logical_x,
                 logical_y,
                 logical_width,

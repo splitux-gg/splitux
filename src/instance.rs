@@ -1,5 +1,5 @@
 use crate::Monitor;
-use crate::app::PartyConfig;
+use crate::app::SplituxConfig;
 use crate::profiles::GUEST_NAMES;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ pub struct Instance {
 pub fn set_instance_resolutions(
     instances: &mut Vec<Instance>,
     primary_monitor: &Monitor,
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
 ) {
     let (basewidth, baseheight) = (primary_monitor.width(), primary_monitor.height());
     let playercount = instances.len();
@@ -24,7 +24,9 @@ pub fn set_instance_resolutions(
         let (mut w, mut h) = match playercount {
             1 => (basewidth, baseheight),
             2 => {
-                if cfg.vertical_two_player {
+                // Check layout_presets for vertical vs horizontal
+                let is_vertical = cfg.layout_presets.two_player.contains("vertical");
+                if is_vertical {
                     (basewidth / 2, baseheight)
                 } else {
                     (basewidth, baseheight / 2)
@@ -45,7 +47,7 @@ pub fn set_instance_resolutions(
 pub fn set_instance_resolutions_multimonitor(
     instances: &mut Vec<Instance>,
     monitors: &Vec<Monitor>,
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
 ) {
     let mut mon_playercounts: Vec<usize> = vec![0; monitors.len()];
     for instance in instances.iter() {
@@ -63,7 +65,9 @@ pub fn set_instance_resolutions_multimonitor(
         let (mut w, mut h) = match playercount {
             1 => (basewidth, baseheight),
             2 => {
-                if cfg.vertical_two_player {
+                // Check layout_presets for vertical vs horizontal
+                let is_vertical = cfg.layout_presets.two_player.contains("vertical");
+                if is_vertical {
                     (basewidth / 2, baseheight)
                 } else {
                     (basewidth, baseheight / 2)

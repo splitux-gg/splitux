@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::app::{PadFilterType, PartyConfig};
+use crate::app::{PadFilterType, SplituxConfig};
 use crate::backend;
 use crate::backend::facepunch::get_linux_bepinex_env;
 use crate::backend::photon::generate_all_configs as photon_generate_configs;
@@ -28,7 +28,7 @@ pub fn launch_cmds(
     h: &Handler,
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
     audio_sink_envs: &[String],
 ) -> Result<Vec<std::process::Command>, Box<dyn std::error::Error>> {
     let win = h.win();
@@ -102,7 +102,7 @@ pub fn launch_cmds(
 
             // BepInEx doorstop requires native winhttp.dll override
             // Without this, Wine uses its builtin and BepInEx never loads
-            if h.has_photon() || h.has_facepunch() {
+            if h.has_photon() || h.has_facepunch() || h.has_goldberg_plugin() {
                 cmd.env("WINEDLLOVERRIDES", "winhttp=n,b");
             }
         }
@@ -140,7 +140,10 @@ pub fn launch_cmds(
             }
 
             // Set up SDL environment inside container
-            bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
+            // Skip SDL config entirely if input isolation disabled (like test-repo.sh)
+            if !h.disable_input_isolation {
+                bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
+            }
 
             // Set up audio routing inside container
             if let Some(sink_name) = audio_sink_envs.get(i) {
@@ -166,8 +169,10 @@ pub fn launch_cmds(
                 }
             }
 
-            // Block unassigned input devices
-            bwrap::block_unassigned_devices(&mut cmd, input_devices, &instance.devices, i);
+            // Block unassigned input devices (unless disabled for mods that handle input internally)
+            if !h.disable_input_isolation {
+                bwrap::block_unassigned_devices(&mut cmd, input_devices, &instance.devices, i);
+            }
 
             // 5. Profile bindings
             if win {

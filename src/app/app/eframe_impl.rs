@@ -194,8 +194,13 @@ impl eframe::App for Splitux {
             }
         }
         if let Some(start) = self.loading_since {
-            if start.elapsed() > std::time::Duration::from_secs(60) {
-                // Give up waiting after one minute
+            // Don't timeout during game launch (games can run for hours)
+            let is_launch = self
+                .loading_msg
+                .as_ref()
+                .is_some_and(|m| m.starts_with("Launching"));
+            if !is_launch && start.elapsed() > std::time::Duration::from_secs(60) {
+                // Give up waiting after one minute (for non-launch operations)
                 self.loading_msg = Some("Operation timed out".to_string());
             }
         }

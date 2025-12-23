@@ -43,12 +43,28 @@ pub struct PanelState {
 }
 
 /// UI layout state (panel positions, sizes, collapse state)
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LayoutState {
     #[serde(default)]
     pub games_panel: PanelState,
-    #[serde(default)]
+    #[serde(default = "default_devices_panel")]
     pub devices_panel: PanelState,
+}
+
+fn default_devices_panel() -> PanelState {
+    PanelState {
+        collapsed: true, // Devices panel collapsed by default
+        custom_width: None,
+    }
+}
+
+impl Default for LayoutState {
+    fn default() -> Self {
+        Self {
+            games_panel: PanelState::default(),
+            devices_panel: default_devices_panel(),
+        }
+    }
 }
 
 /// Audio routing configuration for per-instance audio output
@@ -67,7 +83,6 @@ pub struct AudioConfig {
 }
 
 /// Main application configuration
-/// (renamed from PartyConfig)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SplituxConfig {
     #[serde(default)]
@@ -108,6 +123,10 @@ pub struct SplituxConfig {
     /// Custom device names (maps device unique ID -> user-assigned name)
     #[serde(default)]
     pub device_aliases: HashMap<String, String>,
+    /// Delay before each instance spawn for input initialization (seconds)
+    /// Allows previous instance's SDL/libinput to complete before spawning next
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_init_delay: Option<f64>,
 }
 
 fn default_enable_kwin_script() -> bool {
@@ -135,6 +154,7 @@ impl Default for SplituxConfig {
             master_profile: None,
             layout: LayoutState::default(),
             device_aliases: HashMap::new(),
+            input_init_delay: None,
         }
     }
 }
@@ -151,5 +171,3 @@ impl SplituxConfig {
     }
 }
 
-/// Type alias for backward compatibility during migration
-pub type PartyConfig = SplituxConfig;

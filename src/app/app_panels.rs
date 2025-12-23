@@ -71,9 +71,10 @@ impl Splitux {
                 }
 
                 ui.add_space(8.0);
-                let version_label = match self.needs_update {
-                    true => format!("v{} (update available)", env!("CARGO_PKG_VERSION")),
-                    false => format!("v{}", env!("CARGO_PKG_VERSION")),
+                let version_label = if self.needs_update.load(std::sync::atomic::Ordering::Relaxed) {
+                    format!("v{} (update available)", env!("CARGO_PKG_VERSION"))
+                } else {
+                    format!("v{}", env!("CARGO_PKG_VERSION"))
                 };
                 ui.label(RichText::new(version_label).small().weak());
             });
@@ -303,7 +304,7 @@ impl Splitux {
 
     /// Settings bottom buttons for left panel
     fn display_settings_bottom_buttons_panel(&mut self, ui: &mut Ui) {
-        use super::config::{save_cfg, PartyConfig};
+        use super::config::{save_cfg, SplituxConfig};
         use crate::input::scan_input_devices;
 
         let is_buttons_focused = self.settings_focus == SettingsFocus::BottomButtons;
@@ -317,7 +318,7 @@ impl Splitux {
         if restore_response.clicked()
             || (is_buttons_focused && self.settings_button_index == 1 && self.activate_focused)
         {
-            self.options = PartyConfig::default();
+            self.options = SplituxConfig::default();
             self.input_devices = scan_input_devices(&self.options.pad_filter_type);
             self.refresh_device_display_names();
         }

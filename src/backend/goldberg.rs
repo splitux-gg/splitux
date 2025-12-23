@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::handler::Handler;
 use crate::instance::Instance;
+use crate::mods::PluginSource;
 use crate::profiles::generate_steam_id;
 
 mod operations;
@@ -40,6 +41,11 @@ pub struct GoldbergSettings {
     /// Custom Goldberg settings files (goldberg.settings.*)
     #[serde(default)]
     pub settings: HashMap<String, String>,
+
+    /// Plugin source for BepInEx-based plugins (goldberg.plugin.*)
+    /// When specified, BepInEx will be installed and the plugin fetched from the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<PluginSource>,
 }
 
 /// Goldberg backend implementation
@@ -117,6 +123,8 @@ impl Backend for Goldberg {
             is_windows,
             &self.settings.settings,
             self.settings.disable_networking,
+            &self.settings.plugin,
+            game_root,
         )
     }
 }

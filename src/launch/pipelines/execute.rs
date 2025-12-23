@@ -1,10 +1,13 @@
 //! Game execution pipeline
 
-use crate::app::{PartyConfig, WindowManagerType};
+use std::process::Child;
+
+use crate::app::{SplituxConfig, WindowManagerType};
 use crate::audio::{
     resolve_audio_system, setup_audio_session, teardown_audio_session, AudioContext, AudioSystem,
     VirtualSink,
 };
+use crate::gptokeyb;
 use crate::handler::Handler;
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
@@ -20,10 +23,13 @@ pub fn launch_game(
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
     monitors: &[Monitor],
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Set up audio routing if enabled
     let (audio_system, virtual_sinks, audio_sink_envs) = setup_audio_routing(instances, cfg);
+
+    // Set up gptokeyb daemons if enabled
+    let mut gptokeyb_handles = setup_gptokeyb_daemons(h, input_devices, instances);
 
     let new_cmds = launch_cmds(h, input_devices, instances, cfg, &audio_sink_envs)?;
     print_launch_cmds(&new_cmds);
@@ -43,33 +49,49 @@ pub fn launch_game(
     // Setup WM with layout context
     let player_count = instances.len();
     let preset_id = cfg.layout_presets.get_for_count(player_count);
-    let preset = get_preset_by_id(preset_id)
-        .or_else(|| get_presets_for_count(player_count).first().copied())
+
+    println!("[splitux] Layout: preset_id from config = '{}'", preset_id);
+
+    let preset_found = get_preset_by_id(preset_id);
+    let preset = preset_found
+        .or_else(|| {
+            println!("[splitux] Layout: preset '{}' not found, using fallback", preset_id);
+            get_presets_for_count(player_count).first().copied()
+        })
         .expect("No layout preset available");
 
-    // Get custom instance order (or default sequential)
-    let instance_order = cfg.layout_presets.get_order(preset_id, player_count);
+    println!("[splitux] Layout: using preset '{}' ({})", preset.id, preset.name);
 
-    // Reorder instances according to custom order for layout positioning
-    // The order maps region -> instance, so we need to place instance at its target region
-    let ordered_instances: Vec<Instance> = instance_order
-        .iter()
-        .map(|&i| instances.get(i).cloned().unwrap_or_else(|| instances[0].clone()))
-        .collect();
+    // Get custom instance order (or default sequential)
+    // instance_order[region] = instance_idx (which instance goes in which region)
+    let instance_order = cfg.layout_presets.get_order(preset_id, player_count);
+    println!("[splitux] Layout: instance_order = {:?}", instance_order);
+
+    // Compute inverse mapping: instance_to_region[instance] = region
+    // This tells us which region each spawned window should go to
+    let mut instance_to_region = vec![0; player_count];
+    for (region, &instance_idx) in instance_order.iter().enumerate() {
+        if instance_idx < player_count {
+            instance_to_region[instance_idx] = region;
+        }
+    }
+    println!("[splitux] Layout: instance_to_region = {:?}", instance_to_region);
 
     let ctx = LayoutContext {
-        instances: ordered_instances,
+        instances: instances.to_vec(),
         monitors: monitors.to_vec(),
         preset,
+        instance_to_region,
     };
 
     println!("[splitux] Setting up {} window manager", wm.name());
     wm.setup(&ctx)?;
 
-    let sleep_time = match h.pause_between_starts {
-        Some(f) => f,
-        None => 0.5,
-    };
+    // Delay after each spawn for Vulkan/GPU initialization
+    let vulkan_init_delay = 6.0;
+
+    // Delay before each spawn for input/SDL initialization
+    let input_init_delay = cfg.input_init_delay.unwrap_or(1.0);
 
     let mut handles = Vec::new();
 
@@ -80,6 +102,15 @@ pub fn launch_game(
 
     let mut i = 0;
     for mut cmd in new_cmds {
+        // Input initialization delay before spawn (except first instance)
+        if i > 0 && input_init_delay > 0.0 {
+            println!(
+                "[splitux] Input init delay: {}ms",
+                (input_init_delay * 1000.0) as u32
+            );
+            std::thread::sleep(std::time::Duration::from_secs_f64(input_init_delay));
+        }
+
         if redirect_stdout {
             cmd.stdout(std::process::Stdio::null());
             cmd.stderr(std::process::Stdio::null());
@@ -87,8 +118,13 @@ pub fn launch_game(
         let handle = cmd.spawn()?;
         handles.push(handle);
 
+        // Vulkan/GPU initialization delay after spawn (except last instance)
         if i < instances.len() - 1 {
-            std::thread::sleep(std::time::Duration::from_secs_f64(sleep_time));
+            println!(
+                "[splitux] Vulkan init delay: {}ms",
+                (vulkan_init_delay * 1000.0) as u32
+            );
+            std::thread::sleep(std::time::Duration::from_secs_f64(vulkan_init_delay));
         }
         i += 1;
     }
@@ -107,6 +143,9 @@ pub fn launch_game(
     println!("[splitux] Tearing down {} window manager", wm.name());
     wm.teardown()?;
 
+    // Teardown gptokeyb daemons
+    gptokeyb::terminate_all(&mut gptokeyb_handles);
+
     // Teardown audio routing
     if !virtual_sinks.is_empty() {
         if let Err(e) = teardown_audio_session(audio_system, &virtual_sinks) {
@@ -122,7 +161,7 @@ pub fn launch_game(
 /// Returns (audio_system, virtual_sinks, sink_env_vars_per_instance)
 fn setup_audio_routing(
     instances: &[Instance],
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
 ) -> (AudioSystem, Vec<VirtualSink>, Vec<String>) {
     if !cfg.audio.enabled {
         // Audio routing disabled, return empty vectors
@@ -158,4 +197,40 @@ fn setup_audio_routing(
             (audio_system, vec![], vec![String::new(); instances.len()])
         }
     }
+}
+
+/// Set up gptokeyb daemons for all instances
+///
+/// Returns a vector of child handles (Some for instances with gptokeyb, None otherwise)
+fn setup_gptokeyb_daemons(
+    h: &Handler,
+    input_devices: &[DeviceInfo],
+    instances: &[Instance],
+) -> Vec<Option<Child>> {
+    if !h.has_gptokeyb() {
+        return (0..instances.len()).map(|_| None).collect();
+    }
+
+    if !gptokeyb::is_available() {
+        println!("[splitux] gptokeyb - Binary not found, skipping controller→keyboard translation");
+        return (0..instances.len()).map(|_| None).collect();
+    }
+
+    println!(
+        "[splitux] gptokeyb - Setting up controller→keyboard translation (profile: {})",
+        h.gptokeyb.profile
+    );
+
+    // Collect device indices per instance
+    let instance_device_indices: Vec<Vec<usize>> = instances
+        .iter()
+        .map(|inst| inst.devices.clone())
+        .collect();
+
+    gptokeyb::spawn_all_daemons(
+        &h.gptokeyb,
+        &h.path_handler,
+        input_devices,
+        &instance_device_indices,
+    )
 }

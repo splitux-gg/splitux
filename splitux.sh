@@ -413,8 +413,14 @@ download_goldberg() {
 
 download_gamescope() {
     local gsc_out="$SCRIPT_DIR/res/gamescope-splitux"
-    local gsc_repo="gabrielgad/gamescope-splitux"
-    local gsc_release="v1.0.0"
+    local gsc_repo="splitux-gg/gamescope-splitux"
+    local gsc_release
+    gsc_release=$(curl -fsSL "https://api.github.com/repos/splitux-gg/gamescope-splitux/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+
+    if [[ -z "$gsc_release" ]]; then
+        warn "Failed to fetch latest gamescope-splitux release, using fallback v1.0.1"
+        gsc_release="v1.0.1"
+    fi
 
     # Check if already available
     if [[ -f "$gsc_out/bin/gamescope" ]]; then

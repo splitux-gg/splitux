@@ -1,0 +1,39 @@
+# Mouse Only Profile - Controller to mouse only
+# Right stick = mouse movement, triggers = clicks
+# Minimal keyboard mapping for basic navigation
+
+# Right stick mouse movement
+right_analog_as_mouse = true
+
+# Mouse clicks
+l2 = mouse_right
+r2 = mouse_left
+lt = mouse_right
+rt = mouse_left
+
+# Face buttons for basic navigation
+a = enter
+b = esc
+x = tab
+y = backspace
+
+# Shoulder buttons for scrolling
+l1 = mouse_scroll_up
+r1 = mouse_scroll_down
+
+# D-pad as arrow keys
+up = up
+down = down
+left = left
+right = right
+
+# Special buttons
+back = esc
+start = enter
+
+# Mouse settings - slightly slower for precision
+mouse_scale = 400
+mouse_delay = 16
+deadzone_x = 2000
+deadzone_y = 2000
+deadzone_triggers = 3000

@@ -208,9 +208,7 @@ impl Splitux {
                             _ => {}
                         }
                     } else {
-                        println!("[splitux] Nav Up - focus before: {:?}", self.instance_focus);
                         self.handle_instance_up();
-                        println!("[splitux] Nav Up - focus after: {:?}", self.instance_focus);
                     }
                 }
                 Some(PadButton::Down) => {
@@ -234,9 +232,7 @@ impl Splitux {
                             self.dropdown_selection_idx += 1;
                         }
                     } else {
-                        println!("[splitux] Nav Down - focus before: {:?}", self.instance_focus);
                         self.handle_instance_down();
-                        println!("[splitux] Nav Down - focus after: {:?}", self.instance_focus);
                     }
                 }
                 Some(PadButton::Left) => {
@@ -290,6 +286,14 @@ impl Splitux {
             }
             InstanceFocus::InstanceCard(idx, element) => {
                 let idx = *idx;
+
+                // Check if SetMaster button is visible (named profile that's not already master)
+                let instance = self.instances.get(idx);
+                let profile_name = instance.and_then(|i| self.profiles.get(i.profselection));
+                let is_named = profile_name.is_some_and(|p| !p.starts_with("Guest"));
+                let is_master = profile_name.is_some_and(|p| self.options.master_profile.as_ref() == Some(p));
+                let set_master_visible = is_named && !is_master;
+
                 let new_element = match element {
                     InstanceCardFocus::Profile => {
                         if idx > 0 {
@@ -304,12 +308,20 @@ impl Splitux {
                         }
                     }
                     InstanceCardFocus::SetMaster => InstanceCardFocus::Profile,
-                    InstanceCardFocus::Monitor => InstanceCardFocus::SetMaster,
+                    InstanceCardFocus::Monitor => {
+                        if set_master_visible {
+                            InstanceCardFocus::SetMaster
+                        } else {
+                            InstanceCardFocus::Profile
+                        }
+                    }
                     InstanceCardFocus::InviteDevice => {
                         if self.options.gamescope_sdl_backend {
                             InstanceCardFocus::Monitor
-                        } else {
+                        } else if set_master_visible {
                             InstanceCardFocus::SetMaster
+                        } else {
+                            InstanceCardFocus::Profile
                         }
                     }
                     InstanceCardFocus::Device(0) => InstanceCardFocus::InviteDevice,
@@ -344,8 +356,24 @@ impl Splitux {
             InstanceFocus::InstanceCard(idx, element) => {
                 let idx = *idx;
                 let dev_count = self.instances.get(idx).map(|inst| inst.devices.len()).unwrap_or(0);
+
+                // Check if SetMaster button is visible (named profile that's not already master)
+                let instance = self.instances.get(idx);
+                let profile_name = instance.and_then(|i| self.profiles.get(i.profselection));
+                let is_named = profile_name.is_some_and(|p| !p.starts_with("Guest"));
+                let is_master = profile_name.is_some_and(|p| self.options.master_profile.as_ref() == Some(p));
+                let set_master_visible = is_named && !is_master;
+
                 let new_element = match element {
-                    InstanceCardFocus::Profile => InstanceCardFocus::SetMaster,
+                    InstanceCardFocus::Profile => {
+                        if set_master_visible {
+                            InstanceCardFocus::SetMaster
+                        } else if self.options.gamescope_sdl_backend {
+                            InstanceCardFocus::Monitor
+                        } else {
+                            InstanceCardFocus::InviteDevice
+                        }
+                    }
                     InstanceCardFocus::SetMaster => {
                         if self.options.gamescope_sdl_backend {
                             InstanceCardFocus::Monitor

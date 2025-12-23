@@ -14,6 +14,7 @@ use crate::backend::{
     FacepunchSettings as BackendFacepunchSettings, GoldbergSettings as BackendGoldbergSettings,
     MultiplayerBackend, PhotonSettings as BackendPhotonSettings,
 };
+use crate::gptokeyb::GptokeybSettings;
 use crate::util::SanitizePath;
 
 use serde::{Deserialize, Serialize};
@@ -83,8 +84,6 @@ pub struct Handler {
     /// DEPRECATED: Use `backend: goldberg` instead. Kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_goldberg: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pause_between_starts: Option<f64>,
     /// Game-specific Goldberg settings files.
     /// Keys are filenames (e.g., "force_lobby_type.txt", "invite_all.txt")
     /// Values are file contents (use empty string for empty files)
@@ -138,6 +137,14 @@ pub struct Handler {
     /// Disable bwrap container (may be needed for games with networking issues)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disable_bwrap: bool,
+    /// Disable input device isolation (for games where mods handle input internally)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable_input_isolation: bool,
+
+    /// gptokeyb settings for controller→keyboard/mouse translation
+    /// Enable for games without native controller support
+    #[serde(default, skip_serializing_if = "GptokeybSettings::is_default")]
+    pub gptokeyb: GptokeybSettings,
 
     /// Game config file patches - modify game config files with key-value replacements
     /// Outer key: file path relative to game root (e.g., "conf/settings.cfg")
@@ -195,8 +202,6 @@ impl Default for Handler {
             sdl2_override: SDL2Override::No,
             proton_path: String::new(),
 
-            pause_between_starts: None,
-
             backend: MultiplayerBackend::None,
             use_goldberg: false,
             steam_appid: None,
@@ -217,6 +222,8 @@ impl Default for Handler {
 
             game_null_paths: Vec::new(),
             disable_bwrap: false,
+            disable_input_isolation: false,
+            gptokeyb: GptokeybSettings::default(),
             game_patches: HashMap::new(),
 
             original_save_path: String::new(),
@@ -277,6 +284,7 @@ impl Handler {
                     disable_networking: self.goldberg_disable_networking,
                     networking_sockets: self.goldberg_networking_sockets,
                     settings: self.goldberg_settings.clone(),
+                    plugin: None, // Legacy handlers don't have plugin support
                 });
             }
         }
@@ -399,6 +407,15 @@ impl Handler {
     /// Check if Goldberg backend is enabled
     pub fn has_goldberg(&self) -> bool {
         self.goldberg.is_some()
+    }
+
+    /// Check if Goldberg backend has a plugin configured (needs BepInEx)
+    pub fn has_goldberg_plugin(&self) -> bool {
+        self.goldberg
+            .as_ref()
+            .and_then(|g| g.plugin.as_ref())
+            .map(|p| !p.is_empty())
+            .unwrap_or(false)
     }
 
     /// Check if Photon backend is enabled
@@ -535,6 +552,19 @@ impl Handler {
     /// Get platform-specific app identifier (e.g., Steam appid as string)
     pub fn platform_app_id(&self) -> Option<String> {
         self.get_platform().app_identifier()
+    }
+
+    // ============= GPTOKEYB HELPER METHODS =============
+
+    /// Check if gptokeyb is enabled for this handler
+    pub fn has_gptokeyb(&self) -> bool {
+        self.gptokeyb.is_enabled()
+    }
+
+    /// Get gptokeyb settings reference (for UI)
+    #[allow(dead_code)]
+    pub fn gptokeyb_ref(&self) -> &GptokeybSettings {
+        &self.gptokeyb
     }
 }
 

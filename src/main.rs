@@ -1,9 +1,11 @@
 mod app;
 mod audio;
 mod backend;
+mod bepinex;
 mod bwrap;
 mod game_patches;
 mod gamescope;
+mod gptokeyb;
 mod handler;
 mod input;
 mod instance;

@@ -8,6 +8,8 @@ mod eframe_impl;
 mod helpers;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use super::config::*;
 use super::focus::FocusManager;
@@ -25,8 +27,8 @@ pub use crate::ui::{ActiveDropdown, FocusPane, InstanceFocus, MenuPage, Registry
 
 pub struct Splitux {
     pub installed_steamapps: Vec<Option<steamlocate::App>>,
-    pub needs_update: bool,
-    pub options: PartyConfig,
+    pub needs_update: Arc<AtomicBool>,
+    pub options: SplituxConfig,
     pub cur_page: MenuPage,
     pub infotext: String,
 
@@ -153,7 +155,7 @@ impl Splitux {
         // Extract panel layout state before options is moved
         let games_panel_collapsed = options.layout.games_panel.collapsed;
         let games_panel_width = options.layout.games_panel.custom_width.unwrap_or(160.0);
-        let devices_panel_collapsed = options.layout.devices_panel.collapsed;
+        let devices_panel_collapsed = true; // Always start collapsed
         let devices_panel_width = options.layout.devices_panel.custom_width.unwrap_or(200.0);
         let handlers = match handler_lite {
             Some(_) => Vec::new(),
@@ -176,7 +178,7 @@ impl Splitux {
             }
         };
 
-        let profiles = scan_profiles(false);
+        let profiles = scan_profiles(true);
 
         // Scan audio devices
         let audio_system = resolve_audio_system(options.audio.system);
@@ -195,9 +197,9 @@ impl Splitux {
             );
         }
 
-        let mut app = Self {
+        let app = Self {
             installed_steamapps: get_installed_steamapps(),
-            needs_update: false,
+            needs_update: Arc::new(AtomicBool::new(false)),
             options,
             cur_page,
             infotext: String::new(),
@@ -289,8 +291,11 @@ impl Splitux {
             layout_edit_order: Vec::new(),
         };
 
-        app.spawn_task("Checking for updates", move || {
-            app.needs_update = check_for_splitux_update();
+        let needs_update = app.needs_update.clone();
+        std::thread::spawn(move || {
+            if check_for_splitux_update() {
+                needs_update.store(true, Ordering::Relaxed);
+            }
         });
 
         app

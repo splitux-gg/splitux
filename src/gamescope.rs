@@ -5,7 +5,7 @@
 
 use std::process::Command;
 
-use crate::app::PartyConfig;
+use crate::app::SplituxConfig;
 use crate::input::DeviceInfo;
 use crate::input::DeviceType;
 use crate::instance::Instance;
@@ -14,7 +14,7 @@ use crate::paths::BIN_GSC_SPLITUX;
 /// Create the base gamescope command
 ///
 /// Returns a Command for either gamescope or gamescope-splitux based on config
-pub fn create_command(cfg: &PartyConfig) -> Command {
+pub fn create_command(cfg: &SplituxConfig) -> Command {
     let gamescope = match cfg.input_holding {
         true => BIN_GSC_SPLITUX.as_path(),
         false => std::path::Path::new("gamescope"),
@@ -43,7 +43,7 @@ pub fn setup_env(cmd: &mut Command) {
 }
 
 /// Add gamescope command-line arguments
-pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &PartyConfig) {
+pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &SplituxConfig) {
     // Resolution
     cmd.args([
         "-W",
@@ -75,7 +75,7 @@ pub fn add_input_holding_args(
     cmd: &mut Command,
     instance: &Instance,
     input_devices: &[DeviceInfo],
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
 ) {
     if !cfg.input_holding {
         return;

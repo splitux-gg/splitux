@@ -30,6 +30,9 @@ pub struct LayoutContext {
     pub monitors: Vec<Monitor>,
     /// Layout preset for positioning windows
     pub preset: &'static presets::LayoutPreset,
+    /// Maps spawn index to region index (for custom layout ordering)
+    /// e.g., [1, 0] means window 0 goes to region 1, window 1 goes to region 0
+    pub instance_to_region: Vec<usize>,
 }
 
 /// The core window manager trait

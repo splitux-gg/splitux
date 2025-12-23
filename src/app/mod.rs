@@ -14,4 +14,4 @@ mod pages_settings;
 pub mod theme;
 
 pub use app::Splitux;
-pub use config::{load_photon_ids, PadFilterType, PartyConfig, WindowManagerType};
+pub use config::{load_photon_ids, PadFilterType, SplituxConfig, WindowManagerType};

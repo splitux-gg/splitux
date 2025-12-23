@@ -102,6 +102,43 @@ fn extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Fetch BepInExPack from Thunderstore for a specific community.
+/// Returns the path to the extracted BepInExPack directory.
+///
+/// Most communities use bbepis/BepInExPack version 5.4.2108
+pub fn fetch_bepinex_pack(
+    community: &str,
+    cache_base: &Path,
+) -> Result<PathBuf, Box<dyn Error>> {
+    // Standard BepInExPack used by most communities
+    let source = PluginSource {
+        source: "thunderstore".to_string(),
+        community: community.to_string(),
+        package: "bbepis/BepInExPack".to_string(),
+        version: "5.4.2108".to_string(),
+    };
+
+    let cache_dir = source.cache_path(cache_base);
+
+    // Check if already cached
+    if cache_dir.exists() {
+        eprintln!(
+            "[mods] Using cached BepInExPack for {}",
+            community
+        );
+        return Ok(cache_dir);
+    }
+
+    // Download and extract
+    eprintln!(
+        "[mods] Downloading BepInExPack for {} from Thunderstore...",
+        community
+    );
+    download_and_extract(&source, &cache_dir)?;
+
+    Ok(cache_dir)
+}
+
 /// Recursively collect all files in a directory
 fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut files = Vec::new();

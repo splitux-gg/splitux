@@ -6,13 +6,13 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::app::PartyConfig;
+use crate::app::SplituxConfig;
 use crate::handler::Handler;
 use crate::paths::{PATH_PARTY, PATH_STEAM, BIN_UMU_RUN};
 use crate::util::resolve_proton_path;
 
 /// Get the Wine prefix path for an instance
-pub fn get_prefix_path(cfg: &PartyConfig, instance_idx: usize) -> PathBuf {
+pub fn get_prefix_path(cfg: &SplituxConfig, instance_idx: usize) -> PathBuf {
     PATH_PARTY.join("prefixes").join(match cfg.proton_separate_pfxs {
         true => (instance_idx + 1).to_string(),
         false => "1".to_string(),
@@ -26,7 +26,7 @@ pub fn get_prefix_path(cfg: &PartyConfig, instance_idx: usize) -> PathBuf {
 pub fn setup_env(
     cmd: &mut Command,
     handler: &Handler,
-    cfg: &PartyConfig,
+    cfg: &SplituxConfig,
     instance_idx: usize,
 ) {
     let path_pfx = get_prefix_path(cfg, instance_idx);
@@ -84,6 +84,6 @@ pub fn uses_direct_proton(handler: &Handler) -> bool {
 }
 
 /// Get the Wine prefix user directory path for binding profile data
-pub fn get_prefix_user_path(cfg: &PartyConfig, instance_idx: usize) -> PathBuf {
+pub fn get_prefix_user_path(cfg: &SplituxConfig, instance_idx: usize) -> PathBuf {
     get_prefix_path(cfg, instance_idx).join("drive_c/users/steamuser")
 }
