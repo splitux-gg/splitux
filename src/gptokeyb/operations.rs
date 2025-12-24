@@ -53,11 +53,17 @@ pub fn wait_for_virtual_device(instance_id: usize, timeout_ms: u64) -> Option<Pa
     while start.elapsed().as_millis() < timeout_ms as u128 {
         if let Ok(entries) = std::fs::read_dir("/sys/class/input") {
             for entry in entries.flatten() {
+                // Only look for eventN devices (skip mouseN, jsN, etc.)
+                let entry_name = entry.file_name();
+                let entry_str = entry_name.to_string_lossy();
+                if !entry_str.starts_with("event") {
+                    continue;
+                }
+
                 let name_path = entry.path().join("device/name");
                 if let Ok(name) = std::fs::read_to_string(&name_path) {
                     if name.trim() == expected_name {
-                        let event_name = entry.file_name();
-                        return Some(PathBuf::from("/dev/input").join(event_name));
+                        return Some(PathBuf::from("/dev/input").join(entry_name));
                     }
                 }
             }
@@ -86,6 +92,11 @@ pub fn spawn_daemon(
         .ok_or_else(|| format!("gptokeyb profile '{}' not found", settings.profile))?;
 
     let mut cmd = Command::new(BIN_GPTOKEYB.as_path());
+
+    // Set LD_LIBRARY_PATH so gptokeyb can find libinterpose.so
+    if let Some(bin_dir) = BIN_GPTOKEYB.parent() {
+        cmd.env("LD_LIBRARY_PATH", bin_dir);
+    }
 
     // Config file
     cmd.arg("-c").arg(&config_path);
