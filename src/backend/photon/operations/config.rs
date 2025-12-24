@@ -42,21 +42,22 @@ pub fn generate_instance_config(
     }
 
     // Generate config content
+    // Note: Field names must match what the LocalMultiplayer mod expects
     let config = format!(
-        r#"[Photon]
-AppId={}
-VoiceAppId={}
-
-[LocalMultiplayer]
+        r#"[LocalMultiplayer]
 PlayerIndex={}
 TotalPlayers={}
 ListenPort={}
+
+[Photon]
+AppIdRealtime={}
+AppIdVoice={}
 "#,
-        photon_ids.pun_app_id,
-        photon_ids.voice_app_id,
         instance_idx,
         total_instances,
         PHOTON_BASE_PORT + instance_idx as u16,
+        photon_ids.pun_app_id,
+        photon_ids.voice_app_id,
     );
 
     fs::write(&config_path, config)?;

@@ -2,14 +2,20 @@
 # Right stick = mouse movement, triggers = clicks
 # Minimal keyboard mapping for basic navigation
 
+[config]
+deadzone_mode = axial
+deadzone = 2000
+deadzone_scale = 7
+mouse_scale = 400
+mouse_delay = 16
+
+[controls]
 # Right stick mouse movement
-right_analog_as_mouse = true
+right_analog = mouse_movement
 
 # Mouse clicks
 l2 = mouse_right
 r2 = mouse_left
-lt = mouse_right
-rt = mouse_left
 
 # Face buttons for basic navigation
 a = enter
@@ -18,8 +24,8 @@ x = tab
 y = backspace
 
 # Shoulder buttons for scrolling
-l1 = mouse_scroll_up
-r1 = mouse_scroll_down
+l1 = mouse_wheel_up
+r1 = mouse_wheel_down
 
 # D-pad as arrow keys
 up = up
@@ -30,10 +36,3 @@ right = right
 # Special buttons
 back = esc
 start = enter
-
-# Mouse settings - slightly slower for precision
-mouse_scale = 400
-mouse_delay = 16
-deadzone_x = 2000
-deadzone_y = 2000
-deadzone_triggers = 3000

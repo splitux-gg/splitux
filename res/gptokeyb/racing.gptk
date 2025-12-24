@@ -1,9 +1,15 @@
 # Racing Profile - Controller for racing games
 # Triggers = throttle/brake, Left stick = steering
 
+[config]
+deadzone_mode = axial
+deadzone = 3000
+deadzone_scale = 7
+
+[controls]
 # Triggers as throttle/brake
-rt = w
-lt = s
+r2 = w
+l2 = s
 
 # Left stick steering
 left_analog_left = a
@@ -24,8 +30,6 @@ y = q
 # Shoulder buttons for gear/nitro
 l1 = shift
 r1 = ctrl
-l2 = s
-r2 = w
 
 # Special buttons
 back = esc
@@ -34,8 +38,3 @@ start = enter
 # L3/R3
 l3 = c
 r3 = v
-
-# Deadzone settings - higher for smooth steering
-deadzone_x = 3000
-deadzone_y = 3000
-deadzone_triggers = 2000

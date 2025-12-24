@@ -1,6 +1,14 @@
 # FPS Profile - Controller to keyboard/mouse for first-person games
 # Right stick = mouse look, Left stick = WASD movement
 
+[config]
+deadzone_mode = axial
+deadzone = 2000
+deadzone_scale = 7
+mouse_scale = 48
+mouse_delay = 16
+
+[controls]
 # D-pad movement (alternative to left stick)
 up = w
 down = s
@@ -14,7 +22,7 @@ left_analog_left = a
 left_analog_right = d
 
 # Right stick mouse movement
-right_analog_as_mouse = true
+right_analog = mouse_movement
 
 # Face buttons
 a = space
@@ -28,9 +36,9 @@ l2 = mouse_right
 r1 = q
 r2 = mouse_left
 
-# Triggers
-lt = mouse_right
-rt = mouse_left
+# Triggers (same as shoulder for compatibility)
+# lt = mouse_right
+# rt = mouse_left
 
 # Special buttons
 back = esc
@@ -40,10 +48,3 @@ guide = tab
 # L3/R3 (stick click)
 l3 = c
 r3 = v
-
-# Mouse settings
-mouse_scale = 512
-mouse_delay = 16
-deadzone_x = 2000
-deadzone_y = 2000
-deadzone_triggers = 3000
