@@ -415,20 +415,33 @@ download_gamescope() {
     local gsc_out="$SCRIPT_DIR/res/gamescope-splitux"
     local gsc_repo="splitux-gg/gamescope-splitux"
     local gsc_release
-    gsc_release=$(curl -fsSL "https://api.github.com/repos/splitux-gg/gamescope-splitux/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+    local local_version=""
+
+    # Fetch latest release from GitHub
+    gsc_release=$(curl -fsSL "https://api.github.com/repos/$gsc_repo/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
 
     if [[ -z "$gsc_release" ]]; then
-        warn "Failed to fetch latest gamescope-splitux release, using fallback v1.0.1"
-        gsc_release="v1.0.1"
+        warn "Failed to fetch latest gamescope-splitux release, using fallback v1.0.3"
+        gsc_release="v1.0.3"
     fi
 
-    # Check if already available
-    if [[ -f "$gsc_out/bin/gamescope" ]]; then
-        info "gamescope-splitux already available"
+    # Check local version
+    if [[ -f "$gsc_out/.version" ]]; then
+        local_version=$(cat "$gsc_out/.version")
+    fi
+
+    # Skip if already have latest version
+    if [[ -f "$gsc_out/bin/gamescope" ]] && [[ "$local_version" == "$gsc_release" ]]; then
+        info "gamescope-splitux $gsc_release already installed"
         return 0
     fi
 
-    step "Downloading gamescope-splitux..."
+    if [[ -n "$local_version" ]]; then
+        step "Updating gamescope-splitux $local_version → $gsc_release..."
+    else
+        step "Downloading gamescope-splitux $gsc_release..."
+    fi
+
     local tmp_dir=$(mktemp -d)
     local base_url="https://github.com/$gsc_repo/releases/download/$gsc_release"
 
@@ -438,33 +451,50 @@ download_gamescope() {
         return 1
     fi
 
-    # Extract
+    # Extract (remove old first)
+    rm -rf "$gsc_out"
     mkdir -p "$gsc_out"
     unzip -q "$tmp_dir/gamescope.zip" -d "$gsc_out"
     chmod +x "$gsc_out/bin/"*
 
+    # Store version
+    echo "$gsc_release" > "$gsc_out/.version"
+
     rm -rf "$tmp_dir"
-    info "gamescope-splitux downloaded"
+    info "gamescope-splitux $gsc_release installed"
 }
 
 download_gptokeyb() {
     local gptk_out="$SCRIPT_DIR/res/gptokeyb"
     local gptk_repo="splitux-gg/gptokeyb-splitux"
     local gptk_release
+    local local_version=""
+
+    # Fetch latest release from GitHub
     gptk_release=$(curl -fsSL "https://api.github.com/repos/$gptk_repo/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
 
     if [[ -z "$gptk_release" ]]; then
-        warn "Failed to fetch latest gptokeyb-splitux release, using fallback v1.0.0"
-        gptk_release="v1.0.0"
+        warn "Failed to fetch latest gptokeyb-splitux release, using fallback v1.0.1"
+        gptk_release="v1.0.1"
     fi
 
-    # Check if already available
-    if [[ -f "$gptk_out/bin/gptokeyb" ]]; then
-        info "gptokeyb-splitux already available"
+    # Check local version
+    if [[ -f "$gptk_out/.version" ]]; then
+        local_version=$(cat "$gptk_out/.version")
+    fi
+
+    # Skip if already have latest version
+    if [[ -f "$gptk_out/bin/gptokeyb" ]] && [[ "$local_version" == "$gptk_release" ]]; then
+        info "gptokeyb-splitux $gptk_release already installed"
         return 0
     fi
 
-    step "Downloading gptokeyb-splitux..."
+    if [[ -n "$local_version" ]]; then
+        step "Updating gptokeyb-splitux $local_version → $gptk_release..."
+    else
+        step "Downloading gptokeyb-splitux $gptk_release..."
+    fi
+
     local tmp_dir=$(mktemp -d)
     local base_url="https://github.com/$gptk_repo/releases/download/$gptk_release"
 
@@ -474,7 +504,8 @@ download_gptokeyb() {
         return 1
     fi
 
-    # Extract to temp first, then move files to proper location
+    # Extract to temp first, then move files to proper location (remove old first)
+    rm -rf "$gptk_out/bin"
     mkdir -p "$gptk_out/bin"
     tar -xzf "$tmp_dir/gptokeyb.tar.gz" -C "$tmp_dir/"
     # Rename gptokeyb2 to gptokeyb for compatibility and move to bin/
@@ -483,8 +514,11 @@ download_gptokeyb() {
     [[ -f "$tmp_dir/lib/libinterpose.so" ]] && cp "$tmp_dir/lib/libinterpose.so" "$gptk_out/bin/"
     chmod +x "$gptk_out/bin/"*
 
+    # Store version
+    echo "$gptk_release" > "$gptk_out/.version"
+
     rm -rf "$tmp_dir"
-    info "gptokeyb-splitux downloaded"
+    info "gptokeyb-splitux $gptk_release installed"
 }
 
 copy_steam_client_libs() {
@@ -744,7 +778,7 @@ do_clean() {
     rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
     rm -rf "$SCRIPT_DIR/res/bepinex/mono" "$SCRIPT_DIR/res/bepinex/mono-linux" "$SCRIPT_DIR/res/bepinex/il2cpp"
     rm -rf "$SCRIPT_DIR/res/gamescope-splitux"
-    rm -rf "$SCRIPT_DIR/res/gptokeyb/bin"
+    rm -rf "$SCRIPT_DIR/res/gptokeyb/bin" "$SCRIPT_DIR/res/gptokeyb/.version"
     cargo clean 2>/dev/null || true
     info "Clean complete"
 }
