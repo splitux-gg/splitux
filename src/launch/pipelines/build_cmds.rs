@@ -24,12 +24,16 @@ use super::super::types::SDL_GAMECONTROLLER_IGNORE_DEVICES;
 ///
 /// The `audio_sink_envs` parameter is a list of PULSE_SINK values per instance.
 /// Empty string means no audio routing for that instance.
+///
+/// The `gptokeyb_virtual_devices` parameter contains the path to each instance's
+/// virtual keyboard/mouse device created by gptokeyb (None if gptokeyb not used).
 pub fn launch_cmds(
     h: &Handler,
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
     cfg: &SplituxConfig,
     audio_sink_envs: &[String],
+    gptokeyb_virtual_devices: &[Option<PathBuf>],
 ) -> Result<Vec<std::process::Command>, Box<dyn std::error::Error>> {
     let win = h.win();
     let exec = Path::new(&h.exec);
@@ -126,7 +130,8 @@ pub fn launch_cmds(
 
         // 3. Add gamescope arguments
         gamescope::add_args(&mut cmd, instance, cfg);
-        gamescope::add_input_holding_args(&mut cmd, instance, input_devices, cfg);
+        let virtual_device = gptokeyb_virtual_devices.get(i).and_then(|v| v.as_ref());
+        gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
         gamescope::add_separator(&mut cmd);
 
         // 4. Add bwrap container (unless disabled)

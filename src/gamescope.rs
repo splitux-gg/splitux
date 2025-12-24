@@ -3,11 +3,10 @@
 //! This module handles building gamescope commands with the correct arguments
 //! for resolution, display, and input handling.
 
+use std::path::Path;
 use std::process::Command;
 
 use crate::app::SplituxConfig;
-use crate::input::DeviceInfo;
-use crate::input::DeviceType;
 use crate::instance::Instance;
 use crate::paths::BIN_GSC_SPLITUX;
 
@@ -69,52 +68,19 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &SplituxConfig) {
 
 /// Add input device holding arguments for gamescope-splitux
 ///
-/// This configures gamescope to hold specific input devices and disable backend input
-/// for device types that this instance should use directly.
+/// When a virtual device path is provided (from gptokeyb), gamescope will
+/// read exclusively from that device for keyboard/mouse input.
 pub fn add_input_holding_args(
     cmd: &mut Command,
-    instance: &Instance,
-    input_devices: &[DeviceInfo],
+    virtual_device: Option<&Path>,
     cfg: &SplituxConfig,
 ) {
     if !cfg.input_holding {
         return;
     }
 
-    let mut has_keyboard = false;
-    let mut has_mouse = false;
-    let mut held_devices = String::new();
-
-    for &d in &instance.devices {
-        let dev = &input_devices[d];
-        match dev.device_type {
-            DeviceType::Keyboard => {
-                has_keyboard = true;
-                held_devices.push_str(&format!("{},", &dev.path));
-            }
-            DeviceType::Mouse => {
-                has_mouse = true;
-                held_devices.push_str(&format!("{},", &dev.path));
-            }
-            _ => {}
-        }
-    }
-
-    // When we have keyboard/mouse assigned, disable backend's default handling
-    // so our libinput-held devices get exclusive input
-    if has_keyboard {
-        cmd.arg("--backend-disable-keyboard");
-    }
-    if has_mouse {
-        cmd.arg("--backend-disable-mouse");
-    }
-
-    // Pass specific device paths to hold for libinput processing
-    if !held_devices.is_empty() {
-        cmd.arg(format!(
-            "--libinput-hold-dev={}",
-            held_devices.trim_end_matches(',')
-        ));
+    if let Some(vdev) = virtual_device {
+        cmd.arg(format!("--libinput-hold-dev={}", vdev.display()));
     }
 }
 

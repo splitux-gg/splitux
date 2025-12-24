@@ -28,10 +28,18 @@ pub fn launch_game(
     // Set up audio routing if enabled
     let (audio_system, virtual_sinks, audio_sink_envs) = setup_audio_routing(instances, cfg);
 
-    // Set up gptokeyb daemons if enabled
-    let mut gptokeyb_handles = setup_gptokeyb_daemons(h, input_devices, instances);
+    // Set up gptokeyb daemons if enabled (spawns before command building so we can pass virtual device paths)
+    let (mut gptokeyb_handles, gptokeyb_virtual_devices) =
+        setup_gptokeyb_daemons(h, input_devices, instances);
 
-    let new_cmds = launch_cmds(h, input_devices, instances, cfg, &audio_sink_envs)?;
+    let new_cmds = launch_cmds(
+        h,
+        input_devices,
+        instances,
+        cfg,
+        &audio_sink_envs,
+        &gptokeyb_virtual_devices,
+    )?;
     print_launch_cmds(&new_cmds);
 
     // Create WM backend based on config
@@ -201,19 +209,29 @@ fn setup_audio_routing(
 
 /// Set up gptokeyb daemons for all instances
 ///
-/// Returns a vector of child handles (Some for instances with gptokeyb, None otherwise)
+/// Returns (child_handles, virtual_device_paths).
+/// - child_handles: Some for instances with gptokeyb, None otherwise
+/// - virtual_device_paths: path to gptokeyb's virtual keyboard/mouse device for each instance
 fn setup_gptokeyb_daemons(
     h: &Handler,
     input_devices: &[DeviceInfo],
     instances: &[Instance],
-) -> Vec<Option<Child>> {
+) -> (Vec<Option<Child>>, Vec<Option<std::path::PathBuf>>) {
+    let num_instances = instances.len();
+
     if !h.has_gptokeyb() {
-        return (0..instances.len()).map(|_| None).collect();
+        return (
+            (0..num_instances).map(|_| None).collect(),
+            (0..num_instances).map(|_| None).collect(),
+        );
     }
 
     if !gptokeyb::is_available() {
         println!("[splitux] gptokeyb - Binary not found, skipping controller→keyboard translation");
-        return (0..instances.len()).map(|_| None).collect();
+        return (
+            (0..num_instances).map(|_| None).collect(),
+            (0..num_instances).map(|_| None).collect(),
+        );
     }
 
     println!(

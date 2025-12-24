@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::time::Instant;
 
 use super::types::GptokeybSettings;
 use crate::input::DeviceInfo;
@@ -41,17 +42,42 @@ pub fn get_config_path(settings: &GptokeybSettings, handler_dir: &Path) -> Optio
     }
 }
 
+/// Wait for gptokeyb virtual device to appear for a specific instance
+///
+/// Searches /sys/class/input for a device named "Fake Keyboard Mouse {instance_id}".
+/// Returns the /dev/input/eventN path if found within the timeout.
+pub fn wait_for_virtual_device(instance_id: usize, timeout_ms: u64) -> Option<PathBuf> {
+    let expected_name = format!("Fake Keyboard Mouse {}", instance_id);
+    let start = Instant::now();
+
+    while start.elapsed().as_millis() < timeout_ms as u128 {
+        if let Ok(entries) = std::fs::read_dir("/sys/class/input") {
+            for entry in entries.flatten() {
+                let name_path = entry.path().join("device/name");
+                if let Ok(name) = std::fs::read_to_string(&name_path) {
+                    if name.trim() == expected_name {
+                        let event_name = entry.file_name();
+                        return Some(PathBuf::from("/dev/input").join(event_name));
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    None
+}
+
 /// Spawn gptokeyb daemon for an instance
 ///
-/// Returns the child process handle if successful.
+/// Returns (child_process, virtual_device_path) if successful.
 /// The daemon will read from the specified controller device and create
-/// a virtual keyboard/mouse via uinput.
+/// a virtual keyboard/mouse via uinput with a unique name per instance.
 pub fn spawn_daemon(
     settings: &GptokeybSettings,
     handler_dir: &Path,
     device: &DeviceInfo,
     instance_idx: usize,
-) -> Result<Child, Box<dyn std::error::Error>> {
+) -> Result<(Child, Option<PathBuf>), Box<dyn std::error::Error>> {
     if !is_available() {
         return Err("gptokeyb binary not found".into());
     }
@@ -63,6 +89,12 @@ pub fn spawn_daemon(
 
     // Config file
     cmd.arg("-c").arg(&config_path);
+
+    // Controller isolation: target the first (and only) controller seen by SDL
+    cmd.arg("-D").arg("0");
+
+    // Unique device name for this instance
+    cmd.arg("-n").arg(instance_idx.to_string());
 
     // Device path (gptokeyb will read from this specific controller)
     cmd.env("SDL_GAMECONTROLLERCONFIG_FILE", ""); // Clear any system mappings
@@ -82,24 +114,45 @@ pub fn spawn_daemon(
     );
 
     let child = cmd.spawn()?;
-    Ok(child)
+
+    // Wait for virtual device to appear (2 second timeout)
+    let virtual_device = wait_for_virtual_device(instance_idx, 2000);
+    if let Some(ref vdev) = virtual_device {
+        println!(
+            "[splitux] gptokeyb - Instance {}: virtual device at {}",
+            instance_idx,
+            vdev.display()
+        );
+    } else {
+        println!(
+            "[splitux] gptokeyb - Instance {}: warning: virtual device not detected",
+            instance_idx
+        );
+    }
+
+    Ok((child, virtual_device))
 }
 
 /// Spawn gptokeyb daemons for all instances that need them
 ///
-/// Returns a vector of child handles (one per instance that has gptokeyb enabled).
+/// Returns (child_handles, virtual_device_paths).
 /// Instances without gptokeyb enabled will have None in their slot.
 pub fn spawn_all_daemons(
     settings: &GptokeybSettings,
     handler_dir: &Path,
     input_devices: &[DeviceInfo],
     instance_device_indices: &[Vec<usize>],
-) -> Vec<Option<Child>> {
+) -> (Vec<Option<Child>>, Vec<Option<PathBuf>>) {
+    let num_instances = instance_device_indices.len();
+
     if !settings.is_enabled() {
-        return (0..instance_device_indices.len()).map(|_| None).collect();
+        return (
+            (0..num_instances).map(|_| None).collect(),
+            (0..num_instances).map(|_| None).collect(),
+        );
     }
 
-    instance_device_indices
+    let results: Vec<_> = instance_device_indices
         .iter()
         .enumerate()
         .map(|(i, device_indices)| {
@@ -110,22 +163,29 @@ pub fn spawn_all_daemons(
                 .find(|d| d.device_type == crate::input::DeviceType::Gamepad);
 
             match gamepad {
-                Some(device) => {
-                    match spawn_daemon(settings, handler_dir, device, i) {
-                        Ok(child) => Some(child),
-                        Err(e) => {
-                            println!("[splitux] gptokeyb - Instance {}: Failed to spawn: {}", i, e);
-                            None
-                        }
+                Some(device) => match spawn_daemon(settings, handler_dir, device, i) {
+                    Ok((child, vdev)) => (Some(child), vdev),
+                    Err(e) => {
+                        println!(
+                            "[splitux] gptokeyb - Instance {}: Failed to spawn: {}",
+                            i, e
+                        );
+                        (None, None)
                     }
-                }
+                },
                 None => {
-                    println!("[splitux] gptokeyb - Instance {}: No gamepad assigned, skipping", i);
-                    None
+                    println!(
+                        "[splitux] gptokeyb - Instance {}: No gamepad assigned, skipping",
+                        i
+                    );
+                    (None, None)
                 }
             }
         })
-        .collect()
+        .collect();
+
+    // Unzip into separate vectors
+    results.into_iter().unzip()
 }
 
 /// Terminate all gptokeyb daemons
