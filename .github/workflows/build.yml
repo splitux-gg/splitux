@@ -270,7 +270,7 @@ jobs:
           path: release/Splitux-${{ steps.version.outputs.version }}-x86_64.AppImage
 
   build-flatpak:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -294,6 +294,13 @@ jobs:
           path: .flatpak-builder
           key: splitux-flatpak-builder-${{ hashFiles('Cargo.lock') }}
           restore-keys: splitux-flatpak-builder-
+
+      - name: Install Flatpak
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
 
       - name: Build Flatpak
         run: |
@@ -355,8 +362,8 @@ jobs:
                   path: .
           MANIFEST
 
-          # Build flatpak (disable-rofiles-fuse for containers without FUSE)
-          flatpak-builder --disable-rofiles-fuse --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
+          # Build flatpak
+          flatpak-builder --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
           mkdir -p release
