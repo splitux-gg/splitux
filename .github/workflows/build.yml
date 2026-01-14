@@ -22,7 +22,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     container: archlinux:base-devel
 
     steps:
@@ -42,6 +42,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: splitux-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: splitux-cargo-
+
+      - name: Cache external deps
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/deps-cache
+          key: splitux-deps-v2
+
       - name: Get version info
         id: version
         run: |
@@ -60,20 +77,26 @@ jobs:
 
       - name: Fetch dependencies
         run: |
-          mkdir -p res/goldberg res/gamescope-splitux res/bepinex
+          mkdir -p res/goldberg res/gamescope-splitux res/bepinex res/facepunch
+          CACHE_DIR="/tmp/deps-cache"
+          mkdir -p "$CACHE_DIR"
 
-          # Download gamescope-splitux
-          curl -fsSL https://github.com/gabrielgad/gamescope-splitux/releases/download/v1.0.0/gamescope-splitux-v1.0.0.zip -o /tmp/gsc.zip
-          unzip -o -q /tmp/gsc.zip -d res/gamescope-splitux
+          # Gamescope-splitux (cached - stable version)
+          if [ -f "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" ]; then
+            echo "Using cached gamescope-splitux"
+            unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" -d res/gamescope-splitux
+          else
+            curl -fsSL https://github.com/gabrielgad/gamescope-splitux/releases/download/v1.0.0/gamescope-splitux-v1.0.0.zip -o "$CACHE_DIR/gamescope-splitux-v1.0.0.zip"
+            unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" -d res/gamescope-splitux
+          fi
 
-          # Download Goldberg (Linux)
+          # Goldberg (always fresh - nightly builds)
           curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
           tar -xjf /tmp/gbe-linux.tar.bz2 -C /tmp
           mkdir -p res/goldberg/{linux64,linux32,win,steamnetworkingsockets/x64,steamnetworkingsockets/x32}
           cp -f /tmp/release/regular/x64/*.so res/goldberg/linux64/ 2>/dev/null || true
           cp -f /tmp/release/regular/x32/*.so res/goldberg/linux32/ 2>/dev/null || true
 
-          # Download Goldberg (Windows - for Wine/Proton games)
           curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-win-release.7z -o /tmp/gbe-win.7z
           7z x -o/tmp/gbe-win /tmp/gbe-win.7z -y
           cp -f /tmp/gbe-win/release/regular/steam_api64.dll res/goldberg/win/ 2>/dev/null || true
@@ -81,32 +104,56 @@ jobs:
           cp -f /tmp/gbe-win/release/steamnetworkingsockets/x64/*.dll res/goldberg/steamnetworkingsockets/x64/ 2>/dev/null || true
           cp -f /tmp/gbe-win/release/steamnetworkingsockets/x32/*.dll res/goldberg/steamnetworkingsockets/x32/ 2>/dev/null || true
 
-          # Download BepInEx 5 (Mono - Windows)
-          curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.2/BepInEx_win_x64_5.4.23.2.zip -o /tmp/bepinex-mono.zip
+          # BepInEx 5 Mono Windows (cached)
+          if [ -f "$CACHE_DIR/BepInEx_win_x64_5.4.23.2.zip" ]; then
+            echo "Using cached BepInEx Mono Windows"
+            cp "$CACHE_DIR/BepInEx_win_x64_5.4.23.2.zip" /tmp/bepinex-mono.zip
+          else
+            curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.2/BepInEx_win_x64_5.4.23.2.zip -o /tmp/bepinex-mono.zip
+            cp /tmp/bepinex-mono.zip "$CACHE_DIR/BepInEx_win_x64_5.4.23.2.zip"
+          fi
           mkdir -p res/bepinex/mono/core
           unzip -q /tmp/bepinex-mono.zip -d /tmp/bepinex-mono
           cp -f /tmp/bepinex-mono/BepInEx/core/* res/bepinex/mono/core/ 2>/dev/null || true
           cp -f /tmp/bepinex-mono/winhttp.dll res/bepinex/mono/ 2>/dev/null || true
           cp -f /tmp/bepinex-mono/doorstop_config.ini res/bepinex/mono/ 2>/dev/null || true
 
-          # Download BepInEx 5 (Mono - Linux native)
-          curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.2/BepInEx_linux_x64_5.4.23.2.zip -o /tmp/bepinex-mono-linux.zip
+          # BepInEx 5 Mono Linux (cached)
+          if [ -f "$CACHE_DIR/BepInEx_linux_x64_5.4.23.2.zip" ]; then
+            echo "Using cached BepInEx Mono Linux"
+            cp "$CACHE_DIR/BepInEx_linux_x64_5.4.23.2.zip" /tmp/bepinex-mono-linux.zip
+          else
+            curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.2/BepInEx_linux_x64_5.4.23.2.zip -o /tmp/bepinex-mono-linux.zip
+            cp /tmp/bepinex-mono-linux.zip "$CACHE_DIR/BepInEx_linux_x64_5.4.23.2.zip"
+          fi
           mkdir -p res/bepinex/mono-linux/core
           unzip -q /tmp/bepinex-mono-linux.zip -d /tmp/bepinex-mono-linux
           cp -f /tmp/bepinex-mono-linux/BepInEx/core/* res/bepinex/mono-linux/core/ 2>/dev/null || true
           cp -f /tmp/bepinex-mono-linux/libdoorstop.so res/bepinex/mono-linux/ 2>/dev/null || true
           cp -f /tmp/bepinex-mono-linux/run_bepinex.sh res/bepinex/mono-linux/ 2>/dev/null || true
 
-          # Download BepInEx 6 (IL2CPP)
-          curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip -o /tmp/bepinex-il2cpp.zip
+          # BepInEx 6 IL2CPP (cached)
+          if [ -f "$CACHE_DIR/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" ]; then
+            echo "Using cached BepInEx IL2CPP"
+            cp "$CACHE_DIR/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip" /tmp/bepinex-il2cpp.zip
+          else
+            curl -fsSL https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip -o /tmp/bepinex-il2cpp.zip
+            cp /tmp/bepinex-il2cpp.zip "$CACHE_DIR/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip"
+          fi
           mkdir -p res/bepinex/il2cpp/core
           unzip -q /tmp/bepinex-il2cpp.zip -d /tmp/bepinex-il2cpp
           cp -f /tmp/bepinex-il2cpp/BepInEx/core/* res/bepinex/il2cpp/core/ 2>/dev/null || true
           cp -f /tmp/bepinex-il2cpp/winhttp.dll res/bepinex/il2cpp/ 2>/dev/null || true
           cp -f /tmp/bepinex-il2cpp/doorstop_config.ini res/bepinex/il2cpp/ 2>/dev/null || true
 
-          # Download SplituxFacepunch plugin
-          curl -fsSL https://github.com/splitux-gg/bepinex-facepunch-splitux/releases/download/v2.1.0/SplituxFacepunch.dll -o res/facepunch/SplituxFacepunch.dll || mkdir -p res/facepunch
+          # SplituxFacepunch (cached)
+          if [ -f "$CACHE_DIR/SplituxFacepunch-v2.1.0.dll" ]; then
+            echo "Using cached SplituxFacepunch"
+            cp "$CACHE_DIR/SplituxFacepunch-v2.1.0.dll" res/facepunch/SplituxFacepunch.dll
+          else
+            curl -fsSL https://github.com/splitux-gg/bepinex-facepunch-splitux/releases/download/v2.1.0/SplituxFacepunch.dll -o res/facepunch/SplituxFacepunch.dll
+            cp res/facepunch/SplituxFacepunch.dll "$CACHE_DIR/SplituxFacepunch-v2.1.0.dll"
+          fi
 
       - name: Build Splitux
         run: |
@@ -217,7 +264,7 @@ jobs:
           path: release/Splitux-${{ steps.version.outputs.version }}-x86_64.AppImage
 
   build-flatpak:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -235,12 +282,19 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Install Flatpak and dependencies
+      - name: Cache Flatpak
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/flatpak
+            .flatpak-builder
+          key: splitux-flatpak-${{ hashFiles('Cargo.lock') }}
+          restore-keys: splitux-flatpak-
+
+      - name: Install Flatpak SDK
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
+          flatpak install --user -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08 || true
 
       - name: Build Flatpak
         run: |
@@ -302,8 +356,8 @@ jobs:
                   path: .
           MANIFEST
 
-          # Build flatpak
-          flatpak-builder --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
+          # Build flatpak (user installation, no sudo needed)
+          flatpak-builder --user --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
           mkdir -p release
