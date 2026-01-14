@@ -23,19 +23,25 @@ env:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64]
-    container: archlinux:base-devel
 
     steps:
       - name: Install dependencies
         run: |
-          pacman-key --init
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed \
-            git rust sdl2 \
-            p7zip unzip zip curl wget \
-            libx11 systemd-libs openssl \
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libsdl2-dev \
+            p7zip-full unzip zip curl wget \
+            libx11-dev libssl-dev \
             bubblewrap fuse-overlayfs slirp4netns \
-            fuse2 file patchelf
+            fuse libfuse2 file patchelf
+
+      - name: Install Rust
+        run: |
+          if ! command -v cargo &> /dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -293,8 +299,11 @@ jobs:
 
       - name: Install Flatpak SDK
         run: |
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
-          flatpak install --user -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08 || true
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          # Install SDK if not already present
+          if ! flatpak info --user org.freedesktop.Sdk//23.08 &>/dev/null; then
+            flatpak install --user -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+          fi
 
       - name: Build Flatpak
         run: |
