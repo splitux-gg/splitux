@@ -270,7 +270,8 @@ jobs:
           path: release/Splitux-${{ steps.version.outputs.version }}-x86_64.AppImage
 
   build-flatpak:
-    runs-on: [self-hosted, Linux, X64]
+    # Use GitHub-hosted runner for flatpak (has newer flatpak with large repo support)
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -299,11 +300,10 @@ jobs:
 
       - name: Install Flatpak SDK
         run: |
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          # Install SDK if not already present
-          if ! flatpak info --user org.freedesktop.Sdk//23.08 &>/dev/null; then
-            flatpak install --user -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
-          fi
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
 
       - name: Build Flatpak
         run: |
@@ -365,8 +365,8 @@ jobs:
                   path: .
           MANIFEST
 
-          # Build flatpak (user installation, no sudo needed)
-          flatpak-builder --user --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
+          # Build flatpak
+          flatpak-builder --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
           mkdir -p release
