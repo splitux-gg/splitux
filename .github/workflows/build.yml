@@ -33,8 +33,8 @@ jobs:
             libsdl2-dev \
             p7zip-full unzip zip curl wget \
             libx11-dev libssl-dev \
-            bubblewrap fuse-overlayfs slirp4netns \
-            fuse libfuse2 file patchelf
+            bubblewrap slirp4netns \
+            libfuse2 file patchelf
 
       - name: Install Rust
         run: |
