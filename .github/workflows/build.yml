@@ -270,8 +270,7 @@ jobs:
           path: release/Splitux-${{ steps.version.outputs.version }}-x86_64.AppImage
 
   build-flatpak:
-    # Use GitHub-hosted runner for flatpak (has newer flatpak with large repo support)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -289,21 +288,12 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Cache Flatpak
+      - name: Cache flatpak-builder
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.local/share/flatpak
-            .flatpak-builder
-          key: splitux-flatpak-${{ hashFiles('Cargo.lock') }}
-          restore-keys: splitux-flatpak-
-
-      - name: Install Flatpak SDK
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+          path: .flatpak-builder
+          key: splitux-flatpak-builder-${{ hashFiles('Cargo.lock') }}
+          restore-keys: splitux-flatpak-builder-
 
       - name: Build Flatpak
         run: |
