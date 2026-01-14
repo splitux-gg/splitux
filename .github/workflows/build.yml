@@ -355,8 +355,8 @@ jobs:
                   path: .
           MANIFEST
 
-          # Build flatpak (disable-rofiles for containers without FUSE)
-          flatpak-builder --disable-rofiles --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
+          # Build flatpak (disable-rofiles-fuse for containers without FUSE)
+          flatpak-builder --disable-rofiles-fuse --force-clean --repo=repo build-dir gg.splitux.Splitux.yml
 
           # Create single-file bundle
           mkdir -p release
