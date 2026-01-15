@@ -1,0 +1,45 @@
+{
+  "repo_notes": "Splitux is a local co-op split-screen gaming launcher for Linux. It enables multiple players to play games together on a single PC by running isolated game instances with separate controllers, save data, and network identities. Built in Rust with egui for the UI.\n\nCore architecture:\n- Platform abstraction (Steam, GOG, Epic, Manual) - WHERE games come from\n- Backend system (Goldberg, Photon, Facepunch) - HOW multiplayer is enabled\n- Each game instance runs in Gamescope (nested Wayland compositor) + Bubblewrap sandbox\n- Uses fuse-overlayfs for per-player profile isolation\n- Supports Proton/Wine for Windows games via UMU Launcher",
+  "pages": [
+    {
+      "title": "Architecture Overview",
+      "description": "High-level system architecture including the containerization model (Gamescope + Bubblewrap), platform/backend separation, and launch flow"
+    },
+    {
+      "title": "Handler System",
+      "description": "Game configuration via YAML handlers with dot notation, backend auto-detection, and the handler.rs module structure"
+    },
+    {
+      "title": "Backend System",
+      "description": "Multiplayer backends (Goldberg Steam Emulator, Photon for Unity games, Facepunch.Steamworks) - how they enable LAN play and can coexist"
+    },
+    {
+      "title": "Platform Abstraction",
+      "description": "Platform trait for game sources (Steam, GOG, Epic, Manual), game path resolution, and artwork caching"
+    },
+    {
+      "title": "Launch Pipeline",
+      "description": "The launch flow from user click to game execution: validation, profile setup, overlay mounting, command building, and process spawning"
+    },
+    {
+      "title": "Input Isolation",
+      "description": "Controller and keyboard/mouse isolation per instance using evdev, SDL2 environment variables, and custom Gamescope fork"
+    },
+    {
+      "title": "Window Management",
+      "description": "Hyprland and KDE Plasma integration, Gamescope compositor usage, and window tiling for split-screen"
+    },
+    {
+      "title": "Profile System",
+      "description": "Per-player profiles for separate saves, settings, Wine prefixes, and Steam identities"
+    },
+    {
+      "title": "Creating Handlers",
+      "description": "Guide to creating game handlers: YAML format, backend configuration, required mods, and testing"
+    },
+    {
+      "title": "Installation & Setup",
+      "description": "AppImage, Flatpak, and native installation methods, plus required dependencies"
+    }
+  ]
+}
