@@ -5,10 +5,12 @@
 //! - `audio` - Audio routing settings (options 13-19)
 //! - `profiles` - Profile management (options 20+)
 //! - `devices` - Controller naming
+//! - `profile_builder` - gptokeyb KB/Mouse Mapper
 
 mod audio;
 mod devices;
 mod general;
+mod profile_builder;
 mod profiles;
 
 use super::app::{SettingsCategory, SettingsFocus, Splitux};
@@ -69,6 +71,9 @@ impl Splitux {
                     }
                     SettingsCategory::Controllers => {
                         self.display_settings_devices(ui);
+                    }
+                    SettingsCategory::ProfileBuilder => {
+                        self.display_settings_profile_builder(ui);
                     }
                 }
                 ui.add_space(8.0);

@@ -26,13 +26,14 @@ pub enum InstanceFocus {
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Default)]
 pub enum InstanceCardFocus {
     #[default]
-    Profile,        // Profile dropdown
-    SetMaster,      // Set Master button
-    Monitor,        // Monitor dropdown (if gamescope SDL enabled)
-    InviteDevice,   // Invite Device button
-    Device(usize),  // Specific device in the device list
-    AudioOverride,  // Audio session override dropdown
+    Profile,         // Profile dropdown
+    SetMaster,       // Set Master button
+    Monitor,         // Monitor dropdown (if gamescope SDL enabled)
+    InviteDevice,    // Invite Device button
+    Device(usize),   // Specific device in the device list
+    AudioOverride,   // Audio session override dropdown
     AudioPreference, // Audio preference dropdown (named profiles only)
+    GptokeybProfile, // gptokeyb profile dropdown (KB/Mouse mapping)
 }
 
 /// Focus regions for Registry page
@@ -60,6 +61,7 @@ pub enum SettingsCategory {
     Audio,
     Profiles,
     Controllers,
+    ProfileBuilder,
 }
 
 impl SettingsCategory {
@@ -69,6 +71,7 @@ impl SettingsCategory {
             1 => Self::Audio,
             2 => Self::Profiles,
             3 => Self::Controllers,
+            4 => Self::ProfileBuilder,
             _ => Self::General,
         }
     }
@@ -79,6 +82,7 @@ impl SettingsCategory {
             Self::Audio => 1,
             Self::Profiles => 2,
             Self::Controllers => 3,
+            Self::ProfileBuilder => 4,
         }
     }
 
@@ -88,7 +92,12 @@ impl SettingsCategory {
             Self::Audio => "Audio",
             Self::Profiles => "Profiles",
             Self::Controllers => "Controllers",
+            Self::ProfileBuilder => "KB/Mouse Mapper",
         }
+    }
+
+    pub fn count() -> usize {
+        5
     }
 }
 
@@ -103,6 +112,43 @@ pub enum NavDirection {
     Down,
     Left,
     Right,
+}
+
+/// Focus regions for Profile Builder (KB/Mouse Mapper) page
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProfileBuilderFocus {
+    // === List view ===
+    /// "New" button to create a profile
+    #[default]
+    NewButton,
+    /// Profile row (index, sub-focus: 0=row, 1=edit, 2=delete)
+    ProfileRow(usize, usize),
+
+    // === Editor view - header ===
+    /// Profile name text input
+    NameInput,
+    /// Save button
+    SaveButton,
+    /// Cancel button
+    CancelButton,
+
+    // === Editor view - diagram ===
+    /// Controller button on diagram (index into DIAGRAM_BUTTONS)
+    DiagramButton(usize),
+
+    // === Editor view - mapping (shown when button selected) ===
+    /// Mapping text input
+    MappingInput,
+    /// Clear mapping (X) button
+    ClearMapping,
+
+    // === Editor view - config ===
+    /// Right stick mouse checkbox
+    RightStickMouse,
+    /// Left stick mouse checkbox
+    LeftStickMouse,
+    /// Mouse speed slider
+    MouseSpeed,
 }
 
 /// Unified dropdown state - tracks which dropdown is open across all pages
@@ -124,4 +170,6 @@ pub enum ActiveDropdown {
     InstanceAudioOverride(usize),
     /// Instances page: audio preference dropdown for instance
     InstanceAudioPreference(usize),
+    /// Instances page: gptokeyb profile dropdown for instance
+    InstanceGptokeyb(usize),
 }

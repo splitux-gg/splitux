@@ -250,6 +250,7 @@ impl Splitux {
             SettingsCategory::Audio,
             SettingsCategory::Profiles,
             SettingsCategory::Controllers,
+            SettingsCategory::ProfileBuilder,
         ];
 
         for cat in categories {

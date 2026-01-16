@@ -18,7 +18,14 @@
 //! ```
 
 mod operations;
+pub mod parser;
+pub mod profile;
+pub mod storage;
 mod types;
 
 pub use operations::{is_available, spawn_all_daemons, terminate_all};
+pub use profile::{AnalogMode, ControllerButton, GptokeybProfile};
+pub use storage::{
+    delete_profile, list_builtin_profiles, list_user_profiles, load_user_profile, save_profile,
+};
 pub use types::GptokeybSettings;

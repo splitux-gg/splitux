@@ -7,6 +7,7 @@
 //! - `nav_apply` - Bridge to new focus pipeline system
 //! - `buttons` - Button action handlers (A, B, X, Y)
 //! - `instances` - Instance page specific handlers
+//! - `profile_builder` - Profile Builder (KB/Mouse Mapper) navigation
 
 mod buttons;
 mod gamepad;
@@ -14,3 +15,4 @@ mod instances;
 mod keyboard;
 mod nav_apply;
 mod navigation;
+mod profile_builder;

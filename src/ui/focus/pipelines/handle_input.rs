@@ -230,7 +230,7 @@ fn handle_settings_direction(ctx: &NavContext, direction: NavDirection) -> Vec<N
                 }
             }
             NavDirection::Down => {
-                if ctx.settings_category.to_index() < 3 {
+                if ctx.settings_category.to_index() < SettingsCategory::count() - 1 {
                     vec![NavAction::SetSettingsCategory(SettingsCategory::from_index(
                         ctx.settings_category.to_index() + 1,
                     ))]

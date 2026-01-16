@@ -101,7 +101,8 @@ impl Splitux {
                 ActiveDropdown::InstanceProfile(_)
                 | ActiveDropdown::InstanceMonitor(_)
                 | ActiveDropdown::InstanceAudioOverride(_)
-                | ActiveDropdown::InstanceAudioPreference(_) => return,
+                | ActiveDropdown::InstanceAudioPreference(_)
+                | ActiveDropdown::InstanceGptokeyb(_) => return,
             };
             if self.dropdown_selection_idx < max_items.saturating_sub(1) {
                 self.dropdown_selection_idx += 1;
@@ -114,7 +115,7 @@ impl Splitux {
             SettingsFocus::CategoryList => {
                 // Move down in category list, then to bottom buttons
                 let idx = self.settings_category.to_index();
-                if idx < 3 {
+                if idx < SettingsCategory::count() - 1 {
                     self.settings_category = SettingsCategory::from_index(idx + 1);
                 } else {
                     self.settings_focus = SettingsFocus::BottomButtons;

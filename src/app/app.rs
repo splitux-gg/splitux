@@ -23,7 +23,7 @@ use crate::registry::RegistryIndex;
 use crate::util::*;
 
 // Re-export types from ui module (migrated)
-pub use crate::ui::{ActiveDropdown, FocusPane, InstanceFocus, MenuPage, RegistryFocus, SettingsCategory, SettingsFocus};
+pub use crate::ui::{ActiveDropdown, FocusPane, InstanceFocus, MenuPage, ProfileBuilderFocus, RegistryFocus, SettingsCategory, SettingsFocus};
 
 pub struct Splitux {
     pub installed_steamapps: Vec<Option<steamlocate::App>>,
@@ -108,6 +108,10 @@ pub struct Splitux {
     /// These do NOT persist to profile preferences, only apply to current launch
     pub audio_session_overrides: HashMap<usize, Option<String>>,
 
+    /// Session-only gptokeyb profile overrides (instance index -> profile name)
+    /// None means use handler's default, Some("") means disabled
+    pub gptokeyb_instance_overrides: HashMap<usize, String>,
+
     // Profile management state (Settings page)
     /// Index of profile being edited/renamed (None = not editing)
     pub profile_edit_index: Option<usize>,
@@ -143,6 +147,13 @@ pub struct Splitux {
     pub layout_custom_mode: bool,        // True when in custom assignment mode
     pub layout_focused_region: usize,    // Which region is currently focused
     pub layout_edit_order: Vec<usize>,   // Live editing buffer for instance order
+
+    // Profile Builder state (KB/Mouse Mapper)
+    pub profile_builder_profiles: Vec<String>,    // List of user-created gptokeyb profiles
+    pub profile_builder_editing: Option<crate::gptokeyb::GptokeybProfile>, // Profile being edited
+    pub profile_builder_selected_button: Option<crate::gptokeyb::ControllerButton>, // Button selected for mapping
+    pub profile_builder_name_buffer: String,      // Name input buffer for new profiles
+    pub profile_builder_focus: ProfileBuilderFocus, // Gamepad navigation focus
 }
 
 impl Splitux {
@@ -262,6 +273,7 @@ impl Splitux {
             audio_warnings: Vec::new(),
             profile_audio_prefs: HashMap::new(),
             audio_session_overrides: HashMap::new(),
+            gptokeyb_instance_overrides: HashMap::new(),
 
             // Profile management state
             profile_edit_index: None,
@@ -289,6 +301,13 @@ impl Splitux {
             layout_custom_mode: false,
             layout_focused_region: 0,
             layout_edit_order: Vec::new(),
+
+            // Profile Builder state
+            profile_builder_profiles: crate::gptokeyb::list_user_profiles(),
+            profile_builder_editing: None,
+            profile_builder_selected_button: None,
+            profile_builder_name_buffer: String::new(),
+            profile_builder_focus: ProfileBuilderFocus::default(),
         };
 
         let needs_update = app.needs_update.clone();

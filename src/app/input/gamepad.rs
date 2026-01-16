@@ -63,6 +63,12 @@ impl Splitux {
                     } else if on_settings_page && self.active_dropdown.is_some() {
                         // Close profile preference dropdowns first
                         self.active_dropdown = None;
+                    } else if on_settings_page && self.is_profile_builder_active() {
+                        // Handle Profile Builder B button (cancel/back)
+                        if !self.handle_profile_builder_b_button() {
+                            // If not handled, go to category list
+                            self.settings_focus = crate::ui::focus::types::SettingsFocus::CategoryList;
+                        }
                     } else if on_settings_page && self.profile_prefs_expanded.is_some() && self.profile_prefs_focus > 0 {
                         // Move focus back to profile header
                         self.profile_prefs_focus = 0;
@@ -236,8 +242,11 @@ impl Splitux {
                 self.apply_nav_actions(actions);
             }
             MenuPage::Settings => {
-                // Complex settings states still need legacy handling
-                if self.needs_legacy_settings_nav() {
+                // Profile Builder has its own navigation
+                if self.is_profile_builder_active() {
+                    self.handle_profile_builder_direction(direction);
+                } else if self.needs_legacy_settings_nav() {
+                    // Complex settings states still need legacy handling
                     match direction {
                         NavDirection::Up => self.handle_settings_up(),
                         NavDirection::Down => self.handle_settings_down(),

@@ -137,6 +137,16 @@ impl Splitux {
                     h.disable_facepunch();
                 }
             }
+
+            // EOS checkbox
+            let mut eos_enabled = h.has_eos();
+            if ui.checkbox(&mut eos_enabled, "EOS (Epic)").changed() {
+                if eos_enabled {
+                    h.enable_eos();
+                } else {
+                    h.disable_eos();
+                }
+            }
         });
 
         // Update platform based on dropdown selection

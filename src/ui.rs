@@ -23,4 +23,4 @@ pub enum MenuPage {
 
 
 // Legacy re-exports (for gradual migration)
-pub use focus::{ActiveDropdown, FocusPane, InstanceFocus, RegistryFocus, SettingsCategory, SettingsFocus};
+pub use focus::{ActiveDropdown, FocusPane, InstanceFocus, ProfileBuilderFocus, RegistryFocus, SettingsCategory, SettingsFocus};

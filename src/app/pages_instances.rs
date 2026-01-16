@@ -12,6 +12,7 @@ mod launch_options;
 use super::app::{ActiveDropdown, InstanceFocus, Splitux};
 use super::config::save_cfg;
 use super::theme;
+use crate::gptokeyb::{list_builtin_profiles, list_user_profiles};
 use crate::input::{find_device_by_uniq, is_device_assigned};
 use crate::profile_prefs::ProfilePreferences;
 use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};
@@ -34,6 +35,17 @@ enum AudioOverrideAction {
 enum AudioPrefAction {
     SetDevice(String, String), // (name, description)
     Clear,
+}
+
+/// gptokeyb profile dropdown action
+#[derive(Clone, PartialEq)]
+enum GptokeybAction {
+    /// Use handler default (no override)
+    Default,
+    /// Disable gptokeyb for this instance
+    Disabled,
+    /// Use a specific profile
+    Profile(String),
 }
 
 /// Check if a specific element in an instance card is focused (pure function)
@@ -570,6 +582,107 @@ impl Splitux {
                             }
                         });
                     }
+
+                    // gptokeyb KB/Mouse Mapper section
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(icons::KEYBOARD);
+                        if !card_mode.is_narrow() {
+                            ui.label(RichText::new("KB/Mouse:").small());
+                        }
+
+                        let gptokeyb_focused = is_element_focused(&current_focus, i, InstanceCardFocus::GptokeybProfile);
+                        let gptokeyb_open = self.active_dropdown == Some(ActiveDropdown::InstanceGptokeyb(i));
+
+                        // Get current override for this instance
+                        let has_override = self.gptokeyb_instance_overrides.contains_key(&i);
+                        let current_profile = self.gptokeyb_instance_overrides.get(&i);
+
+                        // Build items list
+                        let mut items: Vec<DropdownItem<GptokeybAction>> = Vec::new();
+
+                        // Default option (use handler setting)
+                        items.push(DropdownItem::new(
+                            GptokeybAction::Default,
+                            "Default (handler)",
+                            !has_override,
+                        ));
+
+                        // Disabled option
+                        items.push(DropdownItem::new(
+                            GptokeybAction::Disabled,
+                            format!("{} Disabled", icons::PROHIBIT),
+                            current_profile == Some(&String::new()),
+                        ));
+
+                        // Built-in profiles
+                        for profile in list_builtin_profiles() {
+                            let is_selected = current_profile == Some(&profile.to_string());
+                            items.push(DropdownItem::new(
+                                GptokeybAction::Profile(profile.to_string()),
+                                format!("{} {} (built-in)", icons::GAME_CONTROLLER, profile),
+                                is_selected,
+                            ));
+                        }
+
+                        // User profiles
+                        for profile in list_user_profiles() {
+                            let is_selected = current_profile == Some(&profile);
+                            items.push(DropdownItem::new(
+                                GptokeybAction::Profile(profile.clone()),
+                                format!("{} {} (custom)", icons::USER, profile),
+                                is_selected,
+                            ));
+                        }
+
+                        // Determine button text
+                        let button_text = if card_mode.is_narrow() {
+                            ""
+                        } else if has_override {
+                            current_profile
+                                .map(|p| if p.is_empty() { "Disabled" } else { p.as_str() })
+                                .unwrap_or("Default")
+                        } else {
+                            "Default"
+                        };
+
+                        let gptokeyb_width = combo_width(ui, 100.0, 50.0);
+
+                        let gptokeyb_response = render_gamepad_dropdown(
+                            ui,
+                            &format!("gptokeyb_{i}"),
+                            button_text,
+                            gptokeyb_width,
+                            &items,
+                            gptokeyb_focused,
+                            gptokeyb_open,
+                            self.dropdown_selection_idx,
+                            gptokeyb_focused && activate_focused,
+                        );
+
+                        // Handle response
+                        if let Some(action) = gptokeyb_response.selected {
+                            match action {
+                                GptokeybAction::Default => {
+                                    self.gptokeyb_instance_overrides.remove(&i);
+                                }
+                                GptokeybAction::Disabled => {
+                                    self.gptokeyb_instance_overrides.insert(i, String::new());
+                                }
+                                GptokeybAction::Profile(name) => {
+                                    self.gptokeyb_instance_overrides.insert(i, name);
+                                }
+                            }
+                            self.active_dropdown = None;
+                        } else if gptokeyb_response.toggled || (gptokeyb_focused && activate_focused) {
+                            if gptokeyb_open {
+                                self.active_dropdown = None;
+                            } else {
+                                self.active_dropdown = Some(ActiveDropdown::InstanceGptokeyb(i));
+                                self.dropdown_selection_idx = 0;
+                            }
+                        }
+                    });
                 });
             ui.add_space(4.0);
         }

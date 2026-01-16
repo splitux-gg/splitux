@@ -71,6 +71,11 @@ impl Splitux {
         key: &mut Option<Key>,
         page_changed: &mut bool,
     ) -> bool {
+        // Profile Builder has its own navigation
+        if self.is_profile_builder_active() {
+            return self.handle_profile_builder_keyboard(k);
+        }
+
         match k {
             Key::ArrowUp => {
                 if self.settings_focus == SettingsFocus::Options && self.settings_option_index > 0 {
@@ -114,6 +119,42 @@ impl Splitux {
             Key::Escape => {
                 self.cur_page = MenuPage::Games;
                 *page_changed = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_profile_builder_keyboard(&mut self, k: Key) -> bool {
+        use crate::ui::focus::types::NavDirection;
+
+        match k {
+            Key::ArrowUp => {
+                self.handle_profile_builder_direction(NavDirection::Up);
+                true
+            }
+            Key::ArrowDown => {
+                self.handle_profile_builder_direction(NavDirection::Down);
+                true
+            }
+            Key::ArrowLeft => {
+                self.handle_profile_builder_direction(NavDirection::Left);
+                true
+            }
+            Key::ArrowRight => {
+                self.handle_profile_builder_direction(NavDirection::Right);
+                true
+            }
+            Key::Enter => {
+                self.handle_profile_builder_a_button();
+                self.activate_focused = true;
+                true
+            }
+            Key::Escape => {
+                if !self.handle_profile_builder_b_button() {
+                    // Go back to category list
+                    self.settings_focus = SettingsFocus::CategoryList;
+                }
                 true
             }
             _ => false,

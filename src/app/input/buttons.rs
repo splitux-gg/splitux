@@ -46,6 +46,14 @@ impl Splitux {
                 }
             }
         } else if on_settings_page {
+            // Check for Profile Builder first
+            if self.is_profile_builder_active() {
+                if self.handle_profile_builder_a_button() {
+                    self.activate_focused = true;
+                    return;
+                }
+            }
+
             match self.settings_focus {
                 SettingsFocus::CategoryList => {
                     // A on category = enter options

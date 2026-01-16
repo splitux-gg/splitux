@@ -200,7 +200,8 @@ impl Splitux {
                             ActiveDropdown::InstanceProfile(_) |
                             ActiveDropdown::InstanceMonitor(_) |
                             ActiveDropdown::InstanceAudioOverride(_) |
-                            ActiveDropdown::InstanceAudioPreference(_) => {
+                            ActiveDropdown::InstanceAudioPreference(_) |
+                            ActiveDropdown::InstanceGptokeyb(_) => {
                                 if self.dropdown_selection_idx > 0 {
                                     self.dropdown_selection_idx -= 1;
                                 }
@@ -226,6 +227,11 @@ impl Splitux {
                             ActiveDropdown::InstanceMonitor(_) => self.monitors.len(),
                             ActiveDropdown::InstanceAudioOverride(_) => self.audio_devices.len() + 2, // devices + mute + reset
                             ActiveDropdown::InstanceAudioPreference(_) => self.audio_devices.len() + 1, // devices + clear
+                            ActiveDropdown::InstanceGptokeyb(_) => {
+                                // 2 (default + disabled) + builtin profiles + user profiles
+                                2 + crate::gptokeyb::list_builtin_profiles().len()
+                                  + crate::gptokeyb::list_user_profiles().len()
+                            }
                             _ => 0,
                         };
                         if self.dropdown_selection_idx < max_items.saturating_sub(1) {
@@ -335,6 +341,7 @@ impl Splitux {
                         }
                     }
                     InstanceCardFocus::AudioPreference => InstanceCardFocus::AudioOverride,
+                    InstanceCardFocus::GptokeybProfile => InstanceCardFocus::AudioPreference,
                 };
                 self.instance_focus = InstanceFocus::InstanceCard(idx, new_element);
             }
@@ -397,7 +404,8 @@ impl Splitux {
                         }
                     }
                     InstanceCardFocus::AudioOverride => InstanceCardFocus::AudioPreference,
-                    InstanceCardFocus::AudioPreference => {
+                    InstanceCardFocus::AudioPreference => InstanceCardFocus::GptokeybProfile,
+                    InstanceCardFocus::GptokeybProfile => {
                         if idx + 1 < self.instances.len() {
                             self.instance_focus = InstanceFocus::InstanceCard(
                                 idx + 1,

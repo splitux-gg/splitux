@@ -2,6 +2,7 @@
 //!
 //! Backends represent different multiplayer networking solutions:
 //! - Goldberg: Steam P2P emulation via DLL replacement
+//! - EOS: Epic Online Services emulation via DLL replacement
 //! - Photon: Unity Photon networking via BepInEx
 //! - Facepunch: BepInEx patches for Facepunch.Steamworks
 //!
@@ -54,16 +55,19 @@ pub trait Backend {
 }
 
 // Backend module implementations
+pub mod eos;
 pub mod facepunch;
 pub mod goldberg;
 pub mod photon;
 
 // Re-export settings types for use in Handler
+pub use eos::EosSettings;
 pub use facepunch::FacepunchSettings;
 pub use goldberg::GoldbergSettings;
 pub use photon::PhotonSettings;
 
 // Use the modular backend implementations
+use self::eos as eos_mod;
 use self::facepunch as facepunch_mod;
 use self::goldberg as goldberg_mod;
 use self::photon as photon_mod;
@@ -75,6 +79,9 @@ fn collect_enabled_backends(handler: &Handler) -> Vec<Box<dyn Backend>> {
     // Collect enabled backends
     if let Some(settings) = handler.goldberg_ref() {
         backends.push(Box::new(goldberg_mod::Goldberg::new(settings.clone())));
+    }
+    if let Some(settings) = handler.eos_ref() {
+        backends.push(Box::new(eos_mod::Eos::new(settings.clone())));
     }
     if handler.photon_ref().is_some() {
         backends.push(Box::new(photon_mod::Photon::new()));

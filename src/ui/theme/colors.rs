@@ -26,6 +26,7 @@ pub const ACCENT_GLOW: Color32 = Color32::from_rgb(100, 200, 255); // Focus glow
 pub const SUCCESS: Color32 = Color32::from_rgb(80, 200, 120);
 pub const WARNING: Color32 = Color32::from_rgb(255, 180, 60);
 pub const ERROR: Color32 = Color32::from_rgb(255, 90, 90);
+pub const SURFACE_DESTRUCTIVE: Color32 = Color32::from_rgb(120, 50, 50); // Red-tinted surface for delete buttons
 
 // Interactive states
 pub const BUTTON_BG: Color32 = Color32::from_rgb(45, 50, 72);

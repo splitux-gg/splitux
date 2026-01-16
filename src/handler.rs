@@ -11,8 +11,9 @@ pub use types::{FacepunchSettings, PhotonSettings, RequiredMod, RuntimePatch, SD
 pub use io::{import_handler, scan_handlers};
 
 use crate::backend::{
-    FacepunchSettings as BackendFacepunchSettings, GoldbergSettings as BackendGoldbergSettings,
-    MultiplayerBackend, PhotonSettings as BackendPhotonSettings,
+    EosSettings as BackendEosSettings, FacepunchSettings as BackendFacepunchSettings,
+    GoldbergSettings as BackendGoldbergSettings, MultiplayerBackend,
+    PhotonSettings as BackendPhotonSettings,
 };
 use crate::gptokeyb::GptokeybSettings;
 use crate::util::SanitizePath;
@@ -127,6 +128,10 @@ pub struct Handler {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facepunch: Option<BackendFacepunchSettings>,
 
+    /// EOS (Epic Online Services) emulator settings (enables EOS if Some)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eos: Option<BackendEosSettings>,
+
     /// Required mods/files that must be installed by the user
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_mods: Vec<RequiredMod>,
@@ -217,6 +222,7 @@ impl Default for Handler {
             goldberg: None,
             photon: None,
             facepunch: None,
+            eos: None,
 
             required_mods: Vec::new(),
 
@@ -428,11 +434,19 @@ impl Handler {
         self.facepunch.is_some()
     }
 
+    /// Check if EOS backend is enabled
+    pub fn has_eos(&self) -> bool {
+        self.eos.is_some()
+    }
+
     /// Get display string for enabled backends (e.g., "Goldberg", "Photon, Facepunch")
     pub fn backend_display(&self) -> String {
         let mut backends = Vec::new();
         if self.has_goldberg() {
             backends.push("Goldberg");
+        }
+        if self.has_eos() {
+            backends.push("EOS");
         }
         if self.has_photon() {
             backends.push("Photon");
@@ -460,6 +474,11 @@ impl Handler {
     /// Get Facepunch settings reference (if enabled)
     pub fn facepunch_ref(&self) -> Option<&BackendFacepunchSettings> {
         self.facepunch.as_ref()
+    }
+
+    /// Get EOS settings reference (if enabled)
+    pub fn eos_ref(&self) -> Option<&BackendEosSettings> {
+        self.eos.as_ref()
     }
 
     /// Enable Goldberg backend with default settings
@@ -496,6 +515,18 @@ impl Handler {
     /// Disable Facepunch backend
     pub fn disable_facepunch(&mut self) {
         self.facepunch = None;
+    }
+
+    /// Enable EOS backend with default settings
+    pub fn enable_eos(&mut self) {
+        if self.eos.is_none() {
+            self.eos = Some(BackendEosSettings::default());
+        }
+    }
+
+    /// Disable EOS backend
+    pub fn disable_eos(&mut self) {
+        self.eos = None;
     }
 
     // ============= PLATFORM HELPER METHODS (Phase 10) =============
