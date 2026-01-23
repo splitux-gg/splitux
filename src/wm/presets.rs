@@ -49,51 +49,27 @@ pub static PRESET_2P_VERTICAL: LayoutPreset = LayoutPreset {
 // 3-Player Presets
 // ============================================================================
 
-/// P1 full top, P2/P3 bottom halves (T-shape)
-pub static PRESET_3P_T_SHAPE: LayoutPreset = LayoutPreset {
-    id: "3p_t_shape",
-    name: "T-Shape",
+/// 3 equal columns side by side (33%/33%/33%)
+pub static PRESET_3P_VERTICAL: LayoutPreset = LayoutPreset {
+    id: "3p_vertical",
+    name: "Side by Side",
     player_count: 3,
     regions: &[
-        [0.0, 0.0, 1.0, 0.5], // P1: full top
-        [0.0, 0.5, 0.5, 0.5], // P2: bottom-left
-        [0.5, 0.5, 0.5, 0.5], // P3: bottom-right
+        [0.0, 0.0, 1.0 / 3.0, 1.0],       // P1: left third
+        [1.0 / 3.0, 0.0, 1.0 / 3.0, 1.0], // P2: middle third
+        [2.0 / 3.0, 0.0, 1.0 / 3.0, 1.0], // P3: right third
     ],
 };
 
-/// P1/P2 top halves, P3 full bottom (Inverted T)
-pub static PRESET_3P_INVERTED_T: LayoutPreset = LayoutPreset {
-    id: "3p_inverted_t",
-    name: "Inverted T",
+/// 3 stacked rows (33%/33%/33%)
+pub static PRESET_3P_HORIZONTAL: LayoutPreset = LayoutPreset {
+    id: "3p_horizontal",
+    name: "Stacked",
     player_count: 3,
     regions: &[
-        [0.0, 0.0, 0.5, 0.5], // P1: top-left
-        [0.5, 0.0, 0.5, 0.5], // P2: top-right
-        [0.0, 0.5, 1.0, 0.5], // P3: full bottom
-    ],
-};
-
-/// P1 left half, P2/P3 stacked on right
-pub static PRESET_3P_LEFT_MAIN: LayoutPreset = LayoutPreset {
-    id: "3p_left_main",
-    name: "Left Main",
-    player_count: 3,
-    regions: &[
-        [0.0, 0.0, 0.5, 1.0], // P1: left half
-        [0.5, 0.0, 0.5, 0.5], // P2: top-right
-        [0.5, 0.5, 0.5, 0.5], // P3: bottom-right
-    ],
-};
-
-/// P1/P2 stacked on left, P3 right half
-pub static PRESET_3P_RIGHT_MAIN: LayoutPreset = LayoutPreset {
-    id: "3p_right_main",
-    name: "Right Main",
-    player_count: 3,
-    regions: &[
-        [0.0, 0.0, 0.5, 0.5], // P1: top-left
-        [0.0, 0.5, 0.5, 0.5], // P2: bottom-left
-        [0.5, 0.0, 0.5, 1.0], // P3: right half
+        [0.0, 0.0, 1.0, 1.0 / 3.0],       // P1: top third
+        [0.0, 1.0 / 3.0, 1.0, 1.0 / 3.0], // P2: middle third
+        [0.0, 2.0 / 3.0, 1.0, 1.0 / 3.0], // P3: bottom third
     ],
 };
 
@@ -140,19 +116,6 @@ pub static PRESET_4P_COLUMNS: LayoutPreset = LayoutPreset {
     ],
 };
 
-/// P1 gets 50% (left half), P2/P3/P4 share the right half in thirds
-pub static PRESET_4P_MAIN_PLUS_3: LayoutPreset = LayoutPreset {
-    id: "4p_main_plus_3",
-    name: "Main + 3",
-    player_count: 4,
-    regions: &[
-        [0.0, 0.0, 0.5, 1.0],          // P1: left half (main)
-        [0.5, 0.0, 0.5, 1.0 / 3.0],    // P2: top-right third
-        [0.5, 1.0 / 3.0, 0.5, 1.0 / 3.0], // P3: middle-right third
-        [0.5, 2.0 / 3.0, 0.5, 1.0 / 3.0], // P4: bottom-right third
-    ],
-};
-
 // ============================================================================
 // Preset Registry
 // ============================================================================
@@ -165,10 +128,8 @@ pub static PRESETS_2P: &[&LayoutPreset] = &[
 
 /// All 3-player presets
 pub static PRESETS_3P: &[&LayoutPreset] = &[
-    &PRESET_3P_T_SHAPE,
-    &PRESET_3P_INVERTED_T,
-    &PRESET_3P_LEFT_MAIN,
-    &PRESET_3P_RIGHT_MAIN,
+    &PRESET_3P_VERTICAL,
+    &PRESET_3P_HORIZONTAL,
 ];
 
 /// All 4-player presets
@@ -176,7 +137,6 @@ pub static PRESETS_4P: &[&LayoutPreset] = &[
     &PRESET_4P_GRID,
     &PRESET_4P_ROWS,
     &PRESET_4P_COLUMNS,
-    &PRESET_4P_MAIN_PLUS_3,
 ];
 
 /// Get all presets for a given player count
@@ -224,7 +184,7 @@ fn default_2p() -> String {
 }
 
 fn default_3p() -> String {
-    "3p_t_shape".to_string()
+    "3p_vertical".to_string()
 }
 
 fn default_4p() -> String {

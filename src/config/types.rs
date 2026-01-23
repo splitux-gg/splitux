@@ -160,13 +160,28 @@ impl Default for SplituxConfig {
 }
 
 impl SplituxConfig {
-    /// Migrate legacy vertical_two_player bool to layout_presets
+    /// Migrate legacy settings to current format
     /// Call this after loading config from disk
     pub fn migrate(&mut self) {
-        // If vertical_two_player was explicitly set to true and layout_presets
-        // is still at default, migrate the setting
+        // Migrate vertical_two_player bool to layout_presets
         if self.vertical_two_player && self.layout_presets.two_player == "2p_horizontal" {
             self.layout_presets.two_player = "2p_vertical".to_string();
+        }
+
+        // Migrate deprecated 3p presets to new equal splits
+        match self.layout_presets.three_player.as_str() {
+            "3p_t_shape" | "3p_left_main" => {
+                self.layout_presets.three_player = "3p_vertical".to_string();
+            }
+            "3p_inverted_t" | "3p_right_main" => {
+                self.layout_presets.three_player = "3p_horizontal".to_string();
+            }
+            _ => {}
+        }
+
+        // Migrate deprecated 4p preset
+        if self.layout_presets.four_player == "4p_main_plus_3" {
+            self.layout_presets.four_player = "4p_grid".to_string();
         }
     }
 }
