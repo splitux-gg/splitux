@@ -6,7 +6,7 @@
 mod types;
 mod thunderstore;
 
-pub use types::{filter_dll_files, PluginSource};
+pub use types::{filter_dll_files, filter_plugin_files, PluginSource};
 pub use thunderstore::{fetch_bepinex_pack, fetch_plugin};
 
 use crate::paths::PATH_PARTY;

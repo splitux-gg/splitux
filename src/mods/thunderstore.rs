@@ -3,11 +3,24 @@
 //! Handles downloading and caching plugins from Thunderstore.
 
 use super::types::PluginSource;
+use serde::Deserialize;
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Write};
 use std::path::{Path, PathBuf};
 use zip::ZipArchive;
+
+/// Thunderstore package version info from API
+#[derive(Debug, Deserialize)]
+struct PackageVersion {
+    version_number: String,
+}
+
+/// Thunderstore package info from API (experimental endpoint)
+#[derive(Debug, Deserialize)]
+struct PackageInfo {
+    latest: Option<PackageVersion>,
+}
 
 /// Fetch a plugin from Thunderstore, using cache if available.
 /// Returns list of all extracted file paths.
@@ -102,37 +115,134 @@ fn extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Fetch BepInExPack from Thunderstore for a specific community.
-/// Returns the path to the extracted BepInExPack directory.
+/// Fetch the latest version of a package from Thunderstore API
+fn fetch_latest_version(_community: &str, package: &str) -> Result<String, Box<dyn Error>> {
+    // Thunderstore experimental API endpoint for package info
+    // Format: https://thunderstore.io/api/experimental/package/{namespace}/{name}/
+    let (namespace, name) = package
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid package format: {}", package))?;
+
+    let url = format!(
+        "https://thunderstore.io/api/experimental/package/{}/{}/",
+        namespace, name
+    );
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let response = client.get(&url).send()?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to fetch package info: HTTP {}", response.status()).into());
+    }
+
+    let info: PackageInfo = response.json()?;
+
+    // Get version from the "latest" field
+    info.latest
+        .map(|v| v.version_number)
+        .ok_or_else(|| "No latest version found for package".into())
+}
+
+/// Get the currently cached version of a package, if any
+fn get_cached_version(cache_base: &Path, community: &str, package: &str) -> Option<String> {
+    let package_dir = cache_base
+        .join("thunderstore")
+        .join(community)
+        .join(package.replace('/', "_"));
+
+    if !package_dir.exists() {
+        return None;
+    }
+
+    // Find version directories
+    if let Ok(entries) = fs::read_dir(&package_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                if let Some(version) = entry.file_name().to_str() {
+                    return Some(version.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Fetch a BepInEx package from Thunderstore for a specific community.
+/// Returns the path to the extracted package directory.
 ///
-/// Most communities use bbepis/BepInExPack version 5.4.2108
+/// The `package` parameter specifies which BepInEx package to use (e.g., "bbepis/BepInExPack"
+/// or "xiaoye97/BepInEx"). Different packages may have different doorstop versions.
+///
+/// Automatically fetches the latest version and updates if a newer version is available.
 pub fn fetch_bepinex_pack(
     community: &str,
+    package: &str,
     cache_base: &Path,
 ) -> Result<PathBuf, Box<dyn Error>> {
-    // Standard BepInExPack used by most communities
+
+    // Fetch latest version from Thunderstore API
+    let latest_version = match fetch_latest_version(community, package) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[mods] Warning: Failed to check latest {} version: {}", package, e);
+            // Fall back to cached version if available
+            if let Some(cached) = get_cached_version(cache_base, community, package) {
+                eprintln!("[mods] Using cached {} version {}", package, cached);
+                let source = PluginSource {
+                    source: "thunderstore".to_string(),
+                    community: community.to_string(),
+                    package: package.to_string(),
+                    version: cached,
+                };
+                return Ok(source.cache_path(cache_base));
+            }
+            return Err(e);
+        }
+    };
+
     let source = PluginSource {
         source: "thunderstore".to_string(),
         community: community.to_string(),
-        package: "bbepis/BepInExPack".to_string(),
-        version: "5.4.2108".to_string(),
+        package: package.to_string(),
+        version: latest_version.clone(),
     };
 
     let cache_dir = source.cache_path(cache_base);
 
-    // Check if already cached
+    // Check if we have the latest version cached
     if cache_dir.exists() {
         eprintln!(
-            "[mods] Using cached BepInExPack for {}",
-            community
+            "[mods] Using cached {} {} for {}",
+            package, latest_version, community
         );
         return Ok(cache_dir);
     }
 
-    // Download and extract
+    // Check if we have an older version cached
+    if let Some(cached_version) = get_cached_version(cache_base, community, package) {
+        if cached_version != latest_version {
+            eprintln!(
+                "[mods] Updating {}: {} -> {}",
+                package, cached_version, latest_version
+            );
+            // Remove old cached version
+            let old_cache = cache_base
+                .join("thunderstore")
+                .join(community)
+                .join(package.replace('/', "_"))
+                .join(&cached_version);
+            fs::remove_dir_all(&old_cache).ok();
+        }
+    }
+
+    // Download and extract latest
     eprintln!(
-        "[mods] Downloading BepInExPack for {} from Thunderstore...",
-        community
+        "[mods] Downloading {} {} for {} from Thunderstore...",
+        package, latest_version, community
     );
     download_and_extract(&source, &cache_dir)?;
 

@@ -64,7 +64,8 @@ fn install_bepinex_from_thunderstore(
     community: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cache_base = mods::cache_base();
-    let bepinex_dir = mods::fetch_bepinex_pack(community, &cache_base)?;
+    // Use default BepInExPack for Goldberg plugin support
+    let bepinex_dir = mods::fetch_bepinex_pack(community, "bbepis/BepInExPack", &cache_base)?;
 
     // Copy winhttp.dll (doorstop loader)
     let winhttp_src = bepinex_dir.join("winhttp.dll");

@@ -52,6 +52,17 @@ spec_ver: 3
 #     dest_path: "BepInEx/plugins"
 #     file_pattern: "*.dll"
 
+# --- Standalone (BepInEx + Mods) ---
+# For games where mods handle their own multiplayer (e.g., DSP with Nebula)
+# Plugins are auto-downloaded from Thunderstore. Version defaults to latest.
+# standalone:
+#   community: dyson-sphere-program    # Thunderstore community
+#   bepinex_package: xiaoye97/BepInEx  # BepInEx package (default: bbepis/BepInExPack)
+#   plugins:
+#     - gabrielgad/NebulaMultiplayerMod            # Simple format (latest version)
+#     - package: quackandcheese/LocalMultiplayer   # Object format with pinned version
+#       version: "1.0.4"
+
 # ============================================
 # GAME CONFIG PATCHES
 # ============================================
