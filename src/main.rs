@@ -33,11 +33,26 @@ use crate::paths::PATH_PARTY;
 use crate::profiles::remove_guest_profiles;
 use crate::util::*;
 
-fn main() -> eframe::Result {
-    // Our sdl/multimonitor stuff essentially depends on us running through x11.
+/// Configure SDL video driver for the splitux GUI process.
+///
+/// On niri: Skip entirely (we use niri IPC for monitor detection).
+/// On other compositors: Use X11 SDL to avoid conflicts with eframe/winit.
+fn configure_sdl_for_compositor() {
+    // On niri, we bypass SDL entirely for monitor detection
+    if std::env::var("NIRI_SOCKET").is_ok() {
+        println!("[splitux] On niri, skipping SDL configuration");
+        return;
+    }
+
+    // Other compositors: force X11 SDL
     unsafe {
         std::env::set_var("SDL_VIDEODRIVER", "x11");
     }
+    println!("[splitux] Using X11 SDL for monitor detection");
+}
+
+fn main() -> eframe::Result {
+    configure_sdl_for_compositor();
 
     let monitors = get_monitors_sdl();
 
@@ -148,6 +163,8 @@ fn main() -> eframe::Result {
             .with_inner_size([1080.0, 540.0])
             .with_min_inner_size([640.0, 360.0])
             .with_fullscreen(fullscreen)
+            .with_decorations(true)
+            .with_transparent(false)
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../res/icon.png")[..])
                     .expect("Failed to load icon"),
@@ -169,6 +186,51 @@ fn main() -> eframe::Result {
             let mut fonts = eframe::egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
+
+            // Add Noto Sans fonts for unicode symbol support (▼▲◀▶•✓✗ etc.)
+            let fonts_dir = crate::paths::PATH_RES.join("fonts");
+
+            // Load NotoSans as primary font
+            if let Ok(font_data) = std::fs::read(fonts_dir.join("NotoSans-Regular.ttf")) {
+                println!("[splitux] Loaded NotoSans-Regular.ttf");
+                fonts.font_data.insert(
+                    "NotoSans".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                );
+            }
+
+            // Load NotoSansSymbols for geometric shapes (▼▲◀▶)
+            if let Ok(font_data) = std::fs::read(fonts_dir.join("NotoSansSymbols-Regular.ttf")) {
+                println!("[splitux] Loaded NotoSansSymbols-Regular.ttf");
+                fonts.font_data.insert(
+                    "NotoSansSymbols".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                );
+            }
+
+            // Load NotoSansSymbols2 for extended symbols (☰ ◉ ⋮⋮)
+            if let Ok(font_data) = std::fs::read(fonts_dir.join("NotoSansSymbols2-Regular.ttf")) {
+                println!("[splitux] Loaded NotoSansSymbols2-Regular.ttf");
+                fonts.font_data.insert(
+                    "NotoSansSymbols2".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                );
+            }
+
+            // Add fonts to proportional family (first = highest priority)
+            if let Some(family) = fonts.families.get_mut(&eframe::egui::FontFamily::Proportional) {
+                // Insert in reverse order so NotoSans is first
+                if fonts.font_data.contains_key("NotoSansSymbols2") {
+                    family.push("NotoSansSymbols2".to_owned());
+                }
+                if fonts.font_data.contains_key("NotoSansSymbols") {
+                    family.push("NotoSansSymbols".to_owned());
+                }
+                if fonts.font_data.contains_key("NotoSans") {
+                    family.insert(0, "NotoSans".to_owned());
+                }
+            }
+
             cc.egui_ctx.set_fonts(fonts);
 
             // Apply custom theme

@@ -8,7 +8,9 @@ use std::process::Command;
 
 use crate::app::SplituxConfig;
 use crate::instance::Instance;
+use crate::monitor::Monitor;
 use crate::paths::BIN_GSC_SPLITUX;
+use crate::util::is_wayland_session;
 
 /// Create the base gamescope command
 ///
@@ -28,6 +30,17 @@ pub fn setup_env(cmd: &mut Command) {
     // Disable gamescope WSI layer
     cmd.env("ENABLE_GAMESCOPE_WSI", "0");
 
+    // Session-aware SDL backend selection for gamescope
+    // Parent process sets SDL_VIDEODRIVER=x11 for its own use, so we must
+    // explicitly override for child processes
+    if is_wayland_session() {
+        // Wayland: use native Wayland SDL (remove inherited x11 setting)
+        cmd.env_remove("SDL_VIDEODRIVER");
+    } else {
+        // X11: use X11 SDL
+        cmd.env("SDL_VIDEODRIVER", "x11");
+    }
+
     // CRITICAL: Tell gamescope's SDL to NOT use any joysticks!
     // By pointing to /dev/null, SDL won't find any joysticks to enumerate.
     // This prevents gamescope from capturing gamepad input for window focus.
@@ -42,7 +55,7 @@ pub fn setup_env(cmd: &mut Command) {
 }
 
 /// Add gamescope command-line arguments
-pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &SplituxConfig) {
+pub fn add_args(cmd: &mut Command, instance: &Instance, _monitors: &[Monitor], cfg: &SplituxConfig) {
     // Resolution
     cmd.args([
         "-W",
@@ -59,8 +72,9 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, cfg: &SplituxConfig) {
         cmd.arg("--force-grab-cursor");
     }
 
-    // SDL backend with display index
-    if cfg.gamescope_sdl_backend {
+    // X11 session: use SDL backend with display-index (legacy path)
+    // Wayland session: skip, WM handles positioning
+    if !is_wayland_session() && cfg.gamescope_sdl_backend {
         cmd.arg("--backend=sdl");
         cmd.arg(format!("--display-index={}", instance.monitor));
     }

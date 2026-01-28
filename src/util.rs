@@ -1,6 +1,15 @@
 use crate::paths::{PATH_HOME, PATH_PARTY};
 
 use dialog::{Choice, DialogBox};
+
+/// Check if we're running in a Wayland session.
+///
+/// Returns true if WAYLAND_DISPLAY is set, indicating the session is Wayland-native.
+/// X11 sessions (including XWayland apps on Wayland) won't have this set.
+pub fn is_wayland_session() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
 use eframe::egui::TextBuffer;
 use rfd::FileDialog;
 use std::error::Error;
@@ -113,6 +122,55 @@ pub fn get_installed_steamapps() -> Vec<Option<steamlocate::App>> {
     return games;
 }
 
+/// Get all Steam library folders from libraryfolders.vdf
+fn get_steam_library_folders() -> Vec<PathBuf> {
+    use crate::paths::PATH_STEAM;
+
+    let mut folders = vec![PATH_STEAM.clone()];
+
+    // Read libraryfolders.vdf to find additional Steam libraries
+    let vdf_path = PATH_STEAM.join("steamapps/libraryfolders.vdf");
+    if let Ok(content) = std::fs::read_to_string(&vdf_path) {
+        // Simple parsing: look for "path" entries
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("\"path\"") {
+                // Extract path value: "path"		"/some/path"
+                if let Some(start) = trimmed.rfind('"') {
+                    let before_last = &trimmed[..start];
+                    if let Some(path_start) = before_last.rfind('"') {
+                        let path_str = &before_last[path_start + 1..];
+                        let path = PathBuf::from(path_str);
+                        if path.exists() && !folders.contains(&path) {
+                            folders.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    folders
+}
+
+/// Search for Proton in a directory's common folder
+fn find_proton_in_common(base_path: &PathBuf, proton_name: &str) -> Option<PathBuf> {
+    let common_path = base_path.join("steamapps/common");
+    if let Ok(entries) = std::fs::read_dir(&common_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str == proton_name || name_str.to_lowercase() == proton_name.to_lowercase() {
+                let proton_bin = entry.path().join("proton");
+                if proton_bin.exists() {
+                    return Some(proton_bin);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Resolve a Proton path from a name (e.g., "Proton - Experimental") or full path
 /// Returns the full path to the proton executable if found
 pub fn resolve_proton_path(proton_name: &str) -> Option<PathBuf> {
@@ -132,18 +190,11 @@ pub fn resolve_proton_path(proton_name: &str) -> Option<PathBuf> {
         return None;
     }
 
-    // Search in Steam's common folder for a matching Proton installation
-    let common_path = PATH_STEAM.join("steamapps/common");
-    if let Ok(entries) = std::fs::read_dir(&common_path) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str == proton_name || name_str.to_lowercase() == proton_name.to_lowercase() {
-                let proton_bin = entry.path().join("proton");
-                if proton_bin.exists() {
-                    return Some(proton_bin);
-                }
-            }
+    // Get all Steam library folders and search each one
+    let library_folders = get_steam_library_folders();
+    for folder in &library_folders {
+        if let Some(proton_bin) = find_proton_in_common(folder, proton_name) {
+            return Some(proton_bin);
         }
     }
 
