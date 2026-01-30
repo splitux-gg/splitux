@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GptokeybSettings {
     /// Profile name - either built-in (fps, mouse_only, etc.) or "custom"
-    /// Built-in profiles are loaded from res/gptokeyb/{profile}.gptk
+    /// Built-in profiles are loaded from assets/gptokeyb/{profile}.gptk
     /// Custom profiles are loaded from handler_dir/gptokeyb.gptk
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub profile: String,

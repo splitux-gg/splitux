@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::paths::PATH_RES;
+use crate::paths::PATH_ASSETS;
 
 use super::types::UnityBackend;
 
@@ -20,7 +20,7 @@ pub fn get_bepinex_res_path(is_windows: bool, backend: UnityBackend) -> PathBuf 
         (false, UnityBackend::Mono) => "mono-linux",
         (_, UnityBackend::Il2Cpp) => "il2cpp",
     };
-    PATH_RES.join("bepinex").join(subdir)
+    PATH_ASSETS.join("bepinex").join(subdir)
 }
 
 /// Check if specific BepInEx backend is available

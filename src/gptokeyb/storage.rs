@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use crate::paths::{PATH_PARTY, PATH_RES};
+use crate::paths::{PATH_PARTY, PATH_ASSETS};
 
 use super::parser::{parse_gptk, serialize_gptk};
 use super::profile::GptokeybProfile;
@@ -42,9 +42,9 @@ pub fn list_user_profiles() -> Vec<String> {
     profiles
 }
 
-/// List built-in profile names from res/gptokeyb/
+/// List built-in profile names from assets/gptokeyb/
 pub fn list_builtin_profiles() -> Vec<String> {
-    let dir = PATH_RES.join("gptokeyb");
+    let dir = PATH_ASSETS.join("gptokeyb");
     if !dir.exists() {
         return Vec::new();
     }

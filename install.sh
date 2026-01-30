@@ -28,11 +28,11 @@ step "Installing Splitux to $PREFIX..."
 if [[ -f "$SCRIPT_DIR/splitux" ]]; then
     BINARY="$SCRIPT_DIR/splitux"
     BIN_DIR="$SCRIPT_DIR/bin"
-    RES_DIR="$SCRIPT_DIR/res"
+    RES_DIR="$SCRIPT_DIR/assets"
 elif [[ -f "$SCRIPT_DIR/build/splitux" ]]; then
     BINARY="$SCRIPT_DIR/build/splitux"
     BIN_DIR="$SCRIPT_DIR/build/bin"
-    RES_DIR="$SCRIPT_DIR/res"
+    RES_DIR="$SCRIPT_DIR/assets"
 else
     echo "Error: splitux binary not found. Run ./splitux.sh build first."
     exit 1
@@ -41,7 +41,7 @@ fi
 # Create directories
 mkdir -p "$PREFIX/bin"
 mkdir -p "$PREFIX/share/splitux/bin"
-mkdir -p "$PREFIX/share/splitux/res"
+mkdir -p "$PREFIX/share/splitux/assets"
 mkdir -p "$PREFIX/share/applications"
 mkdir -p "$PREFIX/share/icons/hicolor/128x128/apps"
 
@@ -57,7 +57,7 @@ fi
 
 # Copy resources
 if [[ -d "$RES_DIR" ]]; then
-    cp -r "$RES_DIR/"* "$PREFIX/share/splitux/res/"
+    cp -r "$RES_DIR/"* "$PREFIX/share/splitux/assets/"
 fi
 
 # Install icon

@@ -1,6 +1,6 @@
 //! KWin window manager integration via D-Bus scripting API
 
-use crate::paths::PATH_RES;
+use crate::paths::PATH_ASSETS;
 use crate::wm::{LayoutContext, NestedSession, WindowManager, WmResult};
 use crate::monitor::Monitor;
 use std::path::PathBuf;
@@ -89,7 +89,7 @@ impl WindowManager for KWinManager {
         } else {
             "splitscreen_kwin.js"
         };
-        self.load_script(PATH_RES.join(script))
+        self.load_script(PATH_ASSETS.join(script))
     }
 
     fn teardown(&mut self) -> WmResult<()> {

@@ -32,7 +32,7 @@ impl Splitux {
             ui.add_space(12.0);
             let start_btn = ui.add(
                 egui::Button::image_and_text(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_START_NEW.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_START_NEW.png"))
                         .fit_to_exact_size(egui::vec2(24.0, 24.0)),
                     "  Start Game  ",
                 )

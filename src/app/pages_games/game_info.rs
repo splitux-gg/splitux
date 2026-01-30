@@ -102,7 +102,7 @@ impl Splitux {
             };
             let playbtn = ui.add(
                 egui::Button::image_and_text(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_A.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_A.png"))
                         .fit_to_exact_size(egui::vec2(20.0, 20.0)),
                     play_text,
                 )
@@ -142,7 +142,7 @@ impl Splitux {
             let profile_min_width = if is_narrow { 60.0 } else { 100.0 };
             let profile_btn = ui.add(
                 egui::Button::image_and_text(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_Y.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_Y.png"))
                         .fit_to_exact_size(egui::vec2(20.0, 20.0)),
                     format!(" {} ", profile_text),
                 )
@@ -173,7 +173,7 @@ impl Splitux {
             };
             let editbtn = ui.add(
                 egui::Button::image_and_text(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_X.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_X.png"))
                         .fit_to_exact_size(egui::vec2(20.0, 20.0)),
                     edit_text,
                 )
@@ -193,13 +193,13 @@ impl Splitux {
             if !is_narrow {
                 ui.add(egui::Separator::default().vertical());
                 if is_win {
-                    ui.add(egui::Image::new(egui::include_image!("../../../res/windows-logo.png"))
+                    ui.add(egui::Image::new(egui::include_image!("../../../assets/windows-logo.png"))
                         .fit_to_exact_size(egui::vec2(18.0, 18.0)));
                     if !is_medium {
                         ui.label("Proton");
                     }
                 } else {
-                    ui.add(egui::Image::new(egui::include_image!("../../../res/linux-logo.png"))
+                    ui.add(egui::Image::new(egui::include_image!("../../../assets/linux-logo.png"))
                         .fit_to_exact_size(egui::vec2(18.0, 18.0)));
                     if !is_medium {
                         ui.label("Native");

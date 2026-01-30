@@ -21,7 +21,7 @@ impl Splitux {
                             Some(i) => &format!("A / Z / Right-Click: Add to P{}", i + 1),
                         };
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_A.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_A.png"))
                                 .max_height(16.0),
                         )
                         .on_hover_text(add_tip);
@@ -31,25 +31,25 @@ impl Splitux {
                             Some(_) => "B / X: Cancel",
                         };
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_B.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_B.png"))
                                 .max_height(16.0),
                         )
                         .on_hover_text(remove_tip);
 
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_Y.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_Y.png"))
                                 .max_height(16.0),
                         )
                         .on_hover_text("Y / A: Invite Device");
 
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_DPAD.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_DPAD.png"))
                                 .max_height(16.0),
                         )
                         .on_hover_text("D-pad / Left Stick: Navigate");
 
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_STICK_R.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_STICK_R.png"))
                                 .max_height(16.0),
                         )
                         .on_hover_text("Right Stick: Scroll");
@@ -59,7 +59,7 @@ impl Splitux {
                     ui.horizontal(|ui| {
                         // Add instance control
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_A.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_A.png"))
                                 .max_height(16.0),
                         );
                         ui.label(" / Z / Right-Click:");
@@ -75,7 +75,7 @@ impl Splitux {
 
                         // Remove/Cancel control
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_B.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_B.png"))
                                 .max_height(16.0),
                         );
                         ui.label(" / X:");
@@ -91,7 +91,7 @@ impl Splitux {
 
                         // Invite control
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_Y.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_Y.png"))
                                 .max_height(16.0),
                         );
                         ui.label(" / A:");
@@ -103,11 +103,11 @@ impl Splitux {
 
                         // Navigation hints
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_DPAD.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_DPAD.png"))
                                 .max_height(16.0),
                         );
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_STICK_L.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_STICK_L.png"))
                                 .max_height(16.0),
                         );
                         ui.label(RichText::new("Navigate").strong());
@@ -115,7 +115,7 @@ impl Splitux {
                         ui.add_space(8.0);
 
                         ui.add(
-                            egui::Image::new(egui::include_image!("../../../res/BTN_STICK_R.png"))
+                            egui::Image::new(egui::include_image!("../../../assets/BTN_STICK_R.png"))
                                 .max_height(16.0),
                         );
                         ui.label(RichText::new("Scroll").strong());

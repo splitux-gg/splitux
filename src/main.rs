@@ -166,7 +166,7 @@ fn main() -> eframe::Result {
             .with_decorations(true)
             .with_transparent(false)
             .with_icon(
-                eframe::icon_data::from_png_bytes(&include_bytes!("../res/icon.png")[..])
+                eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
                     .expect("Failed to load icon"),
             ),
         ..Default::default()
@@ -188,7 +188,7 @@ fn main() -> eframe::Result {
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
 
             // Add Noto Sans fonts for unicode symbol support (▼▲◀▶•✓✗ etc.)
-            let fonts_dir = crate::paths::PATH_RES.join("fonts");
+            let fonts_dir = crate::paths::PATH_ASSETS.join("fonts");
 
             // Load NotoSans as primary font
             if let Ok(font_data) = std::fs::read(fonts_dir.join("NotoSans-Regular.ttf")) {

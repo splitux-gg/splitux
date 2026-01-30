@@ -360,7 +360,7 @@ get_target_dir() {
 # =============================================================================
 
 download_goldberg() {
-    local gbe_out="$SCRIPT_DIR/res/goldberg"
+    local gbe_out="$SCRIPT_DIR/assets/goldberg"
     local gbe_repo="gabrielgad/gbe_fork-splitux"
     local gbe_release="nightly"
 
@@ -412,7 +412,7 @@ download_goldberg() {
 }
 
 download_gamescope() {
-    local gsc_out="$SCRIPT_DIR/res/gamescope-splitux"
+    local gsc_out="$SCRIPT_DIR/assets/gamescope-splitux"
     local gsc_repo="splitux-gg/gamescope-splitux"
     local gsc_release
     local local_version=""
@@ -465,7 +465,7 @@ download_gamescope() {
 }
 
 download_gptokeyb() {
-    local gptk_out="$SCRIPT_DIR/res/gptokeyb"
+    local gptk_out="$SCRIPT_DIR/assets/gptokeyb"
     local gptk_repo="splitux-gg/gptokeyb-splitux"
     local gptk_release
     local local_version=""
@@ -522,7 +522,7 @@ download_gptokeyb() {
 }
 
 copy_steam_client_libs() {
-    local gbe_out="$SCRIPT_DIR/res/goldberg"
+    local gbe_out="$SCRIPT_DIR/assets/goldberg"
     local steam_dir="$HOME/.local/share/Steam"
 
     # 64-bit
@@ -543,7 +543,7 @@ copy_steam_client_libs() {
 }
 
 download_bepinex() {
-    local bepinex_out="$SCRIPT_DIR/res/bepinex"
+    local bepinex_out="$SCRIPT_DIR/assets/bepinex"
     local need_mono_win=false
     local need_mono_linux=false
     local need_il2cpp=false
@@ -632,7 +632,7 @@ download_bepinex() {
 }
 
 download_facepunch() {
-    local fp_out="$SCRIPT_DIR/res/facepunch"
+    local fp_out="$SCRIPT_DIR/assets/facepunch"
     local fp_repo="splitux-gg/bepinex-facepunch-splitux"
     local fp_release="v2.1.0"
 
@@ -696,18 +696,18 @@ do_build() {
     # Setup build directory
     step "Setting up build directory..."
     rm -rf "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR/res" "$BUILD_DIR/bin"
+    mkdir -p "$BUILD_DIR/assets" "$BUILD_DIR/bin"
 
     local target_dir=$(get_target_dir)
     cp "$target_dir/release/splitux" "$BUILD_DIR/"
     cp "$SCRIPT_DIR/LICENSE" "$BUILD_DIR/" 2>/dev/null || true
-    cp -r "$SCRIPT_DIR/res/"* "$BUILD_DIR/res/" 2>/dev/null || true
+    cp -r "$SCRIPT_DIR/assets/"* "$BUILD_DIR/assets/" 2>/dev/null || true
 
     # Copy gamescope-splitux from downloaded binaries (rename to gamescope-splitux)
-    if [[ -f "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescope" ]]; then
-        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescope" "$BUILD_DIR/bin/gamescope-splitux"
-        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescopectl" "$BUILD_DIR/bin/" 2>/dev/null || true
-        cp "$SCRIPT_DIR/res/gamescope-splitux/bin/gamescopereaper" "$BUILD_DIR/bin/" 2>/dev/null || true
+    if [[ -f "$SCRIPT_DIR/assets/gamescope-splitux/bin/gamescope" ]]; then
+        cp "$SCRIPT_DIR/assets/gamescope-splitux/bin/gamescope" "$BUILD_DIR/bin/gamescope-splitux"
+        cp "$SCRIPT_DIR/assets/gamescope-splitux/bin/gamescopectl" "$BUILD_DIR/bin/" 2>/dev/null || true
+        cp "$SCRIPT_DIR/assets/gamescope-splitux/bin/gamescopereaper" "$BUILD_DIR/bin/" 2>/dev/null || true
         chmod +x "$BUILD_DIR/bin/"*
         info "gamescope-splitux installed to build/bin/"
     else
@@ -715,10 +715,10 @@ do_build() {
     fi
 
     # Copy gptokeyb from downloaded binaries
-    if [[ -f "$SCRIPT_DIR/res/gptokeyb/bin/gptokeyb" ]]; then
-        cp "$SCRIPT_DIR/res/gptokeyb/bin/gptokeyb" "$BUILD_DIR/bin/"
+    if [[ -f "$SCRIPT_DIR/assets/gptokeyb/bin/gptokeyb" ]]; then
+        cp "$SCRIPT_DIR/assets/gptokeyb/bin/gptokeyb" "$BUILD_DIR/bin/"
         # Copy interpose library if present
-        cp "$SCRIPT_DIR/res/gptokeyb/bin/libinterpose"*.so "$BUILD_DIR/bin/" 2>/dev/null || true
+        cp "$SCRIPT_DIR/assets/gptokeyb/bin/libinterpose"*.so "$BUILD_DIR/bin/" 2>/dev/null || true
         chmod +x "$BUILD_DIR/bin/"*
         info "gptokeyb installed to build/bin/"
     else
@@ -749,7 +749,7 @@ do_install() {
     cp "$BUILD_DIR/splitux" "$prefix/bin/"
     # Copy helper binaries (gamescope-splitux, gptokeyb, etc.)
     [[ -d "$BUILD_DIR/bin" ]] && cp "$BUILD_DIR/bin"/* "$prefix/bin/"
-    [[ -d "$BUILD_DIR/res" ]] && cp -r "$BUILD_DIR/res"/* "$prefix/share/splitux/"
+    [[ -d "$BUILD_DIR/assets" ]] && cp -r "$BUILD_DIR/assets"/* "$prefix/share/splitux/"
 
     info "Installed to $prefix (ensure $prefix/bin is in PATH)"
 }
@@ -777,10 +777,10 @@ do_update() {
 do_clean() {
     step "Cleaning..."
     rm -rf "$BUILD_DIR"
-    rm -rf "$SCRIPT_DIR/res/goldberg/linux32" "$SCRIPT_DIR/res/goldberg/linux64" "$SCRIPT_DIR/res/goldberg/win"
-    rm -rf "$SCRIPT_DIR/res/bepinex/mono" "$SCRIPT_DIR/res/bepinex/mono-linux" "$SCRIPT_DIR/res/bepinex/il2cpp"
-    rm -rf "$SCRIPT_DIR/res/gamescope-splitux"
-    rm -rf "$SCRIPT_DIR/res/gptokeyb/bin" "$SCRIPT_DIR/res/gptokeyb/.version"
+    rm -rf "$SCRIPT_DIR/assets/goldberg/linux32" "$SCRIPT_DIR/assets/goldberg/linux64" "$SCRIPT_DIR/assets/goldberg/win"
+    rm -rf "$SCRIPT_DIR/assets/bepinex/mono" "$SCRIPT_DIR/assets/bepinex/mono-linux" "$SCRIPT_DIR/assets/bepinex/il2cpp"
+    rm -rf "$SCRIPT_DIR/assets/gamescope-splitux"
+    rm -rf "$SCRIPT_DIR/assets/gptokeyb/bin" "$SCRIPT_DIR/assets/gptokeyb/.version"
     cargo clean 2>/dev/null || true
     info "Clean complete"
 }

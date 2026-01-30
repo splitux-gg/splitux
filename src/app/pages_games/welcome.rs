@@ -52,11 +52,11 @@ impl Splitux {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::Image::new(egui::include_image!("../../../res/BTN_DPAD.png"))
+                        egui::Image::new(egui::include_image!("../../../assets/BTN_DPAD.png"))
                             .max_height(18.0),
                     );
                     ui.add(
-                        egui::Image::new(egui::include_image!("../../../res/BTN_STICK_L.png"))
+                        egui::Image::new(egui::include_image!("../../../assets/BTN_STICK_L.png"))
                             .max_height(18.0),
                     );
                 });
@@ -65,11 +65,11 @@ impl Splitux {
 
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::Image::new(egui::include_image!("../../../res/BTN_LB.png"))
+                        egui::Image::new(egui::include_image!("../../../assets/BTN_LB.png"))
                             .max_height(18.0),
                     );
                     ui.add(
-                        egui::Image::new(egui::include_image!("../../../res/BTN_RB.png"))
+                        egui::Image::new(egui::include_image!("../../../assets/BTN_RB.png"))
                             .max_height(18.0),
                     );
                 });
@@ -77,21 +77,21 @@ impl Splitux {
                 ui.end_row();
 
                 ui.add(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_STICK_R.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_STICK_R.png"))
                         .max_height(18.0),
                 );
                 ui.label("Scroll");
                 ui.end_row();
 
                 ui.add(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_A.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_A.png"))
                         .max_height(18.0),
                 );
                 ui.label("Select / Confirm");
                 ui.end_row();
 
                 ui.add(
-                    egui::Image::new(egui::include_image!("../../../res/BTN_B.png"))
+                    egui::Image::new(egui::include_image!("../../../assets/BTN_B.png"))
                         .max_height(18.0),
                 );
                 ui.label("Back");

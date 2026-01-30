@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::backend::operations::prepare_overlay_dir;
-use crate::paths::PATH_RES;
+use crate::paths::PATH_ASSETS;
 
 use super::super::types::{EosConfig, EosDll};
 use super::write_settings::write_eos_settings;
@@ -37,13 +37,13 @@ pub fn create_instance_overlay(
         // Determine source path based on platform and bitness
         let src_path = if is_windows {
             if dll.is_64bit {
-                PATH_RES.join("eos/win64/EOSSDK-Win64-Shipping.dll")
+                PATH_ASSETS.join("eos/win64/EOSSDK-Win64-Shipping.dll")
             } else {
-                PATH_RES.join("eos/win32/EOSSDK-Win32-Shipping.dll")
+                PATH_ASSETS.join("eos/win32/EOSSDK-Win32-Shipping.dll")
             }
         } else {
             // Linux - only 64-bit supported for now
-            PATH_RES.join("eos/linux64/libEOSSDK-Linux-Shipping.so")
+            PATH_ASSETS.join("eos/linux64/libEOSSDK-Linux-Shipping.so")
         };
 
         let dest_path = target_dir.join(dll_name);

@@ -98,7 +98,7 @@ where
         let painter = ui.painter();
 
         // Draw SVG background
-        egui::Image::new(egui::include_image!("../../../res/controllermap.svg"))
+        egui::Image::new(egui::include_image!("../../../assets/controllermap.svg"))
             .fit_to_exact_size(size)
             .paint_at(ui, rect);
 

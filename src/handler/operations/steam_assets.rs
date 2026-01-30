@@ -35,7 +35,7 @@ impl Handler {
         }
 
         // Fallback to default icon
-        egui::include_image!("../../../res/executable_icon.png")
+        egui::include_image!("../../../assets/executable_icon.png")
     }
 
     /// Returns the box art from platform (e.g., Steam's library_600x900.jpg)

@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::backend::operations::prepare_overlay_dir;
-use crate::paths::PATH_RES;
+use crate::paths::PATH_ASSETS;
 
 use super::super::types::{GoldbergConfig, SteamApiDll, SteamDllType};
 use super::write_settings::write_steam_settings;
@@ -40,18 +40,18 @@ pub fn create_instance_overlay(
             SteamDllType::SteamApi => {
                 // Standard Steam API: use dll_name directly from goldberg/{platform}
                 let goldberg_src = if is_windows {
-                    PATH_RES.join("goldberg/win")
+                    PATH_ASSETS.join("goldberg/win")
                 } else if dll.is_64bit {
-                    PATH_RES.join("goldberg/linux64")
+                    PATH_ASSETS.join("goldberg/linux64")
                 } else {
-                    PATH_RES.join("goldberg/linux32")
+                    PATH_ASSETS.join("goldberg/linux32")
                 };
                 goldberg_src.join(dll_name)
             }
             SteamDllType::NetworkingSockets => {
                 // GameNetworkingSockets.dll -> libsteamnetworkingsockets.dll
                 let arch = if dll.is_64bit { "x64" } else { "x32" };
-                PATH_RES.join(format!(
+                PATH_ASSETS.join(format!(
                     "goldberg/steamnetworkingsockets/{}/libsteamnetworkingsockets.dll",
                     arch
                 ))

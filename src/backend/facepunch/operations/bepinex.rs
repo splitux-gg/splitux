@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::paths::PATH_RES;
+use crate::paths::PATH_ASSETS;
 
 // Re-use UnityBackend from photon module
 use crate::backend::photon::UnityBackend;
@@ -18,7 +18,7 @@ pub fn get_bepinex_res_path(is_windows: bool, backend: UnityBackend) -> PathBuf 
         (false, UnityBackend::Mono) => "mono-linux",
         (_, UnityBackend::Il2Cpp) => "il2cpp",
     };
-    PATH_RES.join("bepinex").join(subdir)
+    PATH_ASSETS.join("bepinex").join(subdir)
 }
 
 /// Install BepInEx core files to overlay directory
@@ -109,7 +109,7 @@ pub fn install_splitux_plugin(overlay_dir: &Path) -> Result<(), Box<dyn std::err
     let plugins_dir = overlay_dir.join("BepInEx").join("plugins");
     fs::create_dir_all(&plugins_dir)?;
 
-    let plugin_src = PATH_RES.join("facepunch").join("SplituxFacepunch.dll");
+    let plugin_src = PATH_ASSETS.join("facepunch").join("SplituxFacepunch.dll");
     if plugin_src.exists() {
         fs::copy(&plugin_src, plugins_dir.join("SplituxFacepunch.dll"))?;
     } else {

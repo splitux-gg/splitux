@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use super::types::GptokeybSettings;
 use crate::input::DeviceInfo;
-use crate::paths::{BIN_GPTOKEYB, PATH_RES};
+use crate::paths::{BIN_GPTOKEYB, PATH_ASSETS};
 
 /// Check if gptokeyb binary is available
 pub fn is_available() -> bool {
@@ -16,7 +16,7 @@ pub fn is_available() -> bool {
 /// Get the config file path for a profile
 ///
 /// Returns:
-/// - For built-in profiles: res/gptokeyb/{profile}.gptk
+/// - For built-in profiles: assets/gptokeyb/{profile}.gptk
 /// - For "custom": handler_dir/gptokeyb.gptk
 pub fn get_config_path(settings: &GptokeybSettings, handler_dir: &Path) -> Option<PathBuf> {
     if settings.profile.is_empty() {
@@ -33,7 +33,7 @@ pub fn get_config_path(settings: &GptokeybSettings, handler_dir: &Path) -> Optio
         }
     } else {
         // Built-in profile in res directory
-        let builtin_path = PATH_RES.join("gptokeyb").join(format!("{}.gptk", settings.profile));
+        let builtin_path = PATH_ASSETS.join("gptokeyb").join(format!("{}.gptk", settings.profile));
         if builtin_path.exists() {
             Some(builtin_path)
         } else {

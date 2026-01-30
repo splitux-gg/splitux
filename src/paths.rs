@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-pub static PATH_RES: LazyLock<PathBuf> = LazyLock::new(|| {
+pub static PATH_ASSETS: LazyLock<PathBuf> = LazyLock::new(|| {
     // Check system-wide install
     let systeminstall = PathBuf::from("/usr/share/splitux");
     if systeminstall.exists() {
@@ -15,8 +15,8 @@ pub static PATH_RES: LazyLock<PathBuf> = LazyLock::new(|| {
             return localinstall;
         }
     }
-    // Fallback to relative res directory (for development)
-    env::current_exe().unwrap().parent().unwrap().join("res")
+    // Fallback to relative assets directory (for development)
+    env::current_exe().unwrap().parent().unwrap().join("assets")
 });
 
 pub static PATH_HOME: LazyLock<PathBuf> =

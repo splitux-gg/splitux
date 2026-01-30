@@ -208,7 +208,7 @@ impl Splitux {
                                 let invite_focused = is_element_focused(&current_focus, i, InstanceCardFocus::InviteDevice);
                                 let invite_text = if card_mode == LayoutMode::Medium { " +Dev" } else { " Invite Device" };
                                 let invite_btn = egui::Button::image_and_text(
-                                    egui::Image::new(egui::include_image!("../../../res/BTN_Y.png"))
+                                    egui::Image::new(egui::include_image!("../../../assets/BTN_Y.png"))
                                         .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                     invite_text,
                                 )
