@@ -2,6 +2,10 @@
 //!
 //! Handles hiding/restoring common status bars (waybar, ags, eww, polybar)
 //! so game windows can use the full screen.
+//!
+//! All bars are killed on hide and restarted on restore using their original
+//! command line from /proc. This is deterministic — unlike SIGUSR1 toggling,
+//! kill/restart always produces the correct end state.
 
 use std::process::Command;
 
@@ -11,67 +15,81 @@ pub struct StatusBarManager {
     hidden_bars: Vec<HiddenBar>,
 }
 
-enum HiddenBar {
-    /// Bar hidden via signal toggle (send same signal to restore)
-    Toggle { name: String, signal: String },
-    /// Bar killed (needs to be restarted)
-    Killed { name: String },
+/// A bar that was killed, with its original command line for restart
+struct HiddenBar {
+    /// Display name (e.g. "waybar")
+    name: String,
+    /// Full command line captured from /proc before killing: (program, args)
+    cmdline: Vec<String>,
 }
 
-/// Known status bars and their hide methods
-const KNOWN_BARS: &[BarConfig] = &[
-    BarConfig { name: "waybar", signal: Some("-SIGUSR1"), kill: false },
-    BarConfig { name: ".waybar-wrapped", signal: Some("-SIGUSR1"), kill: false }, // NixOS
-    BarConfig { name: "ags", signal: Some("-SIGUSR1"), kill: false },
-    BarConfig { name: "eww", signal: None, kill: true },
-    BarConfig { name: "polybar", signal: Some("-SIGUSR1"), kill: false },
+/// Known status bars to look for
+const KNOWN_BARS: &[&str] = &[
+    "waybar",
+    ".waybar-wrapped", // NixOS
+    "ags",
+    "eww",
+    "polybar",
 ];
-
-struct BarConfig {
-    name: &'static str,
-    signal: Option<&'static str>,
-    kill: bool,
-}
 
 impl StatusBarManager {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Check if a process is running by name
-    fn is_running(name: &str) -> bool {
+    /// Get PIDs for a process name
+    fn get_pids(name: &str) -> Vec<u32> {
         Command::new("pgrep")
             .arg("-x")
             .arg(name)
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(
+                        String::from_utf8_lossy(&o.stdout)
+                            .split_whitespace()
+                            .filter_map(|s| s.parse().ok())
+                            .collect(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
     }
 
-    /// Hide all detected status bars
+    /// Read a process's command line from /proc/<pid>/cmdline
+    fn read_cmdline(pid: u32) -> Option<Vec<String>> {
+        let data = std::fs::read(format!("/proc/{}/cmdline", pid)).ok()?;
+        let parts: Vec<String> = data
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect();
+        if parts.is_empty() { None } else { Some(parts) }
+    }
+
+    /// Hide all detected status bars by killing them
     pub fn hide_all(&mut self) {
-        for bar in KNOWN_BARS {
-            if !Self::is_running(bar.name) {
+        for &name in KNOWN_BARS {
+            let pids = Self::get_pids(name);
+            if pids.is_empty() {
                 continue;
             }
 
-            println!("[splitux] wm::bars - Found running bar: {}", bar.name);
+            println!("[splitux] wm::bars - Found running bar: {} (PIDs: {:?})", name, pids);
 
-            if bar.kill {
-                println!("[splitux] wm::bars - Killing {} (will restart on teardown)", bar.name);
-                let _ = Command::new("pkill").arg("-x").arg(bar.name).status();
-                self.hidden_bars.push(HiddenBar::Killed {
-                    name: bar.name.to_string(),
-                });
-            } else if let Some(signal) = bar.signal {
-                println!("[splitux] wm::bars - Sending {} to {}", signal, bar.name);
-                if Command::new("pkill").args([signal, bar.name]).status().is_ok() {
-                    self.hidden_bars.push(HiddenBar::Toggle {
-                        name: bar.name.to_string(),
-                        signal: signal.to_string(),
-                    });
-                }
-            }
+            // Capture the command line from the first PID before killing
+            let cmdline = Self::read_cmdline(pids[0]).unwrap_or_else(|| vec![name.to_string()]);
+
+            println!("[splitux] wm::bars - Killing {} (cmdline: {:?})", name, cmdline);
+            let _ = Command::new("pkill").arg("-x").arg(name).status();
+
+            self.hidden_bars.push(HiddenBar {
+                name: name.to_string(),
+                cmdline,
+            });
         }
 
         if self.hidden_bars.is_empty() {
@@ -79,7 +97,7 @@ impl StatusBarManager {
         }
     }
 
-    /// Restore all previously hidden bars
+    /// Restore all previously hidden bars by restarting them
     pub fn restore_all(&mut self) {
         if self.hidden_bars.is_empty() {
             return;
@@ -88,14 +106,17 @@ impl StatusBarManager {
         println!("[splitux] wm::bars - Restoring {} status bar(s)", self.hidden_bars.len());
 
         for bar in &self.hidden_bars {
-            match bar {
-                HiddenBar::Toggle { name, signal } => {
-                    println!("[splitux] wm::bars - Toggling {} back on", name);
-                    let _ = Command::new("pkill").args([signal.as_str(), name.as_str()]).status();
-                }
-                HiddenBar::Killed { name } => {
-                    println!("[splitux] wm::bars - Restarting {}", name);
-                    let _ = Command::new(name).spawn();
+            println!("[splitux] wm::bars - Restarting {} (cmdline: {:?})", bar.name, bar.cmdline);
+
+            let (program, args) = match bar.cmdline.split_first() {
+                Some((prog, rest)) => (prog.as_str(), rest),
+                None => continue,
+            };
+
+            match Command::new(program).args(args).spawn() {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("[splitux] wm::bars - Failed to restart {}: {}", bar.name, e);
                 }
             }
         }
@@ -104,7 +125,7 @@ impl StatusBarManager {
     }
 
     /// Check if any bars are currently hidden
-    #[allow(dead_code)] // API for WM to check if cleanup needed
+    #[allow(dead_code)]
     pub fn has_hidden_bars(&self) -> bool {
         !self.hidden_bars.is_empty()
     }
