@@ -44,14 +44,13 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libsdl2-dev \
-            p7zip-full unzip zip curl wget \
-            libx11-dev libssl-dev \
+          sudo pacman -Sy --noconfirm \
+            base-devel pkgconf \
+            sdl2-compat \
+            7zip unzip zip curl wget \
+            libx11 openssl \
             bubblewrap slirp4netns \
-            libfuse2 file patchelf
+            fuse2 file patchelf
 
       - name: Install Rust
         run: |
@@ -349,8 +348,7 @@ jobs:
 
       - name: Install Flatpak
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          sudo pacman -Sy --noconfirm flatpak flatpak-builder
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08 || true
 
