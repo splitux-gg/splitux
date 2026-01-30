@@ -127,21 +127,7 @@ impl HyprlandManager {
     fn add_window_rules(&mut self, target_monitor: &str) -> WmResult<()> {
         self.target_monitor = Some(target_monitor.to_string());
 
-        // Match all gamescope variants (gamescope, gamescope-splitux, Gamescope, etc.)
-        let class_match = "class:^([Gg]amescope.*)$";
-
-        let commands = vec![
-            format!("keyword windowrulev2 float,{}", class_match),
-            format!("keyword windowrulev2 noborder,{}", class_match),
-            format!("keyword windowrulev2 noblur,{}", class_match),
-            format!("keyword windowrulev2 noshadow,{}", class_match),
-            format!("keyword windowrulev2 noanim,{}", class_match),
-            format!("keyword windowrulev2 opaque,{}", class_match),
-            format!("keyword windowrulev2 nodim,{}", class_match),
-            format!("keyword windowrulev2 forcergbx,{}", class_match),
-            format!("keyword windowrulev2 pin,{}", class_match),
-            format!("keyword windowrulev2 monitor {},{}", target_monitor, class_match),
-        ];
+        let commands = crate::wm::pure::hyprland::build_window_rules(target_monitor);
 
         println!(
             "[splitux] wm::hyprland - Adding window rules for monitor {}",
@@ -156,16 +142,7 @@ impl HyprlandManager {
 
     /// Apply visual properties directly to a window via setprop
     fn apply_window_props(&self, address: &str) -> WmResult<()> {
-        let commands = vec![
-            format!("setprop address:{} forcenoblur 1 lock", address),
-            format!("setprop address:{} forceopaque 1 lock", address),
-            format!("setprop address:{} forcenoanims 1 lock", address),
-            format!("setprop address:{} forcenoborder 1 lock", address),
-            format!("setprop address:{} forcenoshadow 1 lock", address),
-            format!("setprop address:{} alpha 1.0 lock", address),
-            format!("setprop address:{} alphainactive 1.0 lock", address),
-        ];
-
+        let commands = crate::wm::pure::hyprland::build_window_prop_commands(address);
         self.hyprctl_batch(&commands)
     }
 
@@ -361,42 +338,9 @@ impl WindowManager for HyprlandManager {
         println!("[splitux] wm::hyprland - Waiting for gamescope windows...");
 
         let expected_count = ctx.instances.len();
-        let max_wait = std::time::Duration::from_secs(120);
-        let poll_interval = std::time::Duration::from_millis(500);
-        let start = std::time::Instant::now();
-
-        loop {
-            let windows = self.get_gamescope_windows().unwrap_or_default();
-
-            if windows.len() >= expected_count {
-                println!(
-                    "[splitux] wm::hyprland - Found {} windows after {:.1}s",
-                    windows.len(),
-                    start.elapsed().as_secs_f32()
-                );
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                break;
-            }
-
-            if start.elapsed() > max_wait {
-                println!(
-                    "[splitux] wm::hyprland - Timeout waiting for windows ({}/{})",
-                    windows.len(),
-                    expected_count
-                );
-                break;
-            }
-
-            if start.elapsed().as_secs() % 5 == 0 && start.elapsed().as_millis() % 500 < 100 {
-                println!(
-                    "[splitux] wm::hyprland - Still waiting... ({}/{} windows)",
-                    windows.len(),
-                    expected_count
-                );
-            }
-
-            std::thread::sleep(poll_interval);
-        }
+        crate::wm::operations::poll::wait_for_windows("hyprland", expected_count, || {
+            self.get_gamescope_windows().unwrap_or_default().len()
+        })?;
 
         self.position_windows(ctx)
     }

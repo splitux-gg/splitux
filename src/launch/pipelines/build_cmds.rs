@@ -268,37 +268,3 @@ pub fn launch_cmds(
     Ok(cmds)
 }
 
-/// Print a single launch command for debugging
-pub fn print_launch_cmd(cmd: &Command, i: usize) {
-    println!("[splitux] INSTANCE {}:", i + 1);
-
-    let cwd = cmd.get_current_dir().unwrap_or_else(|| Path::new(""));
-    println!("[splitux] CWD={}", cwd.display());
-
-    for var in cmd.get_envs() {
-        let value = var.1.ok_or_else(|| "").unwrap_or_default();
-        println!(
-            "[splitux] {}={}",
-            var.0.to_string_lossy(),
-            value.display()
-        );
-    }
-
-    println!("[splitux] \"{}\"", cmd.get_program().display());
-
-    print!("[splitux] ");
-    for arg in cmd.get_args() {
-        let fmtarg = arg.to_string_lossy();
-        if fmtarg == "--bind"
-            || fmtarg == "bwrap"
-            || (fmtarg.starts_with("/") && fmtarg.len() > 1)
-        {
-            print!("\n[splitux] ");
-        } else {
-            print!(" ");
-        }
-        print!("\"{}\"", fmtarg);
-    }
-
-    println!("\n[splitux] ---------------------");
-}

@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::paths::PATH_PARTY;
+use crate::backend::operations::prepare_overlay_dir;
 
 // Re-use UnityBackend from photon module
 use crate::backend::photon::UnityBackend;
@@ -29,15 +29,7 @@ pub fn create_instance_overlay(
     is_windows: bool,
     backend: UnityBackend,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let overlay_dir = PATH_PARTY
-        .join("tmp")
-        .join(format!("facepunch-overlay-{}", instance_idx));
-
-    // Clean previous overlay
-    if overlay_dir.exists() {
-        fs::remove_dir_all(&overlay_dir)?;
-    }
-    fs::create_dir_all(&overlay_dir)?;
+    let overlay_dir = prepare_overlay_dir("facepunch", instance_idx)?;
 
     // 1. Install BepInEx core
     install_bepinex_core(&overlay_dir, is_windows, backend)?;

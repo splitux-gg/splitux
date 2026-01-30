@@ -13,7 +13,7 @@ pub use io::{import_handler, scan_handlers};
 use crate::backend::{
     EosSettings as BackendEosSettings, FacepunchSettings as BackendFacepunchSettings,
     GoldbergSettings as BackendGoldbergSettings, MultiplayerBackend,
-    PhotonSettings as BackendPhotonSettings,
+    PhotonSettings as BackendPhotonSettings, StandaloneSettings as BackendStandaloneSettings,
 };
 use crate::gptokeyb::GptokeybSettings;
 use crate::util::SanitizePath;
@@ -132,6 +132,11 @@ pub struct Handler {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eos: Option<BackendEosSettings>,
 
+    /// Standalone backend settings (BepInEx + plugins, no network emulation)
+    /// For games where mods handle their own multiplayer networking (e.g., DSP with Nebula)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone: Option<BackendStandaloneSettings>,
+
     /// Required mods/files that must be installed by the user
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_mods: Vec<RequiredMod>,
@@ -223,6 +228,7 @@ impl Default for Handler {
             photon: None,
             facepunch: None,
             eos: None,
+            standalone: None,
 
             required_mods: Vec::new(),
 
@@ -277,73 +283,27 @@ impl Handler {
 
     /// Migrate legacy backend fields to new optional backend format
     fn migrate_legacy_backends(&mut self) {
-        // Migrate Goldberg: old enum + flat fields -> new Optional<GoldbergSettings>
-        if self.goldberg.is_none() {
-            let should_enable = self.backend == MultiplayerBackend::Goldberg
-                || self.use_goldberg
-                || !self.goldberg_settings.is_empty()
-                || self.goldberg_disable_networking
-                || self.goldberg_networking_sockets;
-
-            if should_enable {
-                self.goldberg = Some(BackendGoldbergSettings {
-                    disable_networking: self.goldberg_disable_networking,
-                    networking_sockets: self.goldberg_networking_sockets,
-                    settings: self.goldberg_settings.clone(),
-                    plugin: None, // Legacy handlers don't have plugin support
-                });
-            }
-        }
-
-        // Migrate Photon: old enum + struct -> new Optional<PhotonSettings>
-        if self.photon.is_none() {
-            let should_enable = self.backend == MultiplayerBackend::Photon
-                || !self.photon_settings.is_empty();
-
-            if should_enable {
-                self.photon = Some(BackendPhotonSettings {
-                    config_path: self.photon_settings.config_path.clone(),
-                    shared_files: self.photon_settings.shared_files.clone(),
-                    plugin: None, // Legacy settings don't have plugin
-                });
-            }
-        }
-
-        // Migrate Facepunch: presence-based -> new Optional<FacepunchSettings>
-        if self.facepunch.is_none() {
-            let should_enable = !self.facepunch_settings.is_default()
-                || !self.runtime_patches.is_empty();
-
-            if should_enable {
-                self.facepunch = Some(BackendFacepunchSettings {
-                    spoof_identity: self.facepunch_settings.spoof_identity,
-                    force_valid: self.facepunch_settings.force_valid,
-                    photon_bypass: self.facepunch_settings.photon_bypass,
-                });
-            }
-        }
-
-        // Clear deprecated fields after migration
-        self.use_goldberg = false;
+        operations::migration::migrate_legacy_backends(self);
     }
 
     /// Trim whitespace from all string fields
     fn trim_fields(&mut self) {
-        self.name = self.name.trim().to_string();
-        self.exec = self.exec.trim().to_string();
-        self.author = self.author.trim().to_string();
-        self.version = self.version.trim().to_string();
-        self.info = self.info.trim().to_string();
-        self.path_gameroot = self.path_gameroot.trim().to_string();
-        self.runtime = self.runtime.trim().to_string();
-        self.args = self.args.trim().to_string();
-        self.env = self.env.trim().to_string();
-        self.proton_path = self.proton_path.trim().to_string();
-        self.original_save_path = self.original_save_path.trim().to_string();
+        use pure::validation::trim_field;
+        trim_field(&mut self.name);
+        trim_field(&mut self.exec);
+        trim_field(&mut self.author);
+        trim_field(&mut self.version);
+        trim_field(&mut self.info);
+        trim_field(&mut self.path_gameroot);
+        trim_field(&mut self.runtime);
+        trim_field(&mut self.args);
+        trim_field(&mut self.env);
+        trim_field(&mut self.proton_path);
+        trim_field(&mut self.original_save_path);
 
         // Trim paths in null_paths list
         for path in &mut self.game_null_paths {
-            *path = path.trim().to_string();
+            trim_field(path);
         }
         // Remove empty entries
         self.game_null_paths.retain(|p| !p.is_empty());
@@ -351,13 +311,7 @@ impl Handler {
 
     /// Validate that required fields are present
     fn validate(&self) -> Result<(), Box<dyn Error>> {
-        if self.name.is_empty() {
-            return Err("Handler 'name' is required".into());
-        }
-        if self.exec.is_empty() {
-            return Err("Handler 'exec' (executable path) is required".into());
-        }
-        Ok(())
+        pure::validation::validate_handler(&self.name, &self.exec)
     }
 
     pub fn from_cli(path_exec: &str, args: &str) -> Self {
@@ -439,6 +393,11 @@ impl Handler {
         self.eos.is_some()
     }
 
+    /// Check if Standalone backend is enabled
+    pub fn has_standalone(&self) -> bool {
+        self.standalone.is_some()
+    }
+
     /// Get display string for enabled backends (e.g., "Goldberg", "Photon, Facepunch")
     pub fn backend_display(&self) -> String {
         let mut backends = Vec::new();
@@ -453,6 +412,9 @@ impl Handler {
         }
         if self.has_facepunch() {
             backends.push("Facepunch");
+        }
+        if self.has_standalone() {
+            backends.push("Standalone");
         }
         if backends.is_empty() {
             "None".to_string()
@@ -479,6 +441,11 @@ impl Handler {
     /// Get EOS settings reference (if enabled)
     pub fn eos_ref(&self) -> Option<&BackendEosSettings> {
         self.eos.as_ref()
+    }
+
+    /// Get Standalone settings reference (if enabled)
+    pub fn standalone_ref(&self) -> Option<&BackendStandaloneSettings> {
+        self.standalone.as_ref()
     }
 
     /// Enable Goldberg backend with default settings

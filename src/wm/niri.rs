@@ -1,31 +1,12 @@
 //! Niri window manager integration via niri msg CLI
 
 use crate::wm::bars::StatusBarManager;
+use crate::wm::pure::layout::plan_tiling_layout;
+use crate::wm::types::WmMonitor;
 use crate::wm::{LayoutContext, WindowManager, WmResult};
 use std::process::Command;
 
-/// Layout type for tiled window arrangement
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum LayoutType {
-    /// N separate columns (side by side)
-    Columns,
-    /// All windows stacked in one column
-    Stacked,
-    /// 2x2 grid (2 columns with 2 stacked each)
-    Grid,
-}
-
-/// Niri monitor info from IPC
-#[derive(Debug, Clone)]
-struct NiriMonitor {
-    name: String,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-}
-
-/// Niri window info from IPC
+/// Niri window info from IPC (niri-specific: needs is_floating + u64 id)
 #[derive(Debug, Clone)]
 struct NiriWindow {
     id: u64,
@@ -85,7 +66,7 @@ impl NiriManager {
     }
 
     /// Get monitor info from Niri
-    fn get_monitors(&self) -> WmResult<Vec<NiriMonitor>> {
+    fn get_monitors(&self) -> WmResult<Vec<WmMonitor>> {
         let response = self.niri_msg(&["outputs"])?;
         let outputs: serde_json::Value = serde_json::from_str(&response)
             .map_err(|e| format!("Failed to parse outputs: {}", e))?;
@@ -96,7 +77,7 @@ impl NiriManager {
                 // Only include outputs with logical info (connected and enabled)
                 if let Some(logical) = output.get("logical") {
                     if !logical.is_null() {
-                        result.push(NiriMonitor {
+                        result.push(WmMonitor {
                             name: name.clone(),
                             x: logical["x"].as_i64().unwrap_or(0) as i32,
                             y: logical["y"].as_i64().unwrap_or(0) as i32,
@@ -113,13 +94,44 @@ impl NiriManager {
         Ok(result)
     }
 
-    /// Find monitor by index
-    fn get_monitor_by_index(&self, index: usize) -> WmResult<NiriMonitor> {
-        let monitors = self.get_monitors()?;
-        monitors
-            .into_iter()
-            .nth(index)
-            .ok_or_else(|| format!("Monitor index {} not found", index).into())
+    /// Find monitor by index (niri's position-sorted order)
+    /// Retries a few times if not found, to handle transient monitor enumeration
+    fn get_monitor_by_index(&self, index: usize) -> WmResult<WmMonitor> {
+        let max_retries = 5;
+        let retry_delay = std::time::Duration::from_millis(200);
+
+        for attempt in 0..max_retries {
+            let monitors = self.get_monitors()?;
+            if let Some(monitor) = monitors.into_iter().nth(index) {
+                return Ok(monitor);
+            }
+
+            if attempt < max_retries - 1 {
+                std::thread::sleep(retry_delay);
+            }
+        }
+
+        Err(format!("Monitor index {} not found after {} retries", index, max_retries).into())
+    }
+
+    /// Find monitor by connector name (e.g., "HDMI-A-1", "DP-1")
+    /// Retries a few times if not found, to handle transient monitor enumeration
+    fn get_monitor_by_name(&self, connector_name: &str) -> WmResult<WmMonitor> {
+        let max_retries = 5;
+        let retry_delay = std::time::Duration::from_millis(200);
+
+        for attempt in 0..max_retries {
+            let monitors = self.get_monitors()?;
+            if let Some(monitor) = monitors.into_iter().find(|m| m.name == connector_name) {
+                return Ok(monitor);
+            }
+
+            if attempt < max_retries - 1 {
+                std::thread::sleep(retry_delay);
+            }
+        }
+
+        Err(format!("Monitor '{}' not found after {} retries", connector_name, max_retries).into())
     }
 
     /// Get list of gamescope windows
@@ -147,29 +159,6 @@ impl NiriManager {
         Ok(result)
     }
 
-    /// Determine layout type from preset ID
-    fn get_layout_type(preset_id: &str) -> LayoutType {
-        match preset_id {
-            // Vertical = side-by-side columns
-            "2p_vertical" | "3p_vertical" => LayoutType::Columns,
-            // Horizontal = stacked in one column
-            "2p_horizontal" | "3p_horizontal" => LayoutType::Stacked,
-            // Grid = 2 columns with 2 stacked each
-            "4p_grid" | "4p_rows" | "4p_columns" => LayoutType::Grid,
-            _ => LayoutType::Columns, // Default fallback
-        }
-    }
-
-    /// Consume N-1 windows into the current column (stack them)
-    fn consume_into_column(&self, count: usize) -> WmResult<()> {
-        for _ in 0..(count.saturating_sub(1)) {
-            self.niri_action("consume-window-into-column", &[])?;
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        Ok(())
-    }
-
-
     /// Position all gamescope windows according to layout using tiled mode
     fn position_windows(&self, ctx: &LayoutContext) -> WmResult<()> {
         let windows = self.get_gamescope_windows()?;
@@ -177,14 +166,20 @@ impl NiriManager {
             return Err("No gamescope windows found".into());
         }
 
-        let monitor_index = ctx.instances.first().map(|i| i.monitor).unwrap_or(0);
-        let monitor = self.get_monitor_by_index(monitor_index)?;
-        let layout_type = Self::get_layout_type(ctx.preset.id);
-        let window_count = windows.len();
+        // Use the target monitor set in setup() (looked up by connector name)
+        let monitor = match &self.target_monitor {
+            Some(name) => self.get_monitor_by_name(name)?,
+            None => {
+                let monitor_index = ctx.instances.first().map(|i| i.monitor).unwrap_or(0);
+                self.get_monitor_by_index(monitor_index)?
+            }
+        };
+
+        let plan = plan_tiling_layout(ctx.preset.id, windows.len());
 
         println!(
-            "[splitux] wm::niri - Target monitor: {} ({}x{}), layout: {:?}, {} windows",
-            monitor.name, monitor.width, monitor.height, layout_type, window_count
+            "[splitux] wm::niri - Target monitor: {} ({}x{}), {} columns, {} windows",
+            monitor.name, monitor.width, monitor.height, plan.columns.len(), windows.len()
         );
 
         // Step 1: Move all windows to target monitor and ensure tiled
@@ -207,91 +202,46 @@ impl NiriManager {
             }
         }
 
-        // Step 2: Apply layout based on type
-        match layout_type {
-            LayoutType::Columns => {
-                // Each window in its own column with equal width
-                let width_percent = format!("{}%", 100 / window_count);
+        // Step 2: Apply tiling plan — re-fetch windows after tiling changes
+        let windows = self.get_gamescope_windows()?;
 
-                // Re-fetch windows after tiling changes
-                let windows = self.get_gamescope_windows()?;
+        for (col_idx, column) in plan.columns.iter().enumerate() {
+            let width = format!("{}%", column.width_percent);
 
-                for win in &windows {
+            if column.windows.len() == 1 {
+                // Single window in this column — just set width
+                if let Some(win) = windows.get(column.windows[0]) {
                     self.niri_action("focus-window", &["--id", &win.id.to_string()])?;
                     std::thread::sleep(std::time::Duration::from_millis(30));
-                    self.niri_action("set-column-width", &[&width_percent])?;
+                    self.niri_action("set-column-width", &[&width])?;
+                }
+            } else {
+                // Multiple windows stacked in this column
+                // Focus the first window
+                if let Some(win) = windows.get(column.windows[0]) {
+                    self.niri_action("focus-window", &["--id", &win.id.to_string()])?;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                 }
 
-                println!(
-                    "[splitux] wm::niri - Arranged {} columns at {}",
-                    window_count, width_percent
-                );
-            }
-
-            LayoutType::Stacked => {
-                // All windows in one column stacked vertically
-                // Focus first window, then consume others into it
-                let windows = self.get_gamescope_windows()?;
-
-                if let Some(first) = windows.first() {
-                    self.niri_action("focus-window", &["--id", &first.id.to_string()])?;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-
-                    // Consume remaining windows into the column
-                    self.consume_into_column(window_count)?;
-
-                    // Set column to full width
-                    self.niri_action("set-column-width", &["100%"])?;
+                // For subsequent windows: focus, move to column, consume
+                for &win_idx in &column.windows[1..] {
+                    if let Some(win) = windows.get(win_idx) {
+                        self.niri_action("focus-window", &["--id", &win.id.to_string()])?;
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                        self.niri_action("focus-column-left", &[])?;
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                        self.niri_action("consume-window-into-column", &[])?;
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
                 }
 
-                println!(
-                    "[splitux] wm::niri - Stacked {} windows in single column",
-                    window_count
-                );
+                self.niri_action("set-column-width", &[&width])?;
             }
 
-            LayoutType::Grid => {
-                // 2x2 grid: 2 columns with 2 stacked windows each
-                // The order depends on the preset (rows vs columns read order)
-                let windows = self.get_gamescope_windows()?;
-
-                if windows.len() >= 4 {
-                    // Determine window order based on preset
-                    let order: [usize; 4] = match ctx.preset.id {
-                        // 4p_columns: P1/P2 left column, P3/P4 right column
-                        "4p_columns" => [0, 1, 2, 3],
-                        // 4p_grid/4p_rows: P1/P3 left column (top/bottom), P2/P4 right column
-                        _ => [0, 2, 1, 3],
-                    };
-
-                    // Focus left column windows and stack them
-                    self.niri_action("focus-window", &["--id", &windows[order[0]].id.to_string()])?;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-
-                    // Move second left-column window next to first, then consume
-                    self.niri_action("focus-window", &["--id", &windows[order[1]].id.to_string()])?;
-                    std::thread::sleep(std::time::Duration::from_millis(30));
-                    self.niri_action("focus-column-left", &[])?;
-                    std::thread::sleep(std::time::Duration::from_millis(30));
-                    self.niri_action("consume-window-into-column", &[])?;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    self.niri_action("set-column-width", &["50%"])?;
-
-                    // Focus right column windows and stack them
-                    self.niri_action("focus-window", &["--id", &windows[order[2]].id.to_string()])?;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-
-                    self.niri_action("focus-window", &["--id", &windows[order[3]].id.to_string()])?;
-                    std::thread::sleep(std::time::Duration::from_millis(30));
-                    self.niri_action("focus-column-left", &[])?;
-                    std::thread::sleep(std::time::Duration::from_millis(30));
-                    self.niri_action("consume-window-into-column", &[])?;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    self.niri_action("set-column-width", &["50%"])?;
-
-                    println!("[splitux] wm::niri - Arranged 4 windows in 2x2 grid");
-                }
-            }
+            println!(
+                "[splitux] wm::niri - Column {}: {} windows at {}",
+                col_idx, column.windows.len(), width
+            );
         }
 
         Ok(())
@@ -312,8 +262,19 @@ impl WindowManager for NiriManager {
     fn setup(&mut self, ctx: &LayoutContext) -> WmResult<()> {
         println!("[splitux] wm::niri - Setting up");
 
+        // Get the target monitor using SDL's index (matches gamescope's --display-index)
         let monitor_index = ctx.instances.first().map(|i| i.monitor).unwrap_or(0);
-        let monitor = self.get_monitor_by_index(monitor_index)?;
+
+        // Look up by connector name from SDL monitor (preferred for accuracy)
+        let monitor = if let Some(sdl_monitor) = ctx.monitors.get(monitor_index) {
+            let connector = sdl_monitor.connector_name();
+            println!("[splitux] wm::niri - Looking up monitor by connector: {}", connector);
+            self.get_monitor_by_name(connector)?
+        } else {
+            // Fallback to index if SDL monitor not available
+            self.get_monitor_by_index(monitor_index)?
+        };
+
         self.target_monitor = Some(monitor.name.clone());
 
         println!(
@@ -331,42 +292,9 @@ impl WindowManager for NiriManager {
         println!("[splitux] wm::niri - Waiting for gamescope windows...");
 
         let expected_count = ctx.instances.len();
-        let max_wait = std::time::Duration::from_secs(120);
-        let poll_interval = std::time::Duration::from_millis(500);
-        let start = std::time::Instant::now();
-
-        loop {
-            let windows = self.get_gamescope_windows().unwrap_or_default();
-
-            if windows.len() >= expected_count {
-                println!(
-                    "[splitux] wm::niri - Found {} windows after {:.1}s",
-                    windows.len(),
-                    start.elapsed().as_secs_f32()
-                );
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                break;
-            }
-
-            if start.elapsed() > max_wait {
-                println!(
-                    "[splitux] wm::niri - Timeout waiting for windows ({}/{})",
-                    windows.len(),
-                    expected_count
-                );
-                break;
-            }
-
-            if start.elapsed().as_secs() % 5 == 0 && start.elapsed().as_millis() % 500 < 100 {
-                println!(
-                    "[splitux] wm::niri - Still waiting... ({}/{} windows)",
-                    windows.len(),
-                    expected_count
-                );
-            }
-
-            std::thread::sleep(poll_interval);
-        }
+        crate::wm::operations::poll::wait_for_windows("niri", expected_count, || {
+            self.get_gamescope_windows().unwrap_or_default().len()
+        })?;
 
         self.position_windows(ctx)
     }

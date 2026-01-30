@@ -16,7 +16,8 @@ use crate::monitor::Monitor;
 use crate::wm::presets::{get_preset_by_id, get_presets_for_count};
 use crate::wm::{LayoutContext, WindowManager, WindowManagerBackend};
 
-use super::build_cmds::{launch_cmds, print_launch_cmd};
+use super::build_cmds::launch_cmds;
+use super::super::pure::command::{format_launch_cmd, rebuild_command_with_blocking};
 
 /// Launch the game with all instances
 pub fn launch_game(
@@ -138,7 +139,8 @@ pub fn launch_game(
         let mut cmd = rebuild_command_with_blocking(cmd, bwrap_arg_count, &blocking_args);
 
         // Print the final command (with blocking args)
-        print_launch_cmd(&cmd, i);
+        print!("{}", format_launch_cmd(&cmd, i));
+        println!();
 
         if redirect_stdout {
             cmd.stdout(std::process::Stdio::null());
@@ -185,61 +187,7 @@ pub fn launch_game(
     Ok(())
 }
 
-/// Reconstruct a Command with extra args inserted at a specific position.
-///
-/// This is used to insert device-blocking bwrap args (--bind /dev/null /dev/input/...)
-/// between the bwrap options and the child command (proton/game). The insertion
-/// happens at spawn time so device permissions are checked against current state,
-/// not stale build-time state.
-fn rebuild_command_with_blocking(
-    cmd: std::process::Command,
-    insertion_idx: usize,
-    extra_args: &[String],
-) -> std::process::Command {
-    if extra_args.is_empty() {
-        return cmd;
-    }
-
-    let program = cmd.get_program().to_owned();
-    let all_args: Vec<std::ffi::OsString> = cmd.get_args().map(|a| a.to_owned()).collect();
-    let envs: Vec<_> = cmd
-        .get_envs()
-        .map(|(k, v)| (k.to_owned(), v.map(|v| v.to_owned())))
-        .collect();
-    let cwd = cmd.get_current_dir().map(|p| p.to_owned());
-
-    let mut new_cmd = std::process::Command::new(&program);
-
-    // Args before insertion point (gamescope + bwrap options)
-    new_cmd.args(&all_args[..insertion_idx]);
-
-    // Device blocking args
-    for arg in extra_args {
-        new_cmd.arg(arg);
-    }
-
-    // Args after insertion point (runtime + game exe + handler args)
-    new_cmd.args(&all_args[insertion_idx..]);
-
-    // Restore environment variables
-    for (key, val) in &envs {
-        match val {
-            Some(v) => {
-                new_cmd.env(key, v);
-            }
-            None => {
-                new_cmd.env_remove(key);
-            }
-        }
-    }
-
-    // Restore working directory
-    if let Some(dir) = &cwd {
-        new_cmd.current_dir(dir);
-    }
-
-    new_cmd
-}
+// rebuild_command_with_blocking moved to launch/pure/command.rs
 
 /// Set up audio routing for all instances
 ///

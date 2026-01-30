@@ -1,5 +1,6 @@
 // Handler operations - file I/O and Steam asset discovery
 
+pub mod migration;
 mod persistence;
 mod steam_assets;
 

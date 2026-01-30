@@ -52,3 +52,13 @@ pub enum StickDirection {
     Left,
     Right,
 }
+
+/// Result of polling an input device
+pub enum PollResult {
+    /// A button was pressed
+    Button(PadButton),
+    /// Device was disabled (with reason for logging at the app layer)
+    DeviceDisabled(String),
+    /// No input
+    None,
+}

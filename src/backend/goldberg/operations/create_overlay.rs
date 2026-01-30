@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::paths::{PATH_PARTY, PATH_RES};
+use crate::backend::operations::prepare_overlay_dir;
+use crate::paths::PATH_RES;
 
 use super::super::types::{GoldbergConfig, SteamApiDll, SteamDllType};
 use super::write_settings::write_steam_settings;
@@ -24,14 +25,7 @@ pub fn create_instance_overlay(
     handler_settings: &HashMap<String, String>,
     disable_networking: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let overlay_dir = PATH_PARTY
-        .join("tmp")
-        .join(format!("goldberg-overlay-{}", instance_idx));
-
-    // Clean previous overlay
-    if overlay_dir.exists() {
-        fs::remove_dir_all(&overlay_dir)?;
-    }
+    let overlay_dir = prepare_overlay_dir("goldberg", instance_idx)?;
 
     for dll in dlls {
         let dll_dir = dll.rel_path.parent().unwrap_or(Path::new(""));

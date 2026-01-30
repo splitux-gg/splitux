@@ -58,19 +58,23 @@ pub trait Backend {
 pub mod eos;
 pub mod facepunch;
 pub mod goldberg;
+pub mod operations;
 pub mod photon;
+pub mod standalone;
 
 // Re-export settings types for use in Handler
 pub use eos::EosSettings;
 pub use facepunch::FacepunchSettings;
 pub use goldberg::GoldbergSettings;
 pub use photon::PhotonSettings;
+pub use standalone::StandaloneSettings;
 
 // Use the modular backend implementations
 use self::eos as eos_mod;
 use self::facepunch as facepunch_mod;
 use self::goldberg as goldberg_mod;
 use self::photon as photon_mod;
+use self::standalone as standalone_mod;
 
 /// Collect enabled backends from handler as trait objects, sorted by priority
 fn collect_enabled_backends(handler: &Handler) -> Vec<Box<dyn Backend>> {
@@ -89,6 +93,9 @@ fn collect_enabled_backends(handler: &Handler) -> Vec<Box<dyn Backend>> {
     if let Some(settings) = handler.facepunch_ref() {
         let patches = handler.runtime_patches.clone();
         backends.push(Box::new(facepunch_mod::Facepunch::new(settings.clone(), patches)));
+    }
+    if let Some(settings) = handler.standalone_ref() {
+        backends.push(Box::new(standalone_mod::Standalone::new(settings.clone())));
     }
 
     // Sort by priority (highest first)

@@ -40,24 +40,36 @@ impl Splitux {
             });
         }
 
-        // Collect button presses
-        let buttons: Vec<Option<PadButton>> = self.input_devices
+        // Collect poll results
+        let results: Vec<PollResult> = self.input_devices
             .iter_mut()
             .filter(|pad| pad.enabled())
             .map(|pad| pad.poll())
             .collect();
 
-        // Process each button
-        for btn in buttons {
+        // Process each result
+        for result in results {
+            match result {
+                PollResult::DeviceDisabled(reason) => {
+                    eprintln!("[splitux] evdev: {}", reason);
+                    continue;
+                }
+                PollResult::None => continue,
+                _ => {}
+            }
+            let btn = match result {
+                PollResult::Button(b) => b,
+                _ => unreachable!(),
+            };
             match btn {
-                Some(PadButton::ABtn) => {
+                PadButton::ABtn => {
                     self.handle_a_button(
                         dropdown_open, dropdown_selection, profiles_len,
                         on_games_page, on_registry_page, on_settings_page, has_handlers,
                         &mut confirm_profile_selection, &mut start_pressed, &mut key,
                     );
                 }
-                Some(PadButton::BBtn) => {
+                PadButton::BBtn => {
                     if dropdown_open {
                         self.profile_dropdown_open = false;
                     } else if on_settings_page && self.active_dropdown.is_some() {
@@ -80,7 +92,7 @@ impl Splitux {
                         page_changed = true;
                     }
                 }
-                Some(PadButton::XBtn) => {
+                PadButton::XBtn => {
                     if on_settings_page && self.is_in_profile_section() {
                         // X = Delete profile when focused on a profile entry (index 21+)
                         if self.settings_option_index >= 21 {
@@ -92,7 +104,7 @@ impl Splitux {
                         self.show_edit_modal = true;
                     }
                 }
-                Some(PadButton::YBtn) => {
+                PadButton::YBtn => {
                     if on_settings_page && self.is_in_profile_section() {
                         // Y = Rename profile when focused on a profile entry (index 21+)
                         if self.settings_option_index >= 21 {
@@ -114,21 +126,21 @@ impl Splitux {
                         page_changed = true;
                     }
                 }
-                Some(PadButton::SelectBtn) => key = Some(Key::Tab),
-                Some(PadButton::StartBtn) => start_pressed = true,
-                Some(PadButton::Up) => {
+                PadButton::SelectBtn => key = Some(Key::Tab),
+                PadButton::StartBtn => start_pressed = true,
+                PadButton::Up => {
                     self.handle_direction_input(NavDirection::Up, &mut key);
                 }
-                Some(PadButton::Down) => {
+                PadButton::Down => {
                     self.handle_direction_input(NavDirection::Down, &mut key);
                 }
-                Some(PadButton::Left) => {
+                PadButton::Left => {
                     self.handle_direction_input(NavDirection::Left, &mut key);
                 }
-                Some(PadButton::Right) => {
+                PadButton::Right => {
                     self.handle_direction_input(NavDirection::Right, &mut key);
                 }
-                Some(PadButton::RB) => {
+                PadButton::RB => {
                     self.active_dropdown = None;
                     self.profile_dropdown_open = false;
                     if let Some((new_page, needs_fetch)) = self.cycle_page_forward(registry_needs_fetch) {
@@ -137,7 +149,7 @@ impl Splitux {
                         page_changed = true;
                     }
                 }
-                Some(PadButton::LB) => {
+                PadButton::LB => {
                     self.active_dropdown = None;
                     self.profile_dropdown_open = false;
                     if let Some((new_page, needs_fetch)) = self.cycle_page_backward(registry_needs_fetch) {
@@ -146,15 +158,15 @@ impl Splitux {
                         page_changed = true;
                     }
                 }
-                Some(PadButton::ScrollUp) => {
+                PadButton::ScrollUp => {
                     self.info_pane_scroll -= 60.0;
                     scroll_delta = Some(Vec2::new(0.0, 60.0));
                 }
-                Some(PadButton::ScrollDown) => {
+                PadButton::ScrollDown => {
                     self.info_pane_scroll += 60.0;
                     scroll_delta = Some(Vec2::new(0.0, -60.0));
                 }
-                Some(PadButton::LT) | Some(PadButton::RT) | Some(_) | None => {}
+                _ => {}
             }
         }
 

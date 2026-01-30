@@ -8,11 +8,16 @@ mod gamescope;
 mod hyprland;
 mod kwin;
 mod layout;
+mod niri;
+pub mod operations;
 pub mod presets;
+pub mod pure;
+pub mod types;
 
 pub use gamescope::GamescopeOnlyManager;
 pub use hyprland::HyprlandManager;
 pub use kwin::KWinManager;
+pub use niri::NiriManager;
 
 use crate::instance::Instance;
 use crate::monitor::Monitor;
@@ -78,6 +83,7 @@ pub trait NestedSession: WindowManager {
 pub enum WindowManagerBackend {
     KWin(KWinManager),
     Hyprland(HyprlandManager),
+    Niri(NiriManager),
     GamescopeOnly(GamescopeOnlyManager),
 }
 
@@ -100,7 +106,13 @@ impl WindowManagerBackend {
             }
         }
 
-        // 3. Check for SteamOS / Gamescope session
+        // 3. Check for Niri (via NIRI_SOCKET env var or niri msg)
+        if std::env::var("NIRI_SOCKET").is_ok() || NiriManager::is_available() {
+            println!("[splitux] wm - Detected Niri compositor");
+            return Self::Niri(NiriManager::new());
+        }
+
+        // 4. Check for SteamOS / Gamescope session
         if std::env::var("GAMESCOPE_WAYLAND_DISPLAY").is_ok()
             || std::env::var("SteamOS").is_ok()
         {
@@ -108,7 +120,7 @@ impl WindowManagerBackend {
             return Self::GamescopeOnly(GamescopeOnlyManager::new());
         }
 
-        // 4. Try process detection as last resort
+        // 5. Try process detection as last resort
         if let Ok(output) = std::process::Command::new("pgrep")
             .args(["-x", "Hyprland"])
             .output()
@@ -129,7 +141,17 @@ impl WindowManagerBackend {
             }
         }
 
-        // 5. Default to no WM positioning
+        if let Ok(output) = std::process::Command::new("pgrep")
+            .args(["-x", "niri"])
+            .output()
+        {
+            if output.status.success() && NiriManager::is_available() {
+                println!("[splitux] wm - Detected Niri via process");
+                return Self::Niri(NiriManager::new());
+            }
+        }
+
+        // 6. Default to no WM positioning
         println!("[splitux] wm - No supported WM detected, using Gamescope-only mode");
         Self::GamescopeOnly(GamescopeOnlyManager::new())
     }
@@ -142,6 +164,7 @@ impl WindowManager for WindowManagerBackend {
         match self {
             Self::KWin(wm) => wm.name(),
             Self::Hyprland(wm) => wm.name(),
+            Self::Niri(wm) => wm.name(),
             Self::GamescopeOnly(wm) => wm.name(),
         }
     }
@@ -150,6 +173,7 @@ impl WindowManager for WindowManagerBackend {
         match self {
             Self::KWin(wm) => wm.setup(ctx),
             Self::Hyprland(wm) => wm.setup(ctx),
+            Self::Niri(wm) => wm.setup(ctx),
             Self::GamescopeOnly(wm) => wm.setup(ctx),
         }
     }
@@ -158,6 +182,7 @@ impl WindowManager for WindowManagerBackend {
         match self {
             Self::KWin(wm) => wm.on_instances_launched(ctx),
             Self::Hyprland(wm) => wm.on_instances_launched(ctx),
+            Self::Niri(wm) => wm.on_instances_launched(ctx),
             Self::GamescopeOnly(wm) => wm.on_instances_launched(ctx),
         }
     }
@@ -166,6 +191,7 @@ impl WindowManager for WindowManagerBackend {
         match self {
             Self::KWin(wm) => wm.teardown(),
             Self::Hyprland(wm) => wm.teardown(),
+            Self::Niri(wm) => wm.teardown(),
             Self::GamescopeOnly(wm) => wm.teardown(),
         }
     }
@@ -182,6 +208,7 @@ impl WindowManager for WindowManagerBackend {
         match self {
             Self::KWin(wm) => wm.is_reactive(),
             Self::Hyprland(wm) => wm.is_reactive(),
+            Self::Niri(wm) => wm.is_reactive(),
             Self::GamescopeOnly(wm) => wm.is_reactive(),
         }
     }

@@ -3,10 +3,19 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 pub static PATH_RES: LazyLock<PathBuf> = LazyLock::new(|| {
-    let localinstall = PathBuf::from("/usr/share/splitux");
-    if localinstall.exists() {
-        return localinstall;
+    // Check system-wide install
+    let systeminstall = PathBuf::from("/usr/share/splitux");
+    if systeminstall.exists() {
+        return systeminstall;
     }
+    // Check user-local install (~/.local/share/splitux)
+    if let Ok(home) = env::var("HOME") {
+        let localinstall = PathBuf::from(home).join(".local/share/splitux");
+        if localinstall.exists() {
+            return localinstall;
+        }
+    }
+    // Fallback to relative res directory (for development)
     env::current_exe().unwrap().parent().unwrap().join("res")
 });
 
@@ -41,7 +50,11 @@ pub static PATH_STEAM: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 pub static BIN_UMU_RUN: LazyLock<PathBuf> = LazyLock::new(|| {
-    let bin_candidates = [PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")];
+    let bin_candidates = [
+        PATH_HOME.join(".local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
 
     for candidate in &bin_candidates {
         let bin = candidate.join("umu-run");
@@ -55,7 +68,11 @@ pub static BIN_UMU_RUN: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 pub static BIN_GSC_SPLITUX: LazyLock<PathBuf> = LazyLock::new(|| {
-    let bin_candidates = [PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")];
+    let bin_candidates = [
+        PATH_HOME.join(".local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
 
     for candidate in &bin_candidates {
         let bin = candidate.join("gamescope-splitux");
@@ -69,7 +86,11 @@ pub static BIN_GSC_SPLITUX: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 pub static BIN_GPTOKEYB: LazyLock<PathBuf> = LazyLock::new(|| {
-    let bin_candidates = [PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")];
+    let bin_candidates = [
+        PATH_HOME.join(".local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
 
     for candidate in &bin_candidates {
         let bin = candidate.join("gptokeyb");

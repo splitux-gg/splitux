@@ -5,7 +5,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::paths::{PATH_PARTY, PATH_RES};
+use crate::backend::operations::prepare_overlay_dir;
+use crate::paths::PATH_RES;
 
 use super::super::types::{EosConfig, EosDll};
 use super::write_settings::write_eos_settings;
@@ -23,14 +24,7 @@ pub fn create_instance_overlay(
     enable_lan: bool,
     disable_online_networking: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let overlay_dir = PATH_PARTY
-        .join("tmp")
-        .join(format!("eos-overlay-{}", instance_idx));
-
-    // Clean previous overlay
-    if overlay_dir.exists() {
-        fs::remove_dir_all(&overlay_dir)?;
-    }
+    let overlay_dir = prepare_overlay_dir("eos", instance_idx)?;
 
     for dll in dlls {
         let dll_dir = dll.rel_path.parent().unwrap_or(Path::new(""));

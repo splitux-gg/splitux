@@ -222,8 +222,12 @@ impl eframe::App for Splitux {
                         });
                 });
         }
+        // Always schedule repaint to avoid busy-polling on some backends.
+        // Use faster rate when focused for smooth UI, slower when unfocused to save CPU.
         if ctx.input(|input| input.focused) {
             ctx.request_repaint_after(std::time::Duration::from_millis(33)); // 30 fps
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500)); // 2 fps when unfocused
         }
     }
 }
