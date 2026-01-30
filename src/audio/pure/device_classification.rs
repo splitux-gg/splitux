@@ -15,7 +15,10 @@ pub fn classify_device(name: &str, description: &str) -> AudioDeviceType {
     if name_lower.contains("hdmi") || desc_lower.contains("hdmi") {
         return AudioDeviceType::Hdmi;
     }
-    if name_lower.contains("displayport") || name_lower.contains("dp-") {
+    // DisplayPort: match "dp-" but exclude Bluetooth A2DP ("a2dp")
+    if name_lower.contains("displayport")
+        || (name_lower.contains("dp-") && !name_lower.contains("a2dp"))
+    {
         return AudioDeviceType::Hdmi; // Treat DP same as HDMI for display audio
     }
 
@@ -41,15 +44,15 @@ pub fn classify_device(name: &str, description: &str) -> AudioDeviceType {
         return AudioDeviceType::Virtual;
     }
 
+    // USB audio devices without specific type - default to headphones
+    // (most USB audio is headphones/DACs, even if PulseAudio reports analog-stereo)
+    if name_lower.contains("usb") {
+        return AudioDeviceType::Headphone;
+    }
+
     // Check for speakers (analog output is usually speakers)
     if name_lower.contains("analog") || desc_lower.contains("speaker") {
         return AudioDeviceType::Speaker;
-    }
-
-    // USB audio devices without specific type - default to headphones
-    // (most USB audio is headphones/DACs)
-    if name_lower.contains("usb") {
-        return AudioDeviceType::Headphone;
     }
 
     AudioDeviceType::Unknown
