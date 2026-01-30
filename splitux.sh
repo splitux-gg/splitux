@@ -437,7 +437,7 @@ download_gamescope() {
     fi
 
     if [[ -n "$local_version" ]]; then
-        step "Updating gamescope-splitux $local_version → $gsc_release..."
+        step "Updating gamescope-splitux $local_version -> $gsc_release..."
     else
         step "Downloading gamescope-splitux $gsc_release..."
     fi
@@ -490,7 +490,7 @@ download_gptokeyb() {
     fi
 
     if [[ -n "$local_version" ]]; then
-        step "Updating gptokeyb-splitux $local_version → $gptk_release..."
+        step "Updating gptokeyb-splitux $local_version -> $gptk_release..."
     else
         step "Downloading gptokeyb-splitux $gptk_release..."
     fi
@@ -747,6 +747,8 @@ do_install() {
     mkdir -p "$prefix/bin" "$prefix/share/splitux"
 
     cp "$BUILD_DIR/splitux" "$prefix/bin/"
+    # Copy helper binaries (gamescope-splitux, gptokeyb, etc.)
+    [[ -d "$BUILD_DIR/bin" ]] && cp "$BUILD_DIR/bin"/* "$prefix/bin/"
     [[ -d "$BUILD_DIR/res" ]] && cp -r "$BUILD_DIR/res"/* "$prefix/share/splitux/"
 
     info "Installed to $prefix (ensure $prefix/bin is in PATH)"
