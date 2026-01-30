@@ -53,7 +53,7 @@ pub fn setup_audio_env(cmd: &mut Command, sink_name: &str) {
     cmd.args(["--setenv", "PULSE_SINK", sink_name]);
 }
 
-/// Get all /dev/input/js* device paths to block legacy joystick interface
+/// Get all /dev/input/js* device paths (legacy joystick interface)
 pub fn glob_js_devices() -> Vec<String> {
     let mut devices = Vec::new();
     if let Ok(entries) = std::fs::read_dir("/dev/input") {
@@ -173,51 +173,98 @@ pub fn get_gamepad_hidraw_devices(
     to_block
 }
 
-/// Block input devices not assigned to this instance
+/// Build blocking args for js devices. Returns bwrap --bind args as a flat Vec.
 ///
-/// This ensures each game instance only sees its assigned controllers
-pub fn block_unassigned_devices(
-    cmd: &mut Command,
-    input_devices: &[DeviceInfo],
-    assigned_indices: &[usize],
-    instance_idx: usize,
-) {
-    // Block ALL js* devices to force SDL to use evdev instead
-    let js_devices = glob_js_devices();
+/// Call this RIGHT BEFORE spawning so we check which devices are currently
+/// accessible. Gamescope may recreate js devices with different ownership.
+pub fn get_js_blocking_args(initial_js_devices: &[String], instance_idx: usize) -> Vec<String> {
+    let js_to_block: Vec<_> = initial_js_devices
+        .iter()
+        .filter(|p| {
+            let path = std::path::Path::new(p);
+            path.exists() && std::fs::OpenOptions::new().write(true).open(path).is_ok()
+        })
+        .collect();
     println!(
         "[splitux] Instance {}: Blocking {} js devices: {:?}",
         instance_idx,
-        js_devices.len(),
-        js_devices
+        js_to_block.len(),
+        js_to_block
     );
-    for js_path in &js_devices {
-        cmd.args(["--bind", "/dev/null", js_path]);
+    let mut args = Vec::new();
+    for js_path in &js_to_block {
+        args.extend(["--bind".to_string(), "/dev/null".to_string(), js_path.to_string()]);
     }
+    args
+}
 
-    // Block evdev devices for gamepads NOT assigned to this instance
+/// Build blocking args for evdev and hidraw devices. Returns bwrap --bind args as a flat Vec.
+///
+/// Call this RIGHT BEFORE spawning so we check which devices are currently
+/// accessible. Gamescope may recreate devices with different ownership.
+pub fn get_evdev_hidraw_blocking_args(
+    input_devices: &[DeviceInfo],
+    assigned_indices: &[usize],
+    instance_idx: usize,
+) -> Vec<String> {
+    let mut args = Vec::new();
+
+    // Block evdev devices with permission check
     let unassigned_evdev = get_unassigned_gamepad_evdev(input_devices, assigned_indices);
+    let evdev_to_block: Vec<_> = unassigned_evdev
+        .iter()
+        .filter(|p| {
+            let path = std::path::Path::new(p);
+            path.exists() && std::fs::OpenOptions::new().write(true).open(path).is_ok()
+        })
+        .collect();
+
     println!(
-        "[splitux] Instance {}: Blocking {} unassigned evdev devices: {:?}",
+        "[splitux] Instance {}: Blocking {} evdev devices: {:?}",
         instance_idx,
-        unassigned_evdev.len(),
-        unassigned_evdev
+        evdev_to_block.len(),
+        evdev_to_block
     );
-    for evdev_path in &unassigned_evdev {
-        cmd.args(["--bind", "/dev/null", evdev_path]);
+
+    for path in &evdev_to_block {
+        args.extend(["--bind".to_string(), "/dev/null".to_string(), path.to_string()]);
     }
 
-    // Block hidraw devices for gamepads NOT assigned to this instance
+    // Block hidraw devices with permission check
     let unassigned_hidraw = get_gamepad_hidraw_devices(input_devices, assigned_indices);
+    let hidraw_to_block: Vec<_> = unassigned_hidraw
+        .iter()
+        .filter(|p| {
+            let path = std::path::Path::new(p);
+            path.exists() && std::fs::OpenOptions::new().write(true).open(path).is_ok()
+        })
+        .collect();
+
     println!(
-        "[splitux] Instance {}: Blocking {} unassigned hidraw devices: {:?}",
+        "[splitux] Instance {}: Blocking {} hidraw devices: {:?}",
         instance_idx,
-        unassigned_hidraw.len(),
-        unassigned_hidraw
+        hidraw_to_block.len(),
+        hidraw_to_block
     );
-    for hidraw_path in &unassigned_hidraw {
-        cmd.args(["--bind", "/dev/null", hidraw_path]);
+
+    for path in &hidraw_to_block {
+        args.extend(["--bind".to_string(), "/dev/null".to_string(), path.to_string()]);
     }
 
+    args
+}
+
+/// Log assigned device indices for this instance.
+///
+/// Note: Actual device blocking (js, evdev, hidraw) is now handled at spawn time
+/// by block_js_devices() and block_evdev_hidraw_devices() to avoid race conditions
+/// when gamescope recreates device nodes with different ownership.
+pub fn log_assigned_devices(
+    _cmd: &mut Command,
+    _input_devices: &[DeviceInfo],
+    assigned_indices: &[usize],
+    instance_idx: usize,
+) {
     println!(
         "[splitux] Instance {}: Assigned device indices: {:?}",
         instance_idx, assigned_indices

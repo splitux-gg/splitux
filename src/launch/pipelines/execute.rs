@@ -7,6 +7,7 @@ use crate::audio::{
     resolve_audio_system, setup_audio_session, teardown_audio_session, AudioContext, AudioSystem,
     VirtualSink,
 };
+use crate::bwrap;
 use crate::gptokeyb;
 use crate::handler::Handler;
 use crate::input::DeviceInfo;
@@ -15,7 +16,7 @@ use crate::monitor::Monitor;
 use crate::wm::presets::{get_preset_by_id, get_presets_for_count};
 use crate::wm::{LayoutContext, WindowManager, WindowManagerBackend};
 
-use super::build_cmds::{launch_cmds, print_launch_cmds};
+use super::build_cmds::{launch_cmds, print_launch_cmd};
 
 /// Launch the game with all instances
 pub fn launch_game(
@@ -36,11 +37,11 @@ pub fn launch_game(
         h,
         input_devices,
         instances,
+        monitors,
         cfg,
         &audio_sink_envs,
         &gptokeyb_virtual_devices,
     )?;
-    print_launch_cmds(&new_cmds);
 
     // Create WM backend based on config
     let mut wm = match &cfg.window_manager {
@@ -108,8 +109,7 @@ pub fn launch_game(
     // if stdout is a TTY. Redirecting to null makes isatty(1) return false.
     let redirect_stdout = !h.win() && h.has_facepunch();
 
-    let mut i = 0;
-    for mut cmd in new_cmds {
+    for (i, (cmd, bwrap_arg_count)) in new_cmds.into_iter().enumerate() {
         // Input initialization delay before spawn (except first instance)
         if i > 0 && input_init_delay > 0.0 {
             println!(
@@ -119,10 +119,32 @@ pub fn launch_game(
             std::thread::sleep(std::time::Duration::from_secs_f64(input_init_delay));
         }
 
+        // Build fresh device blocking args right before spawn (spawn-time permission check).
+        // These must be inserted as bwrap args, before the child command (proton/game).
+        let blocking_args = if !h.disable_bwrap && !h.disable_input_isolation {
+            let initial_js_devices = bwrap::glob_js_devices();
+            let mut args = bwrap::get_js_blocking_args(&initial_js_devices, i);
+            args.extend(bwrap::get_evdev_hidraw_blocking_args(
+                input_devices,
+                &instances[i].devices,
+                i,
+            ));
+            args
+        } else {
+            Vec::new()
+        };
+
+        // Reconstruct command with blocking args inserted at the bwrap/child boundary
+        let mut cmd = rebuild_command_with_blocking(cmd, bwrap_arg_count, &blocking_args);
+
+        // Print the final command (with blocking args)
+        print_launch_cmd(&cmd, i);
+
         if redirect_stdout {
             cmd.stdout(std::process::Stdio::null());
             cmd.stderr(std::process::Stdio::null());
         }
+
         let handle = cmd.spawn()?;
         handles.push(handle);
 
@@ -134,7 +156,6 @@ pub fn launch_game(
             );
             std::thread::sleep(std::time::Duration::from_secs_f64(vulkan_init_delay));
         }
-        i += 1;
     }
 
     // Notify WM that all instances have been launched (for positioning)
@@ -162,6 +183,62 @@ pub fn launch_game(
     }
 
     Ok(())
+}
+
+/// Reconstruct a Command with extra args inserted at a specific position.
+///
+/// This is used to insert device-blocking bwrap args (--bind /dev/null /dev/input/...)
+/// between the bwrap options and the child command (proton/game). The insertion
+/// happens at spawn time so device permissions are checked against current state,
+/// not stale build-time state.
+fn rebuild_command_with_blocking(
+    cmd: std::process::Command,
+    insertion_idx: usize,
+    extra_args: &[String],
+) -> std::process::Command {
+    if extra_args.is_empty() {
+        return cmd;
+    }
+
+    let program = cmd.get_program().to_owned();
+    let all_args: Vec<std::ffi::OsString> = cmd.get_args().map(|a| a.to_owned()).collect();
+    let envs: Vec<_> = cmd
+        .get_envs()
+        .map(|(k, v)| (k.to_owned(), v.map(|v| v.to_owned())))
+        .collect();
+    let cwd = cmd.get_current_dir().map(|p| p.to_owned());
+
+    let mut new_cmd = std::process::Command::new(&program);
+
+    // Args before insertion point (gamescope + bwrap options)
+    new_cmd.args(&all_args[..insertion_idx]);
+
+    // Device blocking args
+    for arg in extra_args {
+        new_cmd.arg(arg);
+    }
+
+    // Args after insertion point (runtime + game exe + handler args)
+    new_cmd.args(&all_args[insertion_idx..]);
+
+    // Restore environment variables
+    for (key, val) in &envs {
+        match val {
+            Some(v) => {
+                new_cmd.env(key, v);
+            }
+            None => {
+                new_cmd.env_remove(key);
+            }
+        }
+    }
+
+    // Restore working directory
+    if let Some(dir) = &cwd {
+        new_cmd.current_dir(dir);
+    }
+
+    new_cmd
 }
 
 /// Set up audio routing for all instances

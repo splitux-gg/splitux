@@ -12,6 +12,7 @@ use crate::gamescope;
 use crate::handler::{Handler, SDL2Override};
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
+use crate::monitor::Monitor;
 use crate::paths::{PATH_PARTY, PATH_STEAM};
 use crate::proton;
 use crate::util::*;
@@ -27,14 +28,18 @@ use super::super::types::SDL_GAMECONTROLLER_IGNORE_DEVICES;
 ///
 /// The `gptokeyb_virtual_devices` parameter contains the path to each instance's
 /// virtual keyboard/mouse device created by gptokeyb (None if gptokeyb not used).
+/// Returns Vec of (Command, bwrap_arg_count) where bwrap_arg_count is the
+/// number of args before the child command. Device blocking args are inserted
+/// at this position at spawn time for fresh permission checks.
 pub fn launch_cmds(
     h: &Handler,
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
+    monitors: &[Monitor],
     cfg: &SplituxConfig,
     audio_sink_envs: &[String],
     gptokeyb_virtual_devices: &[Option<PathBuf>],
-) -> Result<Vec<std::process::Command>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(std::process::Command, usize)>, Box<dyn std::error::Error>> {
     let win = h.win();
     let exec = Path::new(&h.exec);
     let runtime = h.runtime.as_str();
@@ -59,7 +64,7 @@ pub fn launch_cmds(
         fuse_overlayfs_mount_gamedirs(h, instances, &backend_overlays)?;
     }
 
-    let mut cmds: Vec<Command> = Vec::new();
+    let mut cmds: Vec<(Command, usize)> = Vec::new();
 
     for (i, instance) in instances.iter().enumerate() {
         let gamedir = if h.is_saved_handler() && !cfg.disable_mount_gamedirs {
@@ -106,7 +111,7 @@ pub fn launch_cmds(
 
             // BepInEx doorstop requires native winhttp.dll override
             // Without this, Wine uses its builtin and BepInEx never loads
-            if h.has_photon() || h.has_facepunch() || h.has_goldberg_plugin() {
+            if h.has_photon() || h.has_facepunch() || h.has_goldberg_plugin() || h.has_standalone() {
                 cmd.env("WINEDLLOVERRIDES", "winhttp=n,b");
             }
         }
@@ -129,7 +134,7 @@ pub fn launch_cmds(
         }
 
         // 3. Add gamescope arguments
-        gamescope::add_args(&mut cmd, instance, cfg);
+        gamescope::add_args(&mut cmd, instance, monitors, cfg);
         let virtual_device = gptokeyb_virtual_devices.get(i).and_then(|v| v.as_ref());
         gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
         gamescope::add_separator(&mut cmd);
@@ -174,9 +179,9 @@ pub fn launch_cmds(
                 }
             }
 
-            // Block unassigned input devices (unless disabled for mods that handle input internally)
+            // Log assigned devices and block unassigned devices
             if !h.disable_input_isolation {
-                bwrap::block_unassigned_devices(&mut cmd, input_devices, &instance.devices, i);
+                bwrap::log_assigned_devices(&mut cmd, input_devices, &instance.devices, i);
             }
 
             // 5. Profile bindings
@@ -203,9 +208,14 @@ pub fn launch_cmds(
                     ]);
                 }
             }
+
         } else {
             println!("[splitux] Instance {}: bwrap disabled, skipping container", i);
         }
+
+        // Record arg count at end of bwrap section (before runtime/game args).
+        // Device blocking args will be inserted at this position at spawn time.
+        let bwrap_arg_count = cmd.get_args().count();
 
         // 7. Runtime (Proton/Wine or Steam Runtime)
         if win {
@@ -252,45 +262,43 @@ pub fn launch_cmds(
             cmd.arg(processed_arg);
         }
 
-        cmds.push(cmd);
+        cmds.push((cmd, bwrap_arg_count));
     }
 
     Ok(cmds)
 }
 
-/// Print launch commands for debugging
-pub fn print_launch_cmds(cmds: &Vec<Command>) {
-    for (i, cmd) in cmds.iter().enumerate() {
-        println!("[splitux] INSTANCE {}:", i + 1);
+/// Print a single launch command for debugging
+pub fn print_launch_cmd(cmd: &Command, i: usize) {
+    println!("[splitux] INSTANCE {}:", i + 1);
 
-        let cwd = cmd.get_current_dir().unwrap_or_else(|| Path::new(""));
-        println!("[splitux] CWD={}", cwd.display());
+    let cwd = cmd.get_current_dir().unwrap_or_else(|| Path::new(""));
+    println!("[splitux] CWD={}", cwd.display());
 
-        for var in cmd.get_envs() {
-            let value = var.1.ok_or_else(|| "").unwrap_or_default();
-            println!(
-                "[splitux] {}={}",
-                var.0.to_string_lossy(),
-                value.display()
-            );
-        }
-
-        println!("[splitux] \"{}\"", cmd.get_program().display());
-
-        print!("[splitux] ");
-        for arg in cmd.get_args() {
-            let fmtarg = arg.to_string_lossy();
-            if fmtarg == "--bind"
-                || fmtarg == "bwrap"
-                || (fmtarg.starts_with("/") && fmtarg.len() > 1)
-            {
-                print!("\n[splitux] ");
-            } else {
-                print!(" ");
-            }
-            print!("\"{}\"", fmtarg);
-        }
-
-        println!("\n[splitux] ---------------------");
+    for var in cmd.get_envs() {
+        let value = var.1.ok_or_else(|| "").unwrap_or_default();
+        println!(
+            "[splitux] {}={}",
+            var.0.to_string_lossy(),
+            value.display()
+        );
     }
+
+    println!("[splitux] \"{}\"", cmd.get_program().display());
+
+    print!("[splitux] ");
+    for arg in cmd.get_args() {
+        let fmtarg = arg.to_string_lossy();
+        if fmtarg == "--bind"
+            || fmtarg == "bwrap"
+            || (fmtarg.starts_with("/") && fmtarg.len() > 1)
+        {
+            print!("\n[splitux] ");
+        } else {
+            print!(" ");
+        }
+        print!("\"{}\"", fmtarg);
+    }
+
+    println!("\n[splitux] ---------------------");
 }

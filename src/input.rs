@@ -152,71 +152,95 @@ impl InputDevice {
         }
     }
     pub fn poll(&mut self) -> Option<PadButton> {
+        // Quick check: if device node is gone, disable immediately
+        if !std::path::Path::new(&self.path).exists() {
+            self.enabled = false;
+            return None;
+        }
+
         let mut btn: Option<PadButton> = None;
 
         // Hold-to-repeat timing constants
         const INITIAL_DELAY_MS: u128 = 300; // Delay before first repeat
         const REPEAT_RATE_MS: u128 = 80; // Time between repeats
 
+        const MAX_EVENTS_PER_POLL: usize = 256;
+
         // Process events - update stored stick positions
-        if let Ok(events) = self.dev.fetch_events() {
-            for event in events {
-                let summary = event.destructure();
+        match self.dev.fetch_events() {
+            Ok(events) => {
+                let mut count = 0;
+                for event in events {
+                    count += 1;
+                    if count > MAX_EVENTS_PER_POLL {
+                        eprintln!("[splitux] evdev: exceeded max events for {}, disabling device", self.path);
+                        self.enabled = false;
+                        break;
+                    }
 
-                match summary {
-                    EventSummary::Key(_, _, 1) => {
-                        self.has_button_held = true;
+                    let summary = event.destructure();
+
+                    match summary {
+                        EventSummary::Key(_, _, 1) => {
+                            self.has_button_held = true;
+                        }
+                        EventSummary::Key(_, _, 0) => {
+                            self.has_button_held = false;
+                        }
+                        // Update stored stick positions (persisted between polls)
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_X, val) => {
+                            self.stick_x = val;
+                        }
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_Y, val) => {
+                            self.stick_y = val;
+                        }
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_RY, val) => {
+                            self.scroll_y = val;
+                        }
+                        _ => {}
                     }
-                    EventSummary::Key(_, _, 0) => {
-                        self.has_button_held = false;
-                    }
-                    // Update stored stick positions (persisted between polls)
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_X, val) => {
-                        self.stick_x = val;
-                    }
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_Y, val) => {
-                        self.stick_y = val;
-                    }
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_RY, val) => {
-                        self.scroll_y = val;
-                    }
-                    _ => {}
+
+                    btn = match summary {
+                        EventSummary::Key(_, KeyCode::BTN_SOUTH, 1) => Some(PadButton::ABtn),
+                        EventSummary::Key(_, KeyCode::BTN_EAST, 1) => Some(PadButton::BBtn),
+                        EventSummary::Key(_, KeyCode::BTN_NORTH, 1) => Some(PadButton::XBtn),
+                        EventSummary::Key(_, KeyCode::BTN_WEST, 1) => Some(PadButton::YBtn),
+                        EventSummary::Key(_, KeyCode::BTN_START, 1) => Some(PadButton::StartBtn),
+                        EventSummary::Key(_, KeyCode::BTN_SELECT, 1) => Some(PadButton::SelectBtn),
+                        EventSummary::Key(_, KeyCode::BTN_TL, 1) => Some(PadButton::LB),
+                        EventSummary::Key(_, KeyCode::BTN_TR, 1) => Some(PadButton::RB),
+                        EventSummary::Key(_, KeyCode::BTN_TL2, 1) => Some(PadButton::LT),
+                        EventSummary::Key(_, KeyCode::BTN_TR2, 1) => Some(PadButton::RT),
+                        // D-pad
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0X, -1) => {
+                            Some(PadButton::Left)
+                        }
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0X, 1) => {
+                            Some(PadButton::Right)
+                        }
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0Y, -1) => {
+                            Some(PadButton::Up)
+                        }
+                        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0Y, 1) => {
+                            Some(PadButton::Down)
+                        }
+                        // Keyboard
+                        EventSummary::Key(_, KeyCode::KEY_A, 1) => Some(PadButton::AKey),
+                        EventSummary::Key(_, KeyCode::KEY_R, 1) => Some(PadButton::RKey),
+                        EventSummary::Key(_, KeyCode::KEY_X, 1) => Some(PadButton::XKey),
+                        EventSummary::Key(_, KeyCode::KEY_Z, 1) => Some(PadButton::ZKey),
+                        // Mouse
+                        EventSummary::Key(_, KeyCode::BTN_RIGHT, 1) => Some(PadButton::RightClick),
+                        _ => btn,
+                    };
                 }
-
-                btn = match summary {
-                    EventSummary::Key(_, KeyCode::BTN_SOUTH, 1) => Some(PadButton::ABtn),
-                    EventSummary::Key(_, KeyCode::BTN_EAST, 1) => Some(PadButton::BBtn),
-                    EventSummary::Key(_, KeyCode::BTN_NORTH, 1) => Some(PadButton::XBtn),
-                    EventSummary::Key(_, KeyCode::BTN_WEST, 1) => Some(PadButton::YBtn),
-                    EventSummary::Key(_, KeyCode::BTN_START, 1) => Some(PadButton::StartBtn),
-                    EventSummary::Key(_, KeyCode::BTN_SELECT, 1) => Some(PadButton::SelectBtn),
-                    EventSummary::Key(_, KeyCode::BTN_TL, 1) => Some(PadButton::LB),
-                    EventSummary::Key(_, KeyCode::BTN_TR, 1) => Some(PadButton::RB),
-                    EventSummary::Key(_, KeyCode::BTN_TL2, 1) => Some(PadButton::LT),
-                    EventSummary::Key(_, KeyCode::BTN_TR2, 1) => Some(PadButton::RT),
-                    // D-pad
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0X, -1) => {
-                        Some(PadButton::Left)
-                    }
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0X, 1) => {
-                        Some(PadButton::Right)
-                    }
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0Y, -1) => {
-                        Some(PadButton::Up)
-                    }
-                    EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_HAT0Y, 1) => {
-                        Some(PadButton::Down)
-                    }
-                    // Keyboard
-                    EventSummary::Key(_, KeyCode::KEY_A, 1) => Some(PadButton::AKey),
-                    EventSummary::Key(_, KeyCode::KEY_R, 1) => Some(PadButton::RKey),
-                    EventSummary::Key(_, KeyCode::KEY_X, 1) => Some(PadButton::XKey),
-                    EventSummary::Key(_, KeyCode::KEY_Z, 1) => Some(PadButton::ZKey),
-                    // Mouse
-                    EventSummary::Key(_, KeyCode::BTN_RIGHT, 1) => Some(PadButton::RightClick),
-                    _ => btn,
-                };
             }
+            Err(e) if e.raw_os_error() == Some(19) => {
+                // ENODEV — device disconnected
+                eprintln!("[splitux] evdev: device disconnected: {}", self.path);
+                self.enabled = false;
+            }
+            Err(_) => {}
         }
 
         // Process stick input with hold-to-repeat (check stored positions every poll)
