@@ -148,6 +148,7 @@ fn main() -> eframe::Result {
     }
 
     remove_guest_profiles().unwrap();
+    wm::bars::restore_from_previous_session();
     clear_tmp().unwrap();
     cleanup_orphaned_processes();
 

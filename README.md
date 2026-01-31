@@ -1,6 +1,6 @@
 ### Splitux
 
-Split-screen gaming on Linux
+*They killed splitscreen. We brought it back.*
 
 ---
 

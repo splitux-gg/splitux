@@ -6,7 +6,11 @@
 //! All bars are killed on hide and restarted on restore using their original
 //! command line from /proc. This is deterministic — unlike SIGUSR1 toggling,
 //! kill/restart always produces the correct end state.
+//!
+//! Bar state is persisted to disk so bars can be restored even after
+//! abnormal termination (Ctrl+C, crash, SIGKILL).
 
+use crate::paths::PATH_PARTY;
 use std::process::Command;
 
 /// Tracks which bars have been hidden and how to restore them
@@ -21,6 +25,11 @@ struct HiddenBar {
     name: String,
     /// Full command line captured from /proc before killing: (program, args)
     cmdline: Vec<String>,
+}
+
+/// Path to the persisted bar state file
+fn state_file() -> std::path::PathBuf {
+    PATH_PARTY.join("tmp/hidden_bars.json")
 }
 
 /// Known status bars to look for
@@ -70,6 +79,40 @@ impl StatusBarManager {
         if parts.is_empty() { None } else { Some(parts) }
     }
 
+    /// Persist hidden bar state to disk so it survives abnormal termination
+    fn persist_state(&self) {
+        if self.hidden_bars.is_empty() {
+            return;
+        }
+
+        let entries: Vec<Vec<&str>> = self
+            .hidden_bars
+            .iter()
+            .map(|b| b.cmdline.iter().map(|s| s.as_str()).collect())
+            .collect();
+
+        let json = match serde_json::to_string(&entries) {
+            Ok(j) => j,
+            Err(e) => {
+                eprintln!("[splitux] wm::bars - Failed to serialize bar state: {}", e);
+                return;
+            }
+        };
+
+        let path = state_file();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(&path, json) {
+            eprintln!("[splitux] wm::bars - Failed to persist bar state: {}", e);
+        }
+    }
+
+    /// Remove persisted bar state from disk
+    fn clear_state() {
+        let _ = std::fs::remove_file(state_file());
+    }
+
     /// Hide all detected status bars by killing them
     pub fn hide_all(&mut self) {
         for &name in KNOWN_BARS {
@@ -94,6 +137,8 @@ impl StatusBarManager {
 
         if self.hidden_bars.is_empty() {
             println!("[splitux] wm::bars - No status bars detected");
+        } else {
+            self.persist_state();
         }
     }
 
@@ -122,6 +167,7 @@ impl StatusBarManager {
         }
 
         self.hidden_bars.clear();
+        Self::clear_state();
     }
 
     /// Check if any bars are currently hidden
@@ -129,4 +175,63 @@ impl StatusBarManager {
     pub fn has_hidden_bars(&self) -> bool {
         !self.hidden_bars.is_empty()
     }
+}
+
+/// Restore bars from a previous session that was interrupted (Ctrl+C, crash, etc.)
+///
+/// Reads persisted state from disk. If bars were hidden and never restored,
+/// restarts them now. Safe to call at startup — does nothing if no state file exists.
+pub fn restore_from_previous_session() {
+    let path = state_file();
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return, // No state file = nothing to restore
+    };
+
+    let cmdlines: Vec<Vec<String>> = match serde_json::from_str(&data) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[splitux] wm::bars - Failed to parse bar state: {}", e);
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+    };
+
+    if cmdlines.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+
+    println!(
+        "[splitux] wm::bars - Restoring {} bar(s) from previous session",
+        cmdlines.len()
+    );
+
+    for cmdline in &cmdlines {
+        let (program, args) = match cmdline.split_first() {
+            Some((prog, rest)) => (prog.as_str(), rest),
+            None => continue,
+        };
+
+        // Only restart if the bar isn't already running
+        let name = std::path::Path::new(program)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(program);
+
+        if !StatusBarManager::get_pids(name).is_empty() {
+            println!("[splitux] wm::bars - {} already running, skipping", name);
+            continue;
+        }
+
+        println!("[splitux] wm::bars - Restarting {} (cmdline: {:?})", name, cmdline);
+        match Command::new(program).args(args).spawn() {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("[splitux] wm::bars - Failed to restart {}: {}", name, e);
+            }
+        }
+    }
+
+    let _ = std::fs::remove_file(&path);
 }

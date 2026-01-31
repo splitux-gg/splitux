@@ -3,7 +3,7 @@
 //! This module provides a trait-based interface for different window managers,
 //! allowing Splitux to work with Hyprland, KWin, or Gamescope-only mode.
 
-mod bars;
+pub(crate) mod bars;
 mod gamescope;
 mod hyprland;
 mod kwin;
