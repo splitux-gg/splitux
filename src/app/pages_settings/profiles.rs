@@ -1,7 +1,7 @@
 //! Profiles settings section (options 20+)
 
 use crate::app::app::{ActiveDropdown, Splitux};
-use crate::app::theme;
+use crate::ui::theme;
 use crate::profile_prefs::ProfilePreferences;
 use crate::profiles::{delete_profile, rename_profile, scan_profiles};
 use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};

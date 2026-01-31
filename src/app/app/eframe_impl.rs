@@ -19,16 +19,13 @@ impl eframe::App for Splitux {
         // Paint full-screen background to fill any gaps between panels
         let screen_rect = ctx.screen_rect();
         ctx.layer_painter(egui::LayerId::background())
-            .rect_filled(screen_rect, 0.0, crate::app::theme::colors::BG_DARK);
+            .rect_filled(screen_rect, 0.0, crate::ui::theme::colors::BG_DARK);
 
         // Poll for device hotplug events
         self.poll_device_events();
 
         // Poll for monitor changes (hotplug, resolution changes)
         self.poll_monitor_events();
-
-        // Reset focus state at start of frame
-        self.focus_manager.begin_frame();
 
         // Enable keyboard focus navigation
         ctx.options_mut(|opt| {
@@ -38,7 +35,7 @@ impl eframe::App for Splitux {
         egui::TopBottomPanel::top("menu_nav_panel")
             .frame(
                 egui::Frame::NONE
-                    .fill(crate::app::theme::colors::BG_MID)
+                    .fill(crate::ui::theme::colors::BG_MID)
                     .inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ctx, |ui| {
@@ -67,13 +64,13 @@ impl eframe::App for Splitux {
                 .width_range(width_range)
                 .frame(
                     egui::Frame::NONE
-                        .fill(crate::app::theme::colors::BG_MID)
+                        .fill(crate::ui::theme::colors::BG_MID)
                         .inner_margin(if collapsed {
                             egui::Margin::symmetric(4, 8)
                         } else {
                             egui::Margin::same(8)
                         })
-                        .stroke(egui::Stroke::new(1.0, crate::app::theme::colors::BG_LIGHT)),
+                        .stroke(egui::Stroke::new(1.0, crate::ui::theme::colors::BG_LIGHT)),
                 )
                 .show_separator_line(false)
                 .show(ctx, |ui| {
@@ -108,7 +105,7 @@ impl eframe::App for Splitux {
                 .width_range(width_range)
                 .frame(
                     egui::Frame::NONE
-                        .fill(crate::app::theme::colors::BG_MID)
+                        .fill(crate::ui::theme::colors::BG_MID)
                         .inner_margin(if collapsed {
                             egui::Margin::symmetric(4, 8)
                         } else {
@@ -119,7 +116,7 @@ impl eframe::App for Splitux {
                                 bottom: 8,
                             }
                         })
-                        .stroke(egui::Stroke::new(1.0, crate::app::theme::colors::BG_LIGHT)),
+                        .stroke(egui::Stroke::new(1.0, crate::ui::theme::colors::BG_LIGHT)),
                 )
                 .show_separator_line(false)
                 .show(ctx, |ui| {
@@ -142,7 +139,7 @@ impl eframe::App for Splitux {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::NONE
-                    .fill(crate::app::theme::colors::BG_DARK)
+                    .fill(crate::ui::theme::colors::BG_DARK)
                     .inner_margin(egui::Margin {
                         left: 8,
                         right: 8,

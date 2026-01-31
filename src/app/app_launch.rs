@@ -3,7 +3,7 @@
 use std::thread::sleep;
 
 use super::app::{InstanceFocus, MenuPage, Splitux};
-use super::config::save_cfg;
+use crate::config::save_cfg;
 use crate::audio::AUDIO_MUTED_SENTINEL;
 use crate::input::*;
 use crate::instance::*;
@@ -12,12 +12,6 @@ use crate::monitor::get_monitors_sdl;
 use crate::profiles::*;
 use crate::save_sync;
 use crate::util::*;
-
-macro_rules! cur_handler {
-    ($self:expr) => {
-        &$self.handlers[$self.selected_handler]
-    };
-}
 
 impl Splitux {
     pub fn start_game_setup(&mut self) {
@@ -57,7 +51,7 @@ impl Splitux {
         let handler = if let Some(h) = self.handler_lite.clone() {
             h
         } else {
-            cur_handler!(self).to_owned()
+            self.cur_handler().to_owned()
         };
 
         let instances = self.instances.clone();

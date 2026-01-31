@@ -1,7 +1,7 @@
 //! Game info detail view - displays selected game information, action bar, and metadata
 
 use crate::app::app::{FocusPane, Splitux};
-use crate::app::theme;
+use crate::ui::theme;
 use crate::paths::PATH_HOME;
 use crate::ui::responsive::LayoutMode;
 use crate::util::msg;

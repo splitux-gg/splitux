@@ -1,7 +1,7 @@
 //! Focus helper functions for instance page elements
 
 use crate::app::app::InstanceFocus;
-use crate::app::theme;
+use crate::ui::theme;
 use crate::ui::focus::types::InstanceCardFocus;
 use eframe::egui;
 

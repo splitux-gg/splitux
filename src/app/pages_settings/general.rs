@@ -3,7 +3,7 @@
 //! Includes: Window Manager, Controller filter, Proton settings, Photon networking, Gamescope
 
 use crate::app::app::Splitux;
-use crate::app::config::{PadFilterType, WindowManagerType};
+use crate::config::{PadFilterType, WindowManagerType};
 use crate::input::scan_input_devices;
 use crate::paths::PATH_PARTY;
 use crate::ui::responsive::LayoutMode;

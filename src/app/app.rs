@@ -11,8 +11,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::config::*;
-use super::focus::FocusManager;
+use crate::config::*;
 use crate::audio::{resolve_audio_system, scan_sinks, AudioSink, AudioSystem};
 use crate::handler::*;
 use crate::input::*;
@@ -51,11 +50,9 @@ pub struct Splitux {
     pub handler_lite: Option<Handler>,
     pub show_edit_modal: bool,
 
-    // Focus management for spatial controller navigation
-    pub focus_manager: FocusManager,
     pub activate_focused: bool, // Set to true when A button pressed
 
-    // Pane-based focus for Games page (simpler than grid-based FocusManager)
+    // Pane-based focus for Games page
     pub focus_pane: FocusPane,
     pub action_bar_index: usize, // 0=Play, 1=Profile, 2=Edit
     pub info_pane_index: usize,  // Index of focused element in info pane
@@ -231,7 +228,6 @@ impl Splitux {
             handler_edit: None,
             handler_lite,
             show_edit_modal: false,
-            focus_manager: FocusManager::new(),
             activate_focused: false,
             focus_pane: FocusPane::GameList,
             action_bar_index: 0,
@@ -318,5 +314,10 @@ impl Splitux {
         });
 
         app
+    }
+
+    /// Get the currently selected handler
+    pub fn cur_handler(&self) -> &Handler {
+        &self.handlers[self.selected_handler]
     }
 }

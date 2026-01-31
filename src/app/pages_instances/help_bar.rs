@@ -1,7 +1,7 @@
 //! Controls help bar for instance page
 
 use crate::app::app::Splitux;
-use crate::app::theme;
+use crate::ui::theme;
 use crate::ui::responsive::LayoutMode;
 use eframe::egui::{self, RichText, Ui};
 

@@ -1,5 +1,5 @@
 use crate::app::app::{FocusPane, MenuPage, Splitux};
-use crate::app::theme;
+use crate::ui::theme;
 use crate::Handler;
 use crate::handler::{import_handler, scan_handlers};
 use crate::util::*;

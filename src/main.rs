@@ -234,7 +234,7 @@ fn main() -> eframe::Result {
             cc.egui_ctx.set_fonts(fonts);
 
             // Apply custom theme
-            crate::app::theme::apply_theme(&cc.egui_ctx);
+            crate::ui::theme::apply_theme(&cc.egui_ctx);
 
             Ok(Box::<Splitux>::new(Splitux::new(
                 monitors.clone(),

@@ -3,8 +3,8 @@
 use super::focus::{element_focus_stroke, is_element_focused};
 use super::types::{AudioOverrideAction, AudioPrefAction, GptokeybAction};
 use crate::app::app::{ActiveDropdown, InstanceFocus, Splitux};
-use crate::app::config::save_cfg;
-use crate::app::theme;
+use crate::config::save_cfg;
+use crate::ui::theme;
 use crate::gptokeyb::{list_builtin_profiles, list_user_profiles};
 use crate::profile_prefs::ProfilePreferences;
 use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};
@@ -13,6 +13,45 @@ use crate::ui::responsive::{combo_width, LayoutMode};
 use eframe::egui::{self, RichText, Ui};
 use egui_phosphor::fill as icons_fill;
 use egui_phosphor::regular as icons;
+
+/// Player colors for visual distinction
+const PLAYER_COLORS: [egui::Color32; 4] = [
+    egui::Color32::from_rgb(80, 180, 255),  // P1: Blue
+    egui::Color32::from_rgb(255, 100, 100), // P2: Red
+    egui::Color32::from_rgb(100, 220, 100), // P3: Green
+    egui::Color32::from_rgb(255, 200, 80),  // P4: Yellow
+];
+
+/// Render a monitor dropdown and return the selected index (if any) and whether it was toggled.
+fn monitor_dropdown(
+    ui: &mut Ui,
+    id_salt: &str,
+    monitors: &[crate::monitor::Monitor],
+    current_idx: usize,
+    width: f32,
+    is_focused: bool,
+    is_open: bool,
+    selection_idx: usize,
+    activate: bool,
+) -> (Option<usize>, bool) {
+    let items: Vec<DropdownItem<usize>> = monitors
+        .iter()
+        .enumerate()
+        .map(|(idx, mon)| DropdownItem::new(idx, &mon.display_name(), idx == current_idx))
+        .collect();
+
+    let current_name = monitors
+        .get(current_idx)
+        .map(|m| m.display_name())
+        .unwrap_or_else(|| "Select".to_string());
+
+    let resp = render_gamepad_dropdown(
+        ui, id_salt, &current_name, width, &items,
+        is_focused, is_open, selection_idx, activate,
+    );
+
+    (resp.selected, resp.toggled || (is_focused && activate))
+}
 
 impl Splitux {
     pub fn display_page_instances(&mut self, ui: &mut Ui) {
@@ -23,10 +62,7 @@ impl Splitux {
         ui.add_space(8.0);
         ui.separator();
 
-        // Controls help bar (extracted)
         self.display_instance_help_bar(ui);
-
-        // Display warnings
         self.display_instance_warnings(ui);
 
         // Ensure prev_profile_selections matches instances count
@@ -38,10 +74,8 @@ impl Splitux {
         let mut devices_to_remove: Vec<(usize, usize)> = Vec::new();
         let mut profile_changes: Vec<(usize, usize)> = Vec::new();
 
-        // Pre-compute audio conflicts before the mutable borrow of instances
+        // Pre-compute state before mutable iteration
         let audio_conflicts = self.detect_audio_conflicts();
-
-        // Pre-compute effective audio for each instance
         let effective_audio: Vec<Option<(String, String, bool)>> = (0..self.instances.len())
             .map(|i| self.get_effective_audio(i))
             .collect();
@@ -53,22 +87,13 @@ impl Splitux {
             ui.label("Press A or Right-click on a controller to create a player instance");
         }
 
-        // Player colors for visual distinction
-        let player_colors = [
-            egui::Color32::from_rgb(80, 180, 255),  // P1: Blue
-            egui::Color32::from_rgb(255, 100, 100), // P2: Red
-            egui::Color32::from_rgb(100, 220, 100), // P3: Green
-            egui::Color32::from_rgb(255, 200, 80),  // P4: Yellow
-        ];
-
-        // Pre-compute focus state before iterating
         let current_focus = self.instance_focus.clone();
         let activate_focused = self.activate_focused;
         let display_names = self.device_display_names.clone();
 
-        // Render instance cards
+        // ── Render instance cards ──────────────────────────────────────────
         for (i, instance) in &mut self.instances.iter_mut().enumerate() {
-            let player_color = player_colors.get(i).copied().unwrap_or(theme::colors::ACCENT);
+            let player_color = PLAYER_COLORS.get(i).copied().unwrap_or(theme::colors::ACCENT);
             let card_focused = matches!(&current_focus, InstanceFocus::InstanceCard(idx, _) if *idx == i);
             let card_stroke = if card_focused {
                 egui::Stroke::new(3.0, theme::colors::ACCENT)
@@ -83,19 +108,18 @@ impl Splitux {
             theme::card_frame()
                 .stroke(card_stroke)
                 .show(ui, |ui| {
-                    // Row 1: Player label + Profile dropdown + Master indicator
+                    // ── Row 1: Player + Profile + Master + (wide: Monitor + Invite) ──
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("P{}", i + 1)).strong().size(18.0).color(player_color));
                         ui.add_space(8.0);
 
-                        // Profile dropdown with focus indicator
+                        // Profile dropdown
                         if !card_mode.is_narrow() {
                             ui.label("Profile:");
                         }
                         let profile_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Profile);
                         let profile_open = self.active_dropdown == Some(ActiveDropdown::InstanceProfile(i));
 
-                        // Build profile items
                         let profile_items: Vec<DropdownItem<usize>> = self.profiles.iter()
                             .enumerate()
                             .map(|(idx, name)| DropdownItem::new(idx, name.clone(), idx == instance.profselection))
@@ -117,12 +141,10 @@ impl Splitux {
                             profile_focused && activate_focused,
                         );
 
-                        // Handle response - selection takes priority
                         if let Some(new_idx) = profile_response.selected {
                             instance.profselection = new_idx;
                             self.active_dropdown = None;
                         } else if profile_response.toggled || (profile_focused && activate_focused) {
-                            // Toggle on mouse click OR gamepad A press
                             if profile_open {
                                 self.active_dropdown = None;
                             } else {
@@ -135,7 +157,7 @@ impl Splitux {
                             profile_changes.push((i, instance.profselection));
                         }
 
-                        // Master profile indicator and toggle
+                        // Master profile indicator
                         if instance.profselection > 0 && instance.profselection < self.profiles.len() {
                             let prof_name = &self.profiles[instance.profselection];
                             let is_named = !prof_name.starts_with('.') && prof_name != "Guest";
@@ -159,7 +181,7 @@ impl Splitux {
                             }
                         }
 
-                        // In wide mode, include Monitor and Invite on same row
+                        // Wide mode: monitor + invite on same row
                         if !card_mode.is_narrow() {
                             if self.options.gamescope_sdl_backend {
                                 ui.add_space(8.0);
@@ -167,33 +189,16 @@ impl Splitux {
                                 let monitor_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Monitor);
                                 let monitor_open = self.active_dropdown == Some(ActiveDropdown::InstanceMonitor(i));
 
-                                // Build monitor items
-                                let monitor_items: Vec<DropdownItem<usize>> = self.monitors.iter()
-                                    .enumerate()
-                                    .map(|(idx, mon)| DropdownItem::new(idx, &mon.display_name(), idx == instance.monitor))
-                                    .collect();
-
-                                let current_monitor = self.monitors.get(instance.monitor)
-                                    .map(|m| m.display_name())
-                                    .unwrap_or_else(|| "Select".to_string());
-
-                                let monitor_response = render_gamepad_dropdown(
-                                    ui,
-                                    &format!("monitor_{i}"),
-                                    &current_monitor,
-                                    monitor_width,
-                                    &monitor_items,
-                                    monitor_focused,
-                                    monitor_open,
-                                    self.dropdown_selection_idx,
-                                    monitor_focused && activate_focused,
+                                let (selected, toggled) = monitor_dropdown(
+                                    ui, &format!("monitor_{i}"), &self.monitors,
+                                    instance.monitor, monitor_width, monitor_focused, monitor_open,
+                                    self.dropdown_selection_idx, monitor_focused && activate_focused,
                                 );
 
-                                // Handle response - selection takes priority
-                                if let Some(new_idx) = monitor_response.selected {
+                                if let Some(new_idx) = selected {
                                     instance.monitor = new_idx;
                                     self.active_dropdown = None;
-                                } else if monitor_response.toggled || (monitor_focused && activate_focused) {
+                                } else if toggled {
                                     if monitor_open {
                                         self.active_dropdown = None;
                                     } else {
@@ -214,8 +219,7 @@ impl Splitux {
                                 )
                                 .min_size(egui::vec2(0.0, 26.0))
                                 .stroke(element_focus_stroke(&current_focus, i, InstanceCardFocus::InviteDevice));
-                                let invitebtn = ui.add(invite_btn);
-                                if invitebtn.clicked() || (invite_focused && activate_focused) {
+                                if ui.add(invite_btn).clicked() || (invite_focused && activate_focused) {
                                     self.instance_add_dev = Some(i);
                                 }
                             } else if self.instance_add_dev == Some(i) {
@@ -227,7 +231,7 @@ impl Splitux {
                         }
                     });
 
-                    // Row 2: Monitor + Invite (only in narrow mode)
+                    // ── Row 2: Monitor + Invite (narrow mode only) ──
                     if card_mode.is_narrow() {
                         ui.horizontal(|ui| {
                             if self.options.gamescope_sdl_backend {
@@ -235,33 +239,16 @@ impl Splitux {
                                 let monitor_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Monitor);
                                 let monitor_open = self.active_dropdown == Some(ActiveDropdown::InstanceMonitor(i));
 
-                                // Build monitor items
-                                let monitor_items: Vec<DropdownItem<usize>> = self.monitors.iter()
-                                    .enumerate()
-                                    .map(|(idx, mon)| DropdownItem::new(idx, &mon.display_name(), idx == instance.monitor))
-                                    .collect();
-
-                                let current_monitor = self.monitors.get(instance.monitor)
-                                    .map(|m| m.display_name())
-                                    .unwrap_or_else(|| "Select".to_string());
-
-                                let monitor_response = render_gamepad_dropdown(
-                                    ui,
-                                    &format!("monitor_narrow_{i}"),
-                                    &current_monitor,
-                                    monitor_width,
-                                    &monitor_items,
-                                    monitor_focused,
-                                    monitor_open,
-                                    self.dropdown_selection_idx,
-                                    monitor_focused && activate_focused,
+                                let (selected, toggled) = monitor_dropdown(
+                                    ui, &format!("monitor_narrow_{i}"), &self.monitors,
+                                    instance.monitor, monitor_width, monitor_focused, monitor_open,
+                                    self.dropdown_selection_idx, monitor_focused && activate_focused,
                                 );
 
-                                // Handle response - selection takes priority
-                                if let Some(new_idx) = monitor_response.selected {
+                                if let Some(new_idx) = selected {
                                     instance.monitor = new_idx;
                                     self.active_dropdown = None;
-                                } else if monitor_response.toggled || (monitor_focused && activate_focused) {
+                                } else if toggled {
                                     if monitor_open {
                                         self.active_dropdown = None;
                                     } else {
@@ -290,7 +277,7 @@ impl Splitux {
                         });
                     }
 
-                    // Device list
+                    // ── Device list ──
                     let profile_name = if instance.profselection > 0 && instance.profselection < self.profiles.len() {
                         Some(self.profiles[instance.profselection].clone())
                     } else {
@@ -320,7 +307,7 @@ impl Splitux {
                         ui.horizontal(|ui| {
                             ui.label(dev_text);
 
-                            // "Set as preferred" button for named profiles
+                            // Preferred controller star for named profiles
                             if is_named_profile {
                                 let dev_uniq = self.input_devices[dev].uniq();
                                 if !dev_uniq.is_empty() {
@@ -332,8 +319,7 @@ impl Splitux {
                                             ui.label(RichText::new(icons_fill::STAR).color(egui::Color32::GOLD))
                                                 .on_hover_text("This is the preferred controller for this profile");
                                         } else {
-                                            let pref_btn_text = if card_mode.is_narrow() { icons::STAR } else { icons::STAR };
-                                            let mut set_pref_btn = egui::Button::new(pref_btn_text).min_size(egui::vec2(24.0, 24.0));
+                                            let mut set_pref_btn = egui::Button::new(icons::STAR).min_size(egui::vec2(24.0, 24.0));
                                             if device_focused {
                                                 set_pref_btn = set_pref_btn.stroke(theme::focus_stroke());
                                             }
@@ -363,7 +349,7 @@ impl Splitux {
                         });
                     }
 
-                    // Audio section
+                    // ── Audio section ──
                     if !self.audio_devices.is_empty() && self.options.audio.enabled {
                         ui.add_space(4.0);
                         let has_conflict = audio_conflicts.contains(&i);
@@ -399,16 +385,11 @@ impl Splitux {
                             let audio_override_open = self.active_dropdown == Some(ActiveDropdown::InstanceAudioOverride(i));
                             let has_override = self.audio_session_overrides.contains_key(&i);
 
-                            // Build items list
                             let is_muted = effective.as_ref().map_or(false, |(s, _, _)| s.is_empty());
                             let mut items: Vec<DropdownItem<AudioOverrideAction>> = self.audio_devices.iter()
                                 .map(|sink| {
                                     let is_current = effective.as_ref().map_or(false, |(s, _, _)| s == &sink.name);
-                                    DropdownItem::new(
-                                        AudioOverrideAction::SetDevice(sink.name.clone()),
-                                        &sink.description,
-                                        is_current,
-                                    )
+                                    DropdownItem::new(AudioOverrideAction::SetDevice(sink.name.clone()), &sink.description, is_current)
                                 })
                                 .collect();
                             items.push(DropdownItem::new(AudioOverrideAction::Mute, &format!("{} None (mute)", icons::SPEAKER_SLASH), is_muted));
@@ -416,7 +397,6 @@ impl Splitux {
                                 items.push(DropdownItem::new(AudioOverrideAction::Reset, "↩ Reset to profile", false));
                             }
 
-                            // Render dropdown
                             let button_text = if card_mode.is_narrow() {
                                 ""
                             } else if has_override {
@@ -426,29 +406,16 @@ impl Splitux {
                             };
 
                             let audio_response = render_gamepad_dropdown(
-                                ui,
-                                &format!("audio_override_{i}"),
-                                button_text,
-                                audio_combo_width,
-                                &items,
-                                audio_override_focused,
-                                audio_override_open,
-                                self.dropdown_selection_idx,
-                                audio_override_focused && activate_focused,
+                                ui, &format!("audio_override_{i}"), button_text, audio_combo_width,
+                                &items, audio_override_focused, audio_override_open,
+                                self.dropdown_selection_idx, audio_override_focused && activate_focused,
                             );
 
-                            // Handle response - selection takes priority
                             if let Some(action) = audio_response.selected {
                                 match action {
-                                    AudioOverrideAction::SetDevice(name) => {
-                                        self.audio_session_overrides.insert(i, Some(name));
-                                    }
-                                    AudioOverrideAction::Mute => {
-                                        self.audio_session_overrides.insert(i, None);
-                                    }
-                                    AudioOverrideAction::Reset => {
-                                        self.audio_session_overrides.remove(&i);
-                                    }
+                                    AudioOverrideAction::SetDevice(name) => { self.audio_session_overrides.insert(i, Some(name)); }
+                                    AudioOverrideAction::Mute => { self.audio_session_overrides.insert(i, None); }
+                                    AudioOverrideAction::Reset => { self.audio_session_overrides.remove(&i); }
                                 }
                                 self.active_dropdown = None;
                             } else if audio_response.toggled || (audio_override_focused && activate_focused) {
@@ -460,7 +427,7 @@ impl Splitux {
                                 }
                             }
 
-                            // Profile preference management for named profiles
+                            // Audio preference for named profiles
                             if is_named_profile {
                                 if let Some(ref prof_name) = profile_name {
                                     let prefs = ProfilePreferences::load(prof_name);
@@ -470,34 +437,24 @@ impl Splitux {
                                     let audio_pref_focused = is_element_focused(&current_focus, i, InstanceCardFocus::AudioPreference);
                                     let audio_pref_open = self.active_dropdown == Some(ActiveDropdown::InstanceAudioPreference(i));
 
-                                    // Build items list
                                     let mut items: Vec<DropdownItem<AudioPrefAction>> = self.audio_devices.iter()
                                         .map(|sink| DropdownItem::new(
                                             AudioPrefAction::SetDevice(sink.name.clone(), sink.description.clone()),
-                                            &sink.description,
-                                            false,
+                                            &sink.description, false,
                                         ))
                                         .collect();
                                     if prefs.has_audio() {
                                         items.push(DropdownItem::new(AudioPrefAction::Clear, "Clear preference", false));
                                     }
 
-                                    // Clone prof_name for use after dropdown
                                     let prof_name_owned = prof_name.clone();
 
                                     let pref_response = render_gamepad_dropdown(
-                                        ui,
-                                        &format!("audio_pref_{i}"),
-                                        pref_text,
-                                        pref_width,
-                                        &items,
-                                        audio_pref_focused,
-                                        audio_pref_open,
-                                        self.dropdown_selection_idx,
-                                        audio_pref_focused && activate_focused,
+                                        ui, &format!("audio_pref_{i}"), pref_text, pref_width,
+                                        &items, audio_pref_focused, audio_pref_open,
+                                        self.dropdown_selection_idx, audio_pref_focused && activate_focused,
                                     );
 
-                                    // Handle response - selection takes priority
                                     if let Some(action) = pref_response.selected {
                                         match action {
                                             AudioPrefAction::SetDevice(name, desc) => {
@@ -534,7 +491,7 @@ impl Splitux {
                         });
                     }
 
-                    // gptokeyb KB/Mouse Mapper section
+                    // ── gptokeyb KB/Mouse section ──
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label(icons::KEYBOARD);
@@ -545,52 +502,32 @@ impl Splitux {
                         let gptokeyb_focused = is_element_focused(&current_focus, i, InstanceCardFocus::GptokeybProfile);
                         let gptokeyb_open = self.active_dropdown == Some(ActiveDropdown::InstanceGptokeyb(i));
 
-                        // Get current override for this instance
                         let has_override = self.gptokeyb_instance_overrides.contains_key(&i);
-                        let current_profile = self.gptokeyb_instance_overrides.get(&i);
+                        let current_gptokeyb = self.gptokeyb_instance_overrides.get(&i);
 
-                        // Build items list
                         let mut items: Vec<DropdownItem<GptokeybAction>> = Vec::new();
+                        items.push(DropdownItem::new(GptokeybAction::Default, "Default (handler)", !has_override));
+                        items.push(DropdownItem::new(GptokeybAction::Disabled, format!("{} Disabled", icons::PROHIBIT), current_gptokeyb == Some(&String::new())));
 
-                        // Default option (use handler setting)
-                        items.push(DropdownItem::new(
-                            GptokeybAction::Default,
-                            "Default (handler)",
-                            !has_override,
-                        ));
-
-                        // Disabled option
-                        items.push(DropdownItem::new(
-                            GptokeybAction::Disabled,
-                            format!("{} Disabled", icons::PROHIBIT),
-                            current_profile == Some(&String::new()),
-                        ));
-
-                        // Built-in profiles
                         for profile in list_builtin_profiles() {
-                            let is_selected = current_profile == Some(&profile.to_string());
                             items.push(DropdownItem::new(
                                 GptokeybAction::Profile(profile.to_string()),
                                 format!("{} {} (built-in)", icons::GAME_CONTROLLER, profile),
-                                is_selected,
+                                current_gptokeyb == Some(&profile.to_string()),
                             ));
                         }
-
-                        // User profiles
                         for profile in list_user_profiles() {
-                            let is_selected = current_profile == Some(&profile);
                             items.push(DropdownItem::new(
                                 GptokeybAction::Profile(profile.clone()),
                                 format!("{} {} (custom)", icons::USER, profile),
-                                is_selected,
+                                current_gptokeyb == Some(&profile),
                             ));
                         }
 
-                        // Determine button text
                         let button_text = if card_mode.is_narrow() {
                             ""
                         } else if has_override {
-                            current_profile
+                            current_gptokeyb
                                 .map(|p| if p.is_empty() { "Disabled" } else { p.as_str() })
                                 .unwrap_or("Default")
                         } else {
@@ -600,29 +537,16 @@ impl Splitux {
                         let gptokeyb_width = combo_width(ui, 100.0, 50.0);
 
                         let gptokeyb_response = render_gamepad_dropdown(
-                            ui,
-                            &format!("gptokeyb_{i}"),
-                            button_text,
-                            gptokeyb_width,
-                            &items,
-                            gptokeyb_focused,
-                            gptokeyb_open,
-                            self.dropdown_selection_idx,
-                            gptokeyb_focused && activate_focused,
+                            ui, &format!("gptokeyb_{i}"), button_text, gptokeyb_width,
+                            &items, gptokeyb_focused, gptokeyb_open,
+                            self.dropdown_selection_idx, gptokeyb_focused && activate_focused,
                         );
 
-                        // Handle response
                         if let Some(action) = gptokeyb_response.selected {
                             match action {
-                                GptokeybAction::Default => {
-                                    self.gptokeyb_instance_overrides.remove(&i);
-                                }
-                                GptokeybAction::Disabled => {
-                                    self.gptokeyb_instance_overrides.insert(i, String::new());
-                                }
-                                GptokeybAction::Profile(name) => {
-                                    self.gptokeyb_instance_overrides.insert(i, name);
-                                }
+                                GptokeybAction::Default => { self.gptokeyb_instance_overrides.remove(&i); }
+                                GptokeybAction::Disabled => { self.gptokeyb_instance_overrides.insert(i, String::new()); }
+                                GptokeybAction::Profile(name) => { self.gptokeyb_instance_overrides.insert(i, name); }
                             }
                             self.active_dropdown = None;
                         } else if gptokeyb_response.toggled || (gptokeyb_focused && activate_focused) {
@@ -638,15 +562,12 @@ impl Splitux {
             ui.add_space(4.0);
         }
 
-        // Process device removals
+        // Post-processing
         for (i, d) in devices_to_remove {
             self.remove_device_instance(i, d);
         }
-
-        // Handle profile changes
         self.handle_profile_changes(profile_changes);
-
-        // Launch options bar (extracted)
         self.display_launch_options(ui);
     }
+
 }

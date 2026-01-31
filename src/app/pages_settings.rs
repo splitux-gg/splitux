@@ -14,7 +14,7 @@ mod profile_builder;
 mod profiles;
 
 use super::app::{SettingsCategory, SettingsFocus, Splitux};
-use super::theme;
+use crate::ui::theme;
 use eframe::egui::{self, RichText, Ui};
 
 impl Splitux {

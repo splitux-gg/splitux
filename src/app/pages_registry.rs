@@ -1,7 +1,7 @@
 // Registry page - browse and download handlers from online registry
 
 use super::app::{RegistryFocus, Splitux};
-use super::theme;
+use crate::ui::theme;
 use crate::handler::scan_handlers;
 use crate::registry::{download_handler, fetch_registry, RegistryEntry};
 use crate::ui::responsive::LayoutMode;

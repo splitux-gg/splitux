@@ -12,12 +12,6 @@ use crate::handler::HANDLER_SPEC_CURRENT_VERSION;
 use crate::util::msg;
 use eframe::egui::Ui;
 
-macro_rules! cur_handler {
-    ($self:expr) => {
-        &$self.handlers[$self.selected_handler]
-    };
-}
-
 impl Splitux {
     pub fn display_page_games(&mut self, ui: &mut Ui) {
         // If no handlers or in lite mode, show welcome screen
@@ -31,7 +25,7 @@ impl Splitux {
     }
 
     fn check_and_start_game(&mut self) {
-        let h = cur_handler!(self);
+        let h = self.cur_handler();
         if h.spec_ver != HANDLER_SPEC_CURRENT_VERSION {
             let mismatch = match h.spec_ver < HANDLER_SPEC_CURRENT_VERSION {
                 true => "an older",

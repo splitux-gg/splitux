@@ -1,7 +1,7 @@
 //! Launch options bar for instance page
 
 use crate::app::app::{InstanceFocus, Splitux};
-use crate::app::theme;
+use crate::ui::theme;
 use crate::ui::components::layout_carousel::{
     navigate_preset, render_custom_assignment, render_layout_carousel,
 };

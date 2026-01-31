@@ -1,5 +1,5 @@
 use crate::app::app::{SettingsCategory, SettingsFocus, Splitux};
-use crate::app::theme;
+use crate::ui::theme;
 
 use eframe::egui::{self, Ui};
 use egui_phosphor::regular as icons;
@@ -86,7 +86,7 @@ impl Splitux {
 
     /// Settings bottom buttons for left panel
     pub(super) fn display_settings_bottom_buttons_panel(&mut self, ui: &mut Ui) {
-        use crate::app::config::{save_cfg, SplituxConfig};
+        use crate::config::{save_cfg, SplituxConfig};
         use crate::input::scan_input_devices;
 
         let is_buttons_focused = self.settings_focus == SettingsFocus::BottomButtons;

@@ -1,7 +1,7 @@
 //! Instance warning display
 
 use crate::app::app::Splitux;
-use crate::app::theme;
+use crate::ui::theme;
 use eframe::egui::{self, RichText, Ui};
 use egui_phosphor::regular as icons;
 
