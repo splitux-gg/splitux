@@ -106,6 +106,12 @@ jobs:
           CACHE_DIR="/tmp/deps-cache"
           mkdir -p "$CACHE_DIR"
 
+          # Clean stale extraction dirs (self-hosted runner reuses /tmp;
+          # BepInEx zips contain 000-permission files that block re-extraction)
+          chmod -R u+rwX /tmp/bepinex-il2cpp 2>/dev/null || true
+          rm -rf /tmp/bepinex-mono /tmp/bepinex-mono-linux /tmp/bepinex-il2cpp
+          rm -rf /tmp/gbe-win /tmp/release
+
           # Gamescope-splitux (cached - stable version)
           if [ -f "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" ]; then
             echo "Using cached gamescope-splitux"
@@ -196,8 +202,12 @@ jobs:
           cp res/gamescope-splitux/bin/* release/splitux/bin/
           chmod +x release/splitux/bin/*
 
-          # Copy resources
+          # Copy resources (downloaded deps)
           cp -r res/* release/splitux/res/
+
+          # Copy app assets (fonts, icon)
+          cp -r assets release/splitux/
+
           cp LICENSE release/splitux/ 2>/dev/null || true
 
           # Copy scripts and desktop file
@@ -226,6 +236,7 @@ jobs:
           # Copy binary and resources
           cp target/release/splitux AppDir/usr/bin/
           cp -r res/* AppDir/usr/share/splitux/
+          cp -r assets/* AppDir/usr/share/splitux/
           cp res/gamescope-splitux/bin/* AppDir/usr/bin/
           chmod +x AppDir/usr/bin/*
 
@@ -242,8 +253,8 @@ jobs:
           DESKTOP
 
           # Copy/create icon (use a placeholder if none exists)
-          if [ -f res/icon.png ]; then
-            cp res/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/splitux.png
+          if [ -f assets/icon.png ]; then
+            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/splitux.png
           else
             echo "No icon found, AppImage will use default"
           fi
