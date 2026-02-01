@@ -10,8 +10,6 @@ impl Splitux {
             egui::Image::new(egui::include_image!("../../../assets/logo.png"))
                 .max_height(120.0),
         );
-        ui.add_space(4.0);
-        ui.label("They killed splitscreen. We brought it back.");
         ui.add_space(12.0);
         ui.separator();
 
