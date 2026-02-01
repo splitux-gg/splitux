@@ -2,8 +2,6 @@
     <img src="assets/logo.png" width="300" />
 </p>
 
-<h3 align="center">Splitux</h3>
-
 <p align="center"><em>They killed splitscreen. We brought it back.</em></p>
 
 ---
