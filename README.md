@@ -1,6 +1,10 @@
-### Splitux
+<p align="center">
+    <img src="assets/logo.png" width="300" />
+</p>
 
-*They killed splitscreen. We brought it back.*
+<h3 align="center">Splitux</h3>
+
+<p align="center"><em>They killed splitscreen. We brought it back.</em></p>
 
 ---
 

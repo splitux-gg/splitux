@@ -6,9 +6,12 @@ use eframe::egui::{self, RichText, Ui};
 impl Splitux {
     pub(super) fn display_welcome_screen(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
-        ui.heading("Welcome to Splitux");
+        ui.add(
+            egui::Image::new(egui::include_image!("../../../assets/logo.png"))
+                .max_height(120.0),
+        );
         ui.add_space(4.0);
-        ui.label("Local co-op split-screen gaming for Linux");
+        ui.label("They killed splitscreen. We brought it back.");
         ui.add_space(12.0);
         ui.separator();
 
