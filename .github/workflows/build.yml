@@ -121,14 +121,14 @@ jobs:
             unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" -d res/gamescope-splitux
           fi
 
-          # Goldberg (always fresh - nightly builds)
-          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
+          # Goldberg emulator (pinned to stable release)
+          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/release-p2p-autoaccept/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
           tar -xjf /tmp/gbe-linux.tar.bz2 -C /tmp
           mkdir -p res/goldberg/{linux64,linux32,win,steamnetworkingsockets/x64,steamnetworkingsockets/x32}
           cp -f /tmp/release/regular/x64/*.so res/goldberg/linux64/ 2>/dev/null || true
           cp -f /tmp/release/regular/x32/*.so res/goldberg/linux32/ 2>/dev/null || true
 
-          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/nightly/emu-win-release.7z -o /tmp/gbe-win.7z
+          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/release-p2p-autoaccept/emu-win-release.7z -o /tmp/gbe-win.7z
           7z x -o/tmp/gbe-win /tmp/gbe-win.7z -y
           cp -f /tmp/gbe-win/release/regular/steam_api64.dll res/goldberg/win/ 2>/dev/null || true
           cp -f /tmp/gbe-win/release/regular/steam_api.dll res/goldberg/win/ 2>/dev/null || true
