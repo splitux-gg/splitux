@@ -42,9 +42,11 @@ jobs:
     if: always() && (needs.cleanup-nightly.result == 'success' || needs.cleanup-nightly.result == 'skipped')
 
     steps:
-      - name: Install dependencies
+      - name: Verify dependencies
         run: |
-          sudo pacman -Sy --noconfirm \
+          # Self-hosted runner has no sudo; deps are pre-installed on the host.
+          # Fail fast with a clear message if anything is missing.
+          pacman -Q \
             base-devel pkgconf \
             sdl2-compat \
             7zip unzip zip curl wget \
@@ -359,9 +361,11 @@ jobs:
 
       - name: Install Flatpak
         run: |
-          sudo pacman -Sy --noconfirm flatpak flatpak-builder
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08 || true
+          # Self-hosted runner has no sudo; flatpak/flatpak-builder are pre-installed.
+          # Runtime + remote installed per-user (no root needed).
+          pacman -Q flatpak flatpak-builder
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08 || true
 
       - name: Build Flatpak
         run: |
