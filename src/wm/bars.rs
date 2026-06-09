@@ -151,6 +151,14 @@ impl StatusBarManager {
         println!("[splitux] wm::bars - Restoring {} status bar(s)", self.hidden_bars.len());
 
         for bar in &self.hidden_bars {
+            // Don't add a duplicate: if this bar is already running again (e.g.
+            // the compositor auto-restored it, a previous reset already brought
+            // it back, or two resets raced), skip restarting it.
+            if !Self::get_pids(&bar.name).is_empty() {
+                println!("[splitux] wm::bars - {} already running, skipping restart", bar.name);
+                continue;
+            }
+
             println!("[splitux] wm::bars - Restarting {} (cmdline: {:?})", bar.name, bar.cmdline);
 
             let (program, args) = match bar.cmdline.split_first() {
