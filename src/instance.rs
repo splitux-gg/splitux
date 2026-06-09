@@ -1,6 +1,13 @@
 use crate::Monitor;
 use crate::app::SplituxConfig;
 use crate::profiles::GUEST_NAMES;
+use crate::wm::types::{get_layout_type, LayoutType};
+
+/// Whether the layout selected for this player count gives every instance a
+/// full-monitor-resolution surface (vs splitting the monitor between them).
+fn is_fullscreen_layout(cfg: &SplituxConfig, player_count: usize) -> bool {
+    get_layout_type(cfg.layout_presets.get_for_count(player_count)) == LayoutType::Fullscreen
+}
 
 #[derive(Clone)]
 pub struct Instance {
@@ -19,20 +26,26 @@ pub fn set_instance_resolutions(
 ) {
     let (basewidth, baseheight) = (primary_monitor.width(), primary_monitor.height());
     let playercount = instances.len();
+    let fullscreen = is_fullscreen_layout(cfg, playercount);
 
     for instance in instances {
-        let (mut w, mut h) = match playercount {
-            1 => (basewidth, baseheight),
-            2 => {
-                // Check layout_presets for vertical vs horizontal
-                let is_vertical = cfg.layout_presets.two_player.contains("vertical");
-                if is_vertical {
-                    (basewidth / 2, baseheight)
-                } else {
-                    (basewidth, baseheight / 2)
+        // Fullscreen layout: every instance renders at full monitor resolution.
+        let (mut w, mut h) = if fullscreen {
+            (basewidth, baseheight)
+        } else {
+            match playercount {
+                1 => (basewidth, baseheight),
+                2 => {
+                    // Check layout_presets for vertical vs horizontal
+                    let is_vertical = cfg.layout_presets.two_player.contains("vertical");
+                    if is_vertical {
+                        (basewidth / 2, baseheight)
+                    } else {
+                        (basewidth, baseheight / 2)
+                    }
                 }
+                _ => (basewidth / 2, baseheight / 2),
             }
-            _ => (basewidth / 2, baseheight / 2),
         };
         if h < 600 && cfg.gamescope_fix_lowres {
             let ratio = w as f32 / h as f32;
@@ -49,6 +62,10 @@ pub fn set_instance_resolutions_multimonitor(
     monitors: &Vec<Monitor>,
     cfg: &SplituxConfig,
 ) {
+    // The fullscreen preset is keyed by the TOTAL player count (matching the
+    // launch UI), and gives every instance a full surface on its own monitor.
+    let fullscreen = is_fullscreen_layout(cfg, instances.len());
+
     let mut mon_playercounts: Vec<usize> = vec![0; monitors.len()];
     for instance in instances.iter() {
         let mon = instance.monitor;
@@ -62,18 +79,22 @@ pub fn set_instance_resolutions_multimonitor(
             monitors[instance.monitor].height(),
         );
 
-        let (mut w, mut h) = match playercount {
-            1 => (basewidth, baseheight),
-            2 => {
-                // Check layout_presets for vertical vs horizontal
-                let is_vertical = cfg.layout_presets.two_player.contains("vertical");
-                if is_vertical {
-                    (basewidth / 2, baseheight)
-                } else {
-                    (basewidth, baseheight / 2)
+        let (mut w, mut h) = if fullscreen {
+            (basewidth, baseheight)
+        } else {
+            match playercount {
+                1 => (basewidth, baseheight),
+                2 => {
+                    // Check layout_presets for vertical vs horizontal
+                    let is_vertical = cfg.layout_presets.two_player.contains("vertical");
+                    if is_vertical {
+                        (basewidth / 2, baseheight)
+                    } else {
+                        (basewidth, baseheight / 2)
+                    }
                 }
+                _ => (basewidth / 2, baseheight / 2),
             }
-            _ => (basewidth / 2, baseheight / 2),
         };
         if h < 600 && cfg.gamescope_fix_lowres {
             let ratio = w as f32 / h as f32;

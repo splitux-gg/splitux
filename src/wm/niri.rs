@@ -2,7 +2,7 @@
 
 use crate::wm::bars::StatusBarManager;
 use crate::wm::pure::layout::plan_tiling_layout;
-use crate::wm::types::WmMonitor;
+use crate::wm::types::{get_layout_type, LayoutType, WmMonitor};
 use crate::wm::{LayoutContext, WindowManager, WmResult};
 use std::process::Command;
 
@@ -159,11 +159,84 @@ impl NiriManager {
         Ok(result)
     }
 
+    /// Resolve the niri output name for an instance's assigned monitor.
+    ///
+    /// Maps the instance's SDL monitor index → connector name → niri output,
+    /// falling back to the session target monitor if the lookup fails.
+    fn resolve_instance_monitor(&self, ctx: &LayoutContext, instance_idx: usize) -> Option<String> {
+        if let Some(inst) = ctx.instances.get(instance_idx) {
+            if let Some(sdl_monitor) = ctx.monitors.get(inst.monitor) {
+                let connector = sdl_monitor.connector_name();
+                if let Ok(monitor) = self.get_monitor_by_name(connector) {
+                    return Some(monitor.name);
+                }
+            }
+        }
+        self.target_monitor.clone()
+    }
+
+    /// Fullscreen layout: give each gamescope window its own true-fullscreen
+    /// surface on the monitor its instance was assigned to (the play-config
+    /// display choice). Each window is placed in its own tiled column then put
+    /// into niri's fullscreen state, so it covers the whole output edge-to-edge
+    /// (over gaps and bars), 1:1 with the full-resolution gamescope surface —
+    /// what splitux-together needs to capture. Multiple instances on one
+    /// monitor land in adjacent columns you scroll between; each is its own
+    /// fullscreen window.
+    fn position_windows_fullscreen(
+        &self,
+        ctx: &LayoutContext,
+        windows: &[NiriWindow],
+    ) -> WmResult<()> {
+        println!(
+            "[splitux] wm::niri - Fullscreen layout: {} window(s), one fullscreen surface each",
+            windows.len()
+        );
+
+        for (i, win) in windows.iter().enumerate() {
+            let target = self.resolve_instance_monitor(ctx, i);
+            println!(
+                "[splitux] wm::niri - Fullscreen window {}: id={} app_id={} -> monitor {:?}",
+                i, win.id, win.app_id, target
+            );
+
+            self.niri_action("focus-window", &["--id", &win.id.to_string()])?;
+            std::thread::sleep(std::time::Duration::from_millis(30));
+
+            if let Some(ref name) = target {
+                self.niri_action("move-window-to-monitor", &[name])?;
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+
+            // Ensure the window is tiled so its underlying slot is a full column
+            // (it returns to a column when fullscreen is later toggled off).
+            if win.is_floating {
+                self.niri_action("move-window-to-tiling", &[])?;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+
+            // True fullscreen: cover the entire output (edge-to-edge, over bars),
+            // matching the full-res gamescope surface exactly. fullscreen-window
+            // is a toggle and these windows start non-fullscreen, so this enables
+            // it. Target by id so it works regardless of current focus.
+            self.niri_action("fullscreen-window", &["--id", &win.id.to_string()])?;
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+
+        Ok(())
+    }
+
     /// Position all gamescope windows according to layout using tiled mode
     fn position_windows(&self, ctx: &LayoutContext) -> WmResult<()> {
         let windows = self.get_gamescope_windows()?;
         if windows.is_empty() {
             return Err("No gamescope windows found".into());
+        }
+
+        // Fullscreen layout has its own placement path (per-instance monitor,
+        // each window a full-width column) rather than splitting one monitor.
+        if get_layout_type(ctx.preset.id) == LayoutType::Fullscreen {
+            return self.position_windows_fullscreen(ctx, &windows);
         }
 
         // Use the target monitor set in setup() (looked up by connector name)

@@ -117,6 +117,54 @@ pub static PRESET_4P_COLUMNS: LayoutPreset = LayoutPreset {
 };
 
 // ============================================================================
+// Fullscreen ("Independent") Presets
+// ============================================================================
+//
+// Every player gets a full-monitor-resolution surface instead of a split
+// region. Regions are all [0,0,1,1] (full screen) so the geometry-based WM
+// backends (hyprland/kwin) render each window full-size, while niri places
+// each as its own adjacent full-width scrollable column. The per-instance
+// display assignment (set at the play-configuration layer) decides which
+// monitor each window lands on. Needed for splitux-together, where a remote
+// player needs a full 1920x1080 stream rather than a split.
+
+/// 2 independent full-screen surfaces
+pub static PRESET_2P_FULLSCREEN: LayoutPreset = LayoutPreset {
+    id: "2p_fullscreen",
+    name: "Fullscreen",
+    player_count: 2,
+    regions: &[
+        [0.0, 0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+    ],
+};
+
+/// 3 independent full-screen surfaces
+pub static PRESET_3P_FULLSCREEN: LayoutPreset = LayoutPreset {
+    id: "3p_fullscreen",
+    name: "Fullscreen",
+    player_count: 3,
+    regions: &[
+        [0.0, 0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+    ],
+};
+
+/// 4 independent full-screen surfaces
+pub static PRESET_4P_FULLSCREEN: LayoutPreset = LayoutPreset {
+    id: "4p_fullscreen",
+    name: "Fullscreen",
+    player_count: 4,
+    regions: &[
+        [0.0, 0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+    ],
+};
+
+// ============================================================================
 // Preset Registry
 // ============================================================================
 
@@ -124,12 +172,14 @@ pub static PRESET_4P_COLUMNS: LayoutPreset = LayoutPreset {
 pub static PRESETS_2P: &[&LayoutPreset] = &[
     &PRESET_2P_HORIZONTAL,
     &PRESET_2P_VERTICAL,
+    &PRESET_2P_FULLSCREEN,
 ];
 
 /// All 3-player presets
 pub static PRESETS_3P: &[&LayoutPreset] = &[
     &PRESET_3P_VERTICAL,
     &PRESET_3P_HORIZONTAL,
+    &PRESET_3P_FULLSCREEN,
 ];
 
 /// All 4-player presets
@@ -137,6 +187,7 @@ pub static PRESETS_4P: &[&LayoutPreset] = &[
     &PRESET_4P_GRID,
     &PRESET_4P_ROWS,
     &PRESET_4P_COLUMNS,
+    &PRESET_4P_FULLSCREEN,
 ];
 
 /// Get all presets for a given player count

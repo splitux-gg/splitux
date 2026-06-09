@@ -9,6 +9,10 @@ pub enum LayoutType {
     Stacked,
     /// 2x2 grid (2 columns with 2 stacked each)
     Grid,
+    /// Each window at full monitor resolution as its own surface.
+    /// On niri these become adjacent full-width scrollable columns; the
+    /// per-instance display assignment decides which monitor each lands on.
+    Fullscreen,
 }
 
 /// WM-agnostic monitor info
@@ -45,6 +49,8 @@ pub fn get_layout_type(preset_id: &str) -> LayoutType {
         "2p_horizontal" | "3p_horizontal" => LayoutType::Stacked,
         // Grid = 2 columns with 2 stacked each
         "4p_grid" | "4p_rows" | "4p_columns" => LayoutType::Grid,
+        // Fullscreen = each window full monitor res, its own surface
+        "2p_fullscreen" | "3p_fullscreen" | "4p_fullscreen" => LayoutType::Fullscreen,
         _ => LayoutType::Columns, // Default fallback
     }
 }
@@ -70,6 +76,13 @@ mod tests {
         assert_eq!(get_layout_type("4p_grid"), LayoutType::Grid);
         assert_eq!(get_layout_type("4p_rows"), LayoutType::Grid);
         assert_eq!(get_layout_type("4p_columns"), LayoutType::Grid);
+    }
+
+    #[test]
+    fn fullscreen_presets_return_fullscreen() {
+        assert_eq!(get_layout_type("2p_fullscreen"), LayoutType::Fullscreen);
+        assert_eq!(get_layout_type("3p_fullscreen"), LayoutType::Fullscreen);
+        assert_eq!(get_layout_type("4p_fullscreen"), LayoutType::Fullscreen);
     }
 
     #[test]

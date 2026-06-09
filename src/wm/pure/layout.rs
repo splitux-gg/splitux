@@ -22,6 +22,19 @@ pub fn plan_tiling_layout(preset_id: &str, window_count: usize) -> TilingPlan {
             TilingPlan { columns }
         }
 
+        LayoutType::Fullscreen => {
+            // Each window is its own full-width column. On niri these become
+            // adjacent full-monitor-width scrollable columns (you swipe between
+            // them); the game inside each renders at full resolution.
+            let columns = (0..window_count)
+                .map(|i| TilingColumn {
+                    windows: vec![i],
+                    width_percent: 100,
+                })
+                .collect();
+            TilingPlan { columns }
+        }
+
         LayoutType::Stacked => {
             // All windows in a single column
             let windows = (0..window_count).collect();
@@ -96,6 +109,24 @@ mod tests {
         // 4p_columns: P1/P2 left, P3/P4 right
         assert_eq!(plan.columns[0].windows, vec![0, 1]);
         assert_eq!(plan.columns[1].windows, vec![2, 3]);
+    }
+
+    #[test]
+    fn test_fullscreen_layout() {
+        let plan = plan_tiling_layout("2p_fullscreen", 2);
+        assert_eq!(plan.columns.len(), 2);
+        // Each window is its own full-width column
+        assert_eq!(plan.columns[0].windows, vec![0]);
+        assert_eq!(plan.columns[1].windows, vec![1]);
+        assert_eq!(plan.columns[0].width_percent, 100);
+        assert_eq!(plan.columns[1].width_percent, 100);
+    }
+
+    #[test]
+    fn test_fullscreen_four_players() {
+        let plan = plan_tiling_layout("4p_fullscreen", 4);
+        assert_eq!(plan.columns.len(), 4);
+        assert!(plan.columns.iter().all(|c| c.width_percent == 100));
     }
 
     #[test]

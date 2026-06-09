@@ -11,6 +11,7 @@ use egui_phosphor::regular as icons;
 
 use crate::ui::theme;
 use crate::wm::presets::{get_presets_for_count, LayoutPreset};
+use crate::wm::types::{get_layout_type, LayoutType};
 
 /// Player colors for the preview regions
 pub const PLAYER_COLORS: [Color32; 4] = [
@@ -76,6 +77,42 @@ fn draw_layout_preview(
 
         painter.rect_filled(rect, 4.0, bg_color);
         painter.rect_stroke(rect, 4.0, stroke, StrokeKind::Inside);
+
+        // Fullscreen: every window is a full-monitor surface, so the split-region
+        // preview is meaningless. Draw offset overlapping cards instead, to read
+        // as "N independent full-screen windows".
+        if get_layout_type(preset.id) == LayoutType::Fullscreen {
+            let inner_rect = rect.shrink(4.0);
+            let count = preset.regions.len().max(1);
+            // Card occupies most of the preview; later cards are offset down-right.
+            let card_size = egui::vec2(inner_rect.width() * 0.6, inner_rect.height() * 0.6);
+            let span = egui::vec2(inner_rect.width() - card_size.x, inner_rect.height() - card_size.y);
+            for region_idx in 0..count {
+                let instance_idx = instance_order
+                    .and_then(|order| order.get(region_idx).copied())
+                    .unwrap_or(region_idx);
+                let t = if count > 1 {
+                    region_idx as f32 / (count - 1) as f32
+                } else {
+                    0.0
+                };
+                let card_rect = egui::Rect::from_min_size(
+                    inner_rect.min + egui::vec2(span.x * t, span.y * t),
+                    card_size,
+                );
+                let color = PLAYER_COLORS[instance_idx % PLAYER_COLORS.len()];
+                painter.rect_filled(card_rect, 2.0, color.gamma_multiply(0.35));
+                painter.rect_stroke(card_rect, 2.0, Stroke::new(1.5, color), StrokeKind::Inside);
+                painter.text(
+                    card_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{}", instance_idx + 1),
+                    egui::FontId::proportional(11.0),
+                    theme::colors::TEXT_PRIMARY,
+                );
+            }
+            return response;
+        }
 
         // Draw player regions
         let inner_rect = rect.shrink(3.0); // Padding from border

@@ -100,14 +100,22 @@ impl Splitux {
                                 }
                             }
 
-                            // Handle enter custom mode
-                            if response.enter_custom_mode {
+                            // Fullscreen gives every player a full-screen surface,
+                            // so per-region instance assignment is meaningless.
+                            let is_fullscreen = crate::wm::types::get_layout_type(&preset_id)
+                                == crate::wm::types::LayoutType::Fullscreen;
+
+                            // Handle enter custom mode (not applicable to fullscreen)
+                            if response.enter_custom_mode && !is_fullscreen {
                                 self.enter_custom_layout_mode(player_count, &preset_id);
                             }
 
                             if layout_focused {
-                                self.infotext =
-                                    "Left/Right: cycle presets | Y/Right-click: customize positions".to_string();
+                                self.infotext = if is_fullscreen {
+                                    "Left/Right: cycle presets | Each player gets a full-screen window".to_string()
+                                } else {
+                                    "Left/Right: cycle presets | Y/Right-click: customize positions".to_string()
+                                };
                             }
 
                             ui.add_space(16.0);
@@ -140,6 +148,13 @@ impl Splitux {
 
     /// Enter custom layout mode
     pub(crate) fn enter_custom_layout_mode(&mut self, player_count: usize, preset_id: &str) {
+        // Fullscreen presets give every player a full-screen surface; there are
+        // no regions to assign instances to, so custom mode does not apply.
+        if crate::wm::types::get_layout_type(preset_id)
+            == crate::wm::types::LayoutType::Fullscreen
+        {
+            return;
+        }
         self.layout_custom_mode = true;
         self.layout_focused_region = 0;
         // Initialize edit order from saved custom order or default
