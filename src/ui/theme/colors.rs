@@ -109,6 +109,7 @@ pub fn apply_theme(ctx: &egui::Context) {
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, ACCENT_DIM);
     visuals.widgets.hovered.corner_radius = 6.into();
     visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.hovered.expansion = 2.0; // grow slightly on hover (animated)
 
     // Widget styling - active (being clicked)
     visuals.widgets.active.bg_fill = BUTTON_ACTIVE;
@@ -116,6 +117,7 @@ pub fn apply_theme(ctx: &egui::Context) {
     visuals.widgets.active.bg_stroke = Stroke::new(2.0, ACCENT);
     visuals.widgets.active.corner_radius = 6.into();
     visuals.widgets.active.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.active.expansion = 1.0; // press-in feel: drops back from hovered's +2 (animated)
 
     // Widget styling - open (dropdown open, etc.)
     visuals.widgets.open.bg_fill = BUTTON_ACTIVE;
@@ -133,6 +135,11 @@ pub fn apply_theme(ctx: &egui::Context) {
     // Interaction - larger hit areas for controller use
     style.interaction.selectable_labels = true;
     style.interaction.tooltip_delay = 0.3;
+
+    // Animation: how long egui interpolates widget state changes (hover/press
+    // color + expansion fades). Slightly longer than the 0.083s default for a
+    // smoother, more deliberate feel across every widget.
+    style.animation_time = 0.10;
 
     // Apply the style
     ctx.set_style(style);

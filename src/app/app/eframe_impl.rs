@@ -152,6 +152,25 @@ impl eframe::App for Splitux {
                     ui.disable();
                 }
 
+                // --- Page transition: fade + rise the content whenever cur_page
+                // changes. State (last page + change timestamp) is kept in egui's
+                // temp memory so no App field is needed; eased with ease-out cubic. ---
+                let now = ctx.input(|i| i.time);
+                let tid = egui::Id::new("page_transition_state");
+                let (stored_page, change_t) = ctx
+                    .data_mut(|d| d.get_temp::<(MenuPage, f64)>(tid))
+                    .unwrap_or((self.cur_page, now));
+                let change_t = if stored_page != self.cur_page { now } else { change_t };
+                ctx.data_mut(|d| d.insert_temp(tid, (self.cur_page, change_t)));
+                let dur = 0.22_f64;
+                let t = (((now - change_t) / dur).clamp(0.0, 1.0)) as f32;
+                let eased = 1.0 - (1.0 - t).powi(3); // ease-out cubic
+                ui.set_opacity(eased);
+                ui.add_space((1.0 - eased) * 10.0); // rise into place
+                if t < 1.0 {
+                    ctx.request_repaint();
+                }
+
                 // Show permission banner at top if needed (only on Games/Instances pages)
                 if matches!(self.cur_page, MenuPage::Games | MenuPage::Instances) {
                     ui.add_space(8.0);
