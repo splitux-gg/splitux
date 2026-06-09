@@ -181,6 +181,20 @@ impl eframe::App for Splitux {
             self.display_new_profile_dialog(ctx);
         }
 
+        // Once the launch thread signals that game windows are up, drop the
+        // blocking "Launching…" overlay and detach the thread (it keeps
+        // supervising the session + cleaning up in the background), so the
+        // launcher is usable during play instead of frozen on the overlay.
+        if self.task.is_some()
+            && self
+                .launch_ready
+                .swap(false, std::sync::atomic::Ordering::Acquire)
+        {
+            self.task = None;
+            self.loading_since = None;
+            self.loading_msg = None;
+        }
+
         if let Some(handle) = self.task.take() {
             if handle.is_finished() {
                 let _ = handle.join();
@@ -226,5 +240,18 @@ impl eframe::App for Splitux {
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(500)); // 2 fps when unfocused
         }
+    }
+
+    /// Closing the window while a game is running: stop the active launch slice
+    /// (kills the game cgroup) and drop any fuse-overlayfs mounts, so nothing
+    /// leaks. The systemd BindsTo cascade also covers this when the process
+    /// fully exits, but doing it here makes teardown immediate and clean.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        crate::launch::scope::stop_active_slice();
+        if let Err(e) = crate::util::fuse_overlayfs_unmount_gamedirs() {
+            println!("[splitux] on_exit: fuse-overlayfs unmount failed: {e}");
+        }
+        // Undo host-side changes: restart any status bars we hid for the game.
+        crate::wm::bars::restore_from_previous_session();
     }
 }

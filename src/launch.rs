@@ -18,5 +18,6 @@ mod pure;
 mod types;
 
 // Re-export public API
+pub use operations::scope;
 pub use operations::setup_profiles;
 pub use pipelines::launch_game;

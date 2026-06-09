@@ -17,6 +17,7 @@ use crate::wm::presets::{get_preset_by_id, get_presets_for_count};
 use crate::wm::{LayoutContext, WindowManager, WindowManagerBackend};
 
 use super::build_cmds::launch_cmds;
+use super::super::operations::scope;
 use super::super::pure::command::{format_launch_cmd, rebuild_command_with_blocking};
 
 /// Launch the game with all instances
@@ -26,6 +27,7 @@ pub fn launch_game(
     instances: &Vec<Instance>,
     monitors: &[Monitor],
     cfg: &SplituxConfig,
+    ready: &std::sync::atomic::AtomicBool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Set up audio routing if enabled
     let (audio_system, virtual_sinks, audio_sink_envs) = setup_audio_routing(instances, cfg);
@@ -94,6 +96,30 @@ pub fn launch_game(
         instance_to_region,
     };
 
+    // Process containment: each instance launches into its own systemd scope
+    // under a per-launch slice, bound to splitux's main scope. Killing splitux
+    // (by any signal) cascades teardown to the whole game cgroup — wine, the EOS
+    // overlay, fuse daemons and all — instead of letting them reparent and leak.
+    let scoping = scope::enabled();
+    let launch_id = scope::new_launch_id();
+    let main_scope = scope::current_main_scope();
+    if scoping {
+        // Reap leftover units from any previous crashed/killed run first.
+        scope::sweep_orphan_units();
+        scope::set_active_slice(&launch_id);
+        if main_scope.is_none() {
+            println!(
+                "[splitux] scope - Warning: not running inside a splitux-main scope; \
+                 launch slice won't auto-die with splitux (self-scope re-exec may have failed)"
+            );
+        }
+        println!(
+            "[splitux] scope - Launch slice {} (main scope: {:?})",
+            scope::slice_name(&launch_id),
+            main_scope
+        );
+    }
+
     println!("[splitux] Setting up {} window manager", wm.name());
     wm.setup(&ctx)?;
 
@@ -147,6 +173,12 @@ pub fn launch_game(
             cmd.stderr(std::process::Stdio::null());
         }
 
+        // Wrap in a systemd scope so the whole subtree is contained and dies
+        // with splitux. systemd-run waits on the game, so wait() below is intact.
+        if scoping {
+            cmd = scope::wrap_command(cmd, &launch_id, i, main_scope.as_deref());
+        }
+
         let handle = cmd.spawn()?;
         handles.push(handle);
 
@@ -166,8 +198,23 @@ pub fn launch_game(
         wm.on_instances_launched(&ctx)?;
     }
 
+    // Windows are up and positioned: tell the UI it can drop the "Launching…"
+    // overlay and let the launcher be used while we supervise the session below.
+    ready.store(true, std::sync::atomic::Ordering::Release);
+
     for mut handle in handles {
         handle.wait()?;
+    }
+
+    // Stop the launch slice (kills any lingering instance scope + its cgroup),
+    // then drop the fuse-overlayfs mounts. Idempotent — the games normally
+    // exited already, but this reaps stragglers and clears the active marker.
+    if scoping {
+        scope::stop_slice(&launch_id);
+        scope::clear_active_slice();
+    }
+    if let Err(e) = crate::util::fuse_overlayfs_unmount_gamedirs() {
+        println!("[splitux] Warning: fuse-overlayfs unmount failed: {e}");
     }
 
     // Teardown WM

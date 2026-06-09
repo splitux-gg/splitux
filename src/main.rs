@@ -52,6 +52,24 @@ fn configure_sdl_for_compositor() {
 }
 
 fn main() -> eframe::Result {
+    // One-shot: restore host session changes (status bars) left hidden by a
+    // prior instance, then exit. Invoked by the restore-on-death watcher when a
+    // splitux instance dies. Must run before scoping/GUI setup.
+    if std::env::args().any(|arg| arg == "--restore-session") {
+        wm::bars::restore_from_previous_session();
+        std::process::exit(0);
+    }
+
+    // Re-exec into a dedicated systemd scope so every process we launch lives in
+    // a cgroup bound to this splitux instance — killing splitux cascades to the
+    // whole game tree. No-op if already scoped or systemd-user is unavailable.
+    crate::launch::scope::ensure_self_scoped();
+
+    // Arm a detached watcher that restores the host session (bars) if this
+    // instance dies by any means — including kill -9, which runs no in-process
+    // cleanup. We're now the final (scoped) pid, so it watches the right one.
+    crate::launch::scope::spawn_death_watcher();
+
     configure_sdl_for_compositor();
 
     let monitors = get_monitors_sdl();

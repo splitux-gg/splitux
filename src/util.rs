@@ -362,6 +362,11 @@ fn kill_orphaned_splitux_bwrap() -> Result<(), Box<dyn Error>> {
 pub fn cleanup_orphaned_processes() {
     println!("[splitux] Checking for orphaned processes...");
 
+    // Deterministic: stop any leftover splitux launch slices/scopes from a
+    // previous crashed or kill -9'd run. This reaps the whole cgroup (wine and
+    // all), which the name/ppid sweeps below cannot reliably reach.
+    crate::launch::scope::sweep_orphan_units();
+
     if let Err(e) = kill_orphaned_gamescope_splitux() {
         println!(
             "[splitux] Warning: Failed to clean gamescope-splitux: {}",

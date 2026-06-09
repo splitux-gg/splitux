@@ -99,6 +99,11 @@ impl Splitux {
         // Capture master profile for use in launch thread
         let master_profile = cfg.master_profile.clone();
 
+        // Fresh "windows up" signal for this launch; the UI clears the overlay
+        // and detaches once the launch thread sets it.
+        self.launch_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let launch_ready = self.launch_ready.clone();
+
         self.cur_page = MenuPage::Games;
         self.spawn_task(
             "Launching...\n\nDon't press any buttons or move any analog sticks or mice.",
@@ -128,10 +133,14 @@ impl Splitux {
 
                 // Note: fuse_overlayfs_mount_gamedirs is now called inside launch_cmds
                 // with proper Goldberg overlay support
-                if let Err(err) = launch_game(&handler, &dev_infos, &instances, &monitors, &cfg) {
+                if let Err(err) =
+                    launch_game(&handler, &dev_infos, &instances, &monitors, &cfg, &launch_ready)
+                {
                     println!("[splitux] Error launching instances: {}", err);
                     msg("Launch Error", &format!("{err}"));
                 }
+                // Ensure the UI is released even if launch errored before signaling.
+                launch_ready.store(true, std::sync::atomic::Ordering::Release);
 
                 // Sync master profile's saves back to original location
                 if handler.save_sync_back {

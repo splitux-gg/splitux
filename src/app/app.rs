@@ -69,6 +69,10 @@ pub struct Splitux {
     pub loading_since: Option<std::time::Instant>,
     #[allow(dead_code)]
     pub task: Option<std::thread::JoinHandle<()>>,
+    /// Set by the launch thread once game windows are up and positioned. The UI
+    /// uses this to drop the blocking "Launching…" overlay and detach the
+    /// (still-supervising) launch thread, so the launcher is usable during play.
+    pub launch_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
 
     // Registry state
     pub registry_index: Option<RegistryIndex>,
@@ -241,6 +245,7 @@ impl Splitux {
             loading_msg: None,
             loading_since: None,
             task: None,
+            launch_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
             // Registry state
             registry_index: None,

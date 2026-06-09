@@ -12,6 +12,75 @@
 
 use crate::paths::PATH_PARTY;
 use std::process::Command;
+use std::sync::OnceLock;
+
+/// Whether `systemd-run --user` is usable for launching bars into their own
+/// independent scopes (probed once).
+fn systemd_run_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        Command::new("systemd-run")
+            .args(["--user", "--version"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+}
+
+/// Env vars a graphical bar needs, forwarded into its transient service (a
+/// bare `--user` service otherwise inherits only the user manager's env, which
+/// may lack the Wayland/X11 session vars).
+const BAR_ENV_PASSTHROUGH: &[&str] = &[
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "NIRI_SOCKET",
+    "DISPLAY",
+    "PATH",
+    "XDG_CURRENT_DESKTOP",
+    "HYPRLAND_INSTANCE_SIGNATURE",
+    "DBUS_SESSION_BUS_ADDRESS",
+];
+
+/// Launch a status bar so it outlives whatever restored it.
+///
+/// Restored bars must NOT be cgroup children of the restorer (the splitux GUI —
+/// itself now in a transient scope — or the detached restore-on-death watcher
+/// service), or systemd reaps them when the restorer's unit stops. We launch
+/// each bar as its own transient `--user` **service**: `systemd-run` registers
+/// it and returns immediately, leaving the bar running fully detached under the
+/// user manager (it cannot be reaped by the restorer's teardown). Falls back to
+/// a plain spawn when systemd-user is unavailable.
+fn spawn_bar(program: &str, args: &[String]) {
+    if systemd_run_available() {
+        let base = std::path::Path::new(program)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("bar");
+        let unit = format!("splitux-bar-{}-{}.service", base, std::process::id());
+        let mut cmd = Command::new("systemd-run");
+        cmd.args([
+            "--user",
+            "--quiet",
+            "--collect",
+            &format!("--unit={unit}"),
+        ]);
+        for var in BAR_ENV_PASSTHROUGH {
+            if let Ok(val) = std::env::var(var) {
+                cmd.arg(format!("--setenv={var}={val}"));
+            }
+        }
+        cmd.arg("--").arg(program).args(args);
+        // `--user` service registration returns promptly; status() ensures it's
+        // registered before we move on (and exit).
+        match cmd.status() {
+            Ok(s) if s.success() => return,
+            _ => eprintln!(
+                "[splitux] wm::bars - systemd-run service failed for {program}, spawning directly"
+            ),
+        }
+    }
+    let _ = Command::new(program).args(args).spawn();
+}
 
 /// Tracks which bars have been hidden and how to restore them
 #[derive(Default)]
@@ -158,12 +227,7 @@ impl StatusBarManager {
                 None => continue,
             };
 
-            match Command::new(program).args(args).spawn() {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("[splitux] wm::bars - Failed to restart {}: {}", bar.name, e);
-                }
-            }
+            spawn_bar(program, args);
         }
 
         self.hidden_bars.clear();
@@ -225,12 +289,7 @@ pub fn restore_from_previous_session() {
         }
 
         println!("[splitux] wm::bars - Restarting {} (cmdline: {:?})", name, cmdline);
-        match Command::new(program).args(args).spawn() {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("[splitux] wm::bars - Failed to restart {}: {}", name, e);
-            }
-        }
+        spawn_bar(program, args);
     }
 
     let _ = std::fs::remove_file(&path);
