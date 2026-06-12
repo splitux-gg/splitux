@@ -98,6 +98,25 @@ pub fn add_input_holding_args(
     }
 }
 
+/// Hold a splitux-together remote seat's virtual keyboard + mouse.
+///
+/// These are ALWAYS held (independent of the seat's Gamepad/Kb+Mouse type) so
+/// that input the remote browser sends over those devices reaches the game's
+/// gamescope instead of leaking to the host desktop. Requires gamescope-splitux
+/// (input holding), which is also the PipeWire capture source the seat streams.
+pub fn add_seat_hold_args(
+    cmd: &mut Command,
+    seat: &crate::together::TogetherSeatDevices,
+    cfg: &SplituxConfig,
+) {
+    if !cfg.input_holding {
+        return;
+    }
+    for dev in [seat.kbd.as_ref(), seat.mouse.as_ref()].into_iter().flatten() {
+        cmd.arg(format!("--libinput-hold-dev={}", dev.display()));
+    }
+}
+
 /// Add the separator between gamescope args and the inner command
 pub fn add_separator(cmd: &mut Command) {
     cmd.arg("--");

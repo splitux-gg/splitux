@@ -62,6 +62,12 @@ impl Splitux {
                         ui.label(RichText::new("Gamescope").strong().size(14.0));
                         ui.add_space(4.0);
                         self.display_settings_gamescope(ui);
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Together (remote play)").strong().size(14.0));
+                        ui.add_space(4.0);
+                        self.display_settings_together(ui);
                     }
                     SettingsCategory::Audio => {
                         self.display_settings_audio(ui);
@@ -78,5 +84,79 @@ impl Splitux {
                 }
                 ui.add_space(8.0);
             });
+    }
+
+    /// Connection settings for splitux-together (the per-player "Together"
+    /// checkbox lives on each instance card; this is the shared plumbing).
+    fn display_settings_together(&mut self, ui: &mut Ui) {
+        let t = &mut self.options.together;
+        let mut changed = false;
+
+        ui.label(
+            RichText::new(
+                "Mark a player as \"Together (remote)\" on the Instances page to stream their \
+                 screen to a browser. These settings point that at your server.",
+            )
+            .color(theme::colors::TEXT_MUTED)
+            .size(12.0),
+        );
+        ui.add_space(6.0);
+
+        egui::Grid::new("together_settings_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Signalling URL");
+                changed |= ui
+                    .text_edit_singleline(&mut t.signalling_uri)
+                    .on_hover_text("Producer websocket seats dial out to, e.g. wss://together.gabeforge.com/ws/producer")
+                    .changed();
+                ui.end_row();
+
+                ui.label("Public base URL");
+                changed |= ui
+                    .text_edit_singleline(&mut t.public_base_url)
+                    .on_hover_text("Invite links are {base}/j/<token>, e.g. https://together.gabeforge.com")
+                    .changed();
+                ui.end_row();
+
+                ui.label("Spawn local orchestrator");
+                changed |= ui
+                    .checkbox(&mut t.spawn_local_orchestrator, "")
+                    .on_hover_text("On: splitux runs its own orchestrator. Off: use the service at the Signalling URL.")
+                    .changed();
+                ui.end_row();
+
+                ui.label("Encoder");
+                changed |= ui
+                    .text_edit_singleline(&mut t.encoder)
+                    .on_hover_text("va (AMD VCN, recommended), vulkan, or x264 (CPU)")
+                    .changed();
+                ui.end_row();
+
+                ui.label("Bitrate (kbps)");
+                changed |= ui.add(egui::DragValue::new(&mut t.bitrate).range(1000..=60000)).changed();
+                ui.end_row();
+
+                ui.label("FPS (0 = auto)");
+                changed |= ui.add(egui::DragValue::new(&mut t.fps).range(0..=240)).changed();
+                ui.end_row();
+
+                ui.label("TURN relay");
+                let mut turn = t.turn.clone().unwrap_or_default();
+                if ui
+                    .text_edit_singleline(&mut turn)
+                    .on_hover_text("Optional, for friends behind NAT: turn://user:pass@turn.gabeforge.com:3478")
+                    .changed()
+                {
+                    t.turn = if turn.trim().is_empty() { None } else { Some(turn) };
+                    changed = true;
+                }
+                ui.end_row();
+            });
+
+        if changed {
+            let _ = crate::config::save_cfg(&self.options);
+        }
     }
 }

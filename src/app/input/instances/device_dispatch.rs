@@ -105,6 +105,8 @@ impl Splitux {
                                 monitor: 0,
                                 width: 0,
                                 height: 0,
+                                together: false,
+                                together_input: crate::instance::TogetherInput::Gamepad,
                             });
                         }
                     }

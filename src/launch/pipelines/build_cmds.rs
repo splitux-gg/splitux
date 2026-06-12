@@ -39,6 +39,7 @@ pub fn launch_cmds(
     cfg: &SplituxConfig,
     audio_sink_envs: &[String],
     gptokeyb_virtual_devices: &[Option<PathBuf>],
+    together_devices: &[Option<crate::together::TogetherSeatDevices>],
 ) -> Result<Vec<(std::process::Command, usize)>, Box<dyn std::error::Error>> {
     let win = h.win();
     let exec = Path::new(&h.exec);
@@ -133,10 +134,19 @@ pub fn launch_cmds(
             }
         }
 
+        // splitux-together: this instance's remote seat (if any). Its virtual
+        // kbd/mouse are ALWAYS held by gamescope (so remote keystrokes reach the
+        // game, not the host desktop); its pad is wired into the game's SDL
+        // below only when the player is set to Gamepad input.
+        let seat_devices = together_devices.get(i).and_then(|v| v.as_ref());
+
         // 3. Add gamescope arguments
         gamescope::add_args(&mut cmd, instance, monitors, cfg);
         let virtual_device = gptokeyb_virtual_devices.get(i).and_then(|v| v.as_ref());
         gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
+        if let Some(seat) = seat_devices {
+            gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
+        }
         gamescope::add_separator(&mut cmd);
 
         // 4. Add bwrap container (unless disabled)
@@ -144,7 +154,17 @@ pub fn launch_cmds(
             bwrap::add_base_args(&mut cmd);
 
             // Get gamepad paths for this instance
-            let gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
+            let mut gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
+            // A remote seat set to Gamepad input contributes its virtual pad, so
+            // the game's SDL reads the friend's controller. Kb+Mouse seats add no
+            // pad (no phantom controller for a pad-based game).
+            if let Some(seat) = seat_devices {
+                if instance.together_input == crate::instance::TogetherInput::Gamepad {
+                    if let Some(pad) = &seat.pad {
+                        gamepad_paths.push(pad.to_string_lossy().to_string());
+                    }
+                }
+            }
             if !gamepad_paths.is_empty() {
                 println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(","));
             }

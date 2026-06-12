@@ -349,6 +349,37 @@ impl Splitux {
                         });
                     }
 
+                    // ── Together (remote seat) ──
+                    // Mark this player as a remote Together seat: a seat-streamer
+                    // owns its input + streams its screen to a browser, and
+                    // splitux pops an invite URL on launch. The type picks whether
+                    // the game sees this player as a gamepad (held kbd/mouse work
+                    // either way; see crate::together).
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut instance.together, "Together (remote)")
+                            .on_hover_text(
+                                "Stream this player's screen to a remote browser over WebRTC; \
+                                 their browser input drives this seat. splitux shows an invite \
+                                 URL when you launch.",
+                            );
+                        if instance.together {
+                            let label = format!("Input: {}", instance.together_input.label());
+                            if ui
+                                .button(label)
+                                .on_hover_text(
+                                    "Gamepad: the remote controller drives the game. \
+                                     Kb+Mouse: no gamepad identity for this player — they drive \
+                                     the held keyboard/mouse only (so a pad game won't invent an \
+                                     extra player).",
+                                )
+                                .clicked()
+                            {
+                                instance.together_input = instance.together_input.next();
+                            }
+                        }
+                    });
+
                     // ── Audio section ──
                     if !self.audio_devices.is_empty() && self.options.audio.enabled {
                         ui.add_space(4.0);

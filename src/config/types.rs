@@ -127,6 +127,82 @@ pub struct SplituxConfig {
     /// Allows previous instance's SDL/libinput to complete before spawning next
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_init_delay: Option<f64>,
+    /// splitux-together: stream launched instances to remote players over WebRTC.
+    #[serde(default)]
+    pub together: TogetherConfig,
+}
+
+/// splitux-together configuration. When `enabled`, every launched instance also
+/// gets a `seat-streamer` sidecar: its screen is captured from gamescope and
+/// streamed to a remote browser, and the browser's input drives the instance's
+/// virtual gamepad/keyboard/mouse. splitux pops up one invite URL per seat.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TogetherConfig {
+    /// Producer signalling websocket the seat-streamers dial out to. Point this
+    /// at a local orchestrator (`ws://127.0.0.1:8080/ws/producer`) or the public
+    /// service (`wss://together.gabeforge.com/ws/producer`).
+    #[serde(default = "default_signalling_uri")]
+    pub signalling_uri: String,
+    /// Public base URL the invite links are built from (`{base}/j/{token}`).
+    /// e.g. `https://together.gabeforge.com` or `http://127.0.0.1:8080`.
+    #[serde(default = "default_public_base_url")]
+    pub public_base_url: String,
+    /// When true, splitux spawns its own local orchestrator (serving the bundled
+    /// web client) before the seats. When false, it assumes `signalling_uri`
+    /// already points at a running service.
+    #[serde(default = "default_true")]
+    pub spawn_local_orchestrator: bool,
+    /// GStreamer encoder for the seats: "va" (AMD VCN, production), "vulkan",
+    /// "x264" (CPU fallback). See seat-streamer --encoder.
+    #[serde(default = "default_encoder")]
+    pub encoder: String,
+    /// Per-seat target bitrate (kbps).
+    #[serde(default = "default_bitrate")]
+    pub bitrate: u32,
+    /// Per-seat target fps. 0 = let the seat-streamer default decide.
+    #[serde(default)]
+    pub fps: u32,
+    /// STUN server URI for WebRTC.
+    #[serde(default = "default_stun")]
+    pub stun: String,
+    /// Optional TURN relay (`turn://user:pass@host:3478`) for WAN paths where
+    /// the host is behind NAT. Required for remote friends in practice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+}
+
+fn default_signalling_uri() -> String {
+    "ws://127.0.0.1:8080/ws/producer".to_string()
+}
+fn default_public_base_url() -> String {
+    "http://127.0.0.1:8080".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_encoder() -> String {
+    "va".to_string()
+}
+fn default_bitrate() -> u32 {
+    20000
+}
+fn default_stun() -> String {
+    "stun://stun.l.google.com:19302".to_string()
+}
+
+impl Default for TogetherConfig {
+    fn default() -> Self {
+        TogetherConfig {
+            signalling_uri: default_signalling_uri(),
+            public_base_url: default_public_base_url(),
+            spawn_local_orchestrator: true,
+            encoder: default_encoder(),
+            bitrate: default_bitrate(),
+            fps: 0,
+            stun: default_stun(),
+            turn: None,
+        }
+    }
 }
 
 fn default_enable_kwin_script() -> bool {
@@ -155,6 +231,7 @@ impl Default for SplituxConfig {
             layout: LayoutState::default(),
             device_aliases: HashMap::new(),
             input_init_delay: None,
+            together: TogetherConfig::default(),
         }
     }
 }

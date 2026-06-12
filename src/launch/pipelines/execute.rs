@@ -36,6 +36,14 @@ pub fn launch_game(
     let (mut gptokeyb_handles, gptokeyb_virtual_devices) =
         setup_gptokeyb_daemons(h, input_devices, instances);
 
+    // Set up splitux-together remote seats (no-op unless a player is marked
+    // remote). Spawns one seat-streamer per remote player BEFORE command
+    // building so its virtual devices exist for gamescope's --libinput-hold-dev,
+    // exactly like gptokeyb above. Returns the per-instance virtual device paths
+    // to wire into the launch command + the invite URLs to pop up.
+    let (mut together_handles, together_devices, together_invites) =
+        crate::together::setup_together_seats(instances, cfg, &h.name);
+
     let new_cmds = launch_cmds(
         h,
         input_devices,
@@ -44,6 +52,7 @@ pub fn launch_game(
         cfg,
         &audio_sink_envs,
         &gptokeyb_virtual_devices,
+        &together_devices,
     )?;
 
     // Create WM backend based on config
@@ -202,6 +211,10 @@ pub fn launch_game(
     // overlay and let the launcher be used while we supervise the session below.
     ready.store(true, std::sync::atomic::Ordering::Release);
 
+    // Remote seats are live now — pop the invite URLs so the host can hand each
+    // friend their single-URL link.
+    crate::together::popup_invites(&together_invites);
+
     for mut handle in handles {
         handle.wait()?;
     }
@@ -223,6 +236,9 @@ pub fn launch_game(
 
     // Teardown gptokeyb daemons
     gptokeyb::terminate_all(&mut gptokeyb_handles);
+
+    // Teardown together seat-streamers (and any local orchestrator we started)
+    crate::together::terminate_all(&mut together_handles);
 
     // Teardown audio routing
     if !virtual_sinks.is_empty() {

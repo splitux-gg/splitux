@@ -102,3 +102,30 @@ pub static BIN_GPTOKEYB: LazyLock<PathBuf> = LazyLock::new(|| {
     let bin = env::current_exe().unwrap().parent().unwrap().join("bin");
     bin.join("gptokeyb")
 });
+
+/// splitux-together seat-streamer: one sidecar per remote seat. Owns the
+/// virtual gamepad/keyboard/mouse and runs the WebRTC encode pipeline.
+pub static BIN_SEAT_STREAMER: LazyLock<PathBuf> = LazyLock::new(|| resolve_companion_bin("seat-streamer"));
+
+/// splitux-together orchestrator: signalling broker + web host. Optional —
+/// only spawned when together runs its orchestrator locally rather than
+/// pointing at a remote service.
+pub static BIN_ORCHESTRATOR: LazyLock<PathBuf> = LazyLock::new(|| resolve_companion_bin("orchestrator"));
+
+/// Resolve a companion binary by name across the standard install locations,
+/// preferring splitux's own data dir (`~/.local/share/splitux/bin`).
+fn resolve_companion_bin(name: &str) -> PathBuf {
+    let candidates = [
+        PATH_PARTY.join("bin"),
+        PATH_HOME.join(".local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
+    for candidate in &candidates {
+        let bin = candidate.join(name);
+        if bin.exists() {
+            return bin;
+        }
+    }
+    env::current_exe().unwrap().parent().unwrap().join("bin").join(name)
+}

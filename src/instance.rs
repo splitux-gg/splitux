@@ -9,6 +9,36 @@ fn is_fullscreen_layout(cfg: &SplituxConfig, player_count: usize) -> bool {
     get_layout_type(cfg.layout_presets.get_for_count(player_count)) == LayoutType::Fullscreen
 }
 
+/// How a remote (Together) player's input is presented to the game. The seat
+/// always exposes a virtual pad + kbd + mouse and the kbd/mouse are always held
+/// by gamescope (so remote keystrokes can't leak to the host desktop); this only
+/// controls whether the game ALSO sees this player as a gamepad.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TogetherInput {
+    /// Wire the seat's virtual pad into the game's SDL (couch-co-op default).
+    #[default]
+    Gamepad,
+    /// No gamepad identity for this player — they drive the held kbd/mouse only,
+    /// so a pad-based game doesn't invent a spurious extra player.
+    KbMouse,
+}
+
+impl TogetherInput {
+    pub fn label(self) -> &'static str {
+        match self {
+            TogetherInput::Gamepad => "Gamepad",
+            TogetherInput::KbMouse => "Kb+Mouse",
+        }
+    }
+    /// Toggle between the two (for the card's cycle control).
+    pub fn next(self) -> Self {
+        match self {
+            TogetherInput::Gamepad => TogetherInput::KbMouse,
+            TogetherInput::KbMouse => TogetherInput::Gamepad,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Instance {
     pub devices: Vec<usize>,
@@ -17,6 +47,12 @@ pub struct Instance {
     pub monitor: usize,
     pub width: u32,
     pub height: u32,
+    /// When true, this player is a remote Together seat: a seat-streamer owns
+    /// its input + streams its screen to a browser. See [`crate::together`].
+    pub together: bool,
+    /// How this remote player's input reaches the game (ignored unless
+    /// `together`).
+    pub together_input: TogetherInput,
 }
 
 pub fn set_instance_resolutions(

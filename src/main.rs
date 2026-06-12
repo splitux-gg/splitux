@@ -19,6 +19,7 @@ mod profiles;
 mod proton;
 mod registry;
 mod save_sync;
+mod together;
 mod util;
 mod wm;
 

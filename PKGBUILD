@@ -1,6 +1,6 @@
 # Maintainer: gabrielgad
 pkgname=splitux
-pkgver=0.8.5
+pkgver=0.11.0
 pkgrel=1
 pkgdesc="A split-screen game launcher for Linux/SteamOS"
 arch=('x86_64')
