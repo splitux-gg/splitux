@@ -1,6 +1,7 @@
 mod app;
 mod audio;
 mod backend;
+mod cli;
 mod bepinex;
 mod bwrap;
 mod game_patches;
@@ -59,6 +60,12 @@ fn main() -> eframe::Result {
     if std::env::args().any(|arg| arg == "--restore-session") {
         wm::bars::restore_from_previous_session();
         std::process::exit(0);
+    }
+
+    // Headless CLI: if a subcommand was given, handle it and exit before any GUI
+    // or process-scoping setup. No subcommand → fall through to the GUI.
+    if let Some(code) = cli::run_if_cli() {
+        std::process::exit(code);
     }
 
     // Re-exec into a dedicated systemd scope so every process we launch lives in

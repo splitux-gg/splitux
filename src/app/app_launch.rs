@@ -1,7 +1,5 @@
 // Game setup and launch functions
 
-use std::thread::sleep;
-
 use super::app::{InstanceFocus, MenuPage, Splitux};
 use crate::config::save_cfg;
 use crate::audio::AUDIO_MUTED_SENTINEL;
@@ -10,7 +8,6 @@ use crate::instance::*;
 use crate::launch::*;
 use crate::monitor::get_monitors_sdl;
 use crate::profiles::*;
-use crate::save_sync;
 use crate::util::*;
 
 impl Splitux {
@@ -108,61 +105,18 @@ impl Splitux {
         self.spawn_task(
             "Launching...\n\nDon't press any buttons or move any analog sticks or mice.",
             move || {
-                // Clean up any orphaned processes from previous sessions
-                cleanup_orphaned_processes();
-
-                sleep(std::time::Duration::from_secs_f32(1.5));
-
-                if let Err(err) = setup_profiles(&handler, &instances) {
-                    println!("[splitux] Error setting up profiles: {}", err);
-                    msg("Failed setting up profiles", &format!("{err}"));
-                    return;
-                }
-
-                // Initialize profile saves with master-based inheritance
-                if !handler.original_save_path.is_empty() {
-                    if let Err(err) = save_sync::initialize_profile_saves(
-                        &handler,
-                        &instances,
-                        master_profile.as_deref(),
-                    ) {
-                        println!("[splitux] Warning: Failed to initialize saves: {}", err);
-                        // Continue anyway - this is non-fatal
-                    }
-                }
-
-                // Note: fuse_overlayfs_mount_gamedirs is now called inside launch_cmds
-                // with proper Goldberg overlay support
-                if let Err(err) =
-                    launch_game(&handler, &dev_infos, &instances, &monitors, &cfg, &launch_ready)
-                {
-                    println!("[splitux] Error launching instances: {}", err);
-                    msg("Launch Error", &format!("{err}"));
-                }
-                // Ensure the UI is released even if launch errored before signaling.
-                launch_ready.store(true, std::sync::atomic::Ordering::Release);
-
-                // Sync master profile's saves back to original location
-                if handler.save_sync_back {
-                    if let Err(err) = save_sync::sync_master_saves_back(
-                        &handler,
-                        &instances,
-                        master_profile.as_deref(),
-                    ) {
-                        println!("[splitux] Error syncing saves back: {}", err);
-                        msg("Save Sync Error", &format!("Failed to sync saves back: {err}"));
-                    }
-                }
-
-                // WM teardown is now handled inside launch_game
-                if let Err(err) = remove_guest_profiles() {
-                    println!("[splitux] Error removing guest profiles: {}", err);
-                    msg("Failed removing guest profiles", &format!("{err}"));
-                }
-                if let Err(err) = clear_tmp() {
-                    println!("[splitux] Error removing tmp directory: {}", err);
-                    msg("Failed removing tmp directory", &format!("{err}"));
-                }
+                // Shared launch core (also used by the headless CLI). User-facing
+                // failures pop a modal here; the CLI routes them to stderr.
+                run_session(
+                    &handler,
+                    &instances,
+                    &monitors,
+                    &dev_infos,
+                    &cfg,
+                    master_profile.as_deref(),
+                    &launch_ready,
+                    &|title, body| msg(title, body),
+                );
             },
         );
     }
