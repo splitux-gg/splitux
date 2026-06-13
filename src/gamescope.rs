@@ -109,6 +109,14 @@ pub fn add_seat_hold_args(
     seat: &crate::together::TogetherSeatDevices,
     cfg: &SplituxConfig,
 ) {
+    // Drive the nested compositor's refresh at the seat's fps tier so the
+    // PipeWire capture is clocked at that rate (the headless backend otherwise
+    // defaults to 60Hz, capping the producer at one frame per vblank). Set on
+    // together seats only — local splitscreen keeps the monitor's native
+    // refresh. `resolved_fps()` is the same source the seat-streamer `--fps`
+    // uses, so capture and encode rates always agree.
+    cmd.args(["-r", &cfg.together.resolved_fps().to_string()]);
+
     if !cfg.input_holding {
         return;
     }

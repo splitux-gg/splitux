@@ -159,8 +159,10 @@ pub struct TogetherConfig {
     /// Per-seat target bitrate (kbps).
     #[serde(default = "default_bitrate")]
     pub bitrate: u32,
-    /// Per-seat target fps. 0 = let the seat-streamer default decide.
-    #[serde(default)]
+    /// Per-seat target fps tier (200/144/100/72). Drives both the gamescope
+    /// capture refresh (`-r`) and the seat-streamer (`--fps`). 0 resolves to the
+    /// default tier via `resolved_fps()`.
+    #[serde(default = "default_fps")]
     pub fps: u32,
     /// STUN server URI for WebRTC.
     #[serde(default = "default_stun")]
@@ -186,6 +188,24 @@ fn default_encoder() -> String {
 fn default_bitrate() -> u32 {
     20000
 }
+/// Default per-seat fps tier. The architecture targets 200/144/100/72; an unset
+/// `together.fps` resolves to the top tier.
+pub fn default_fps() -> u32 {
+    200
+}
+
+impl TogetherConfig {
+    /// Single source of truth for the seat fps, so the gamescope capture refresh
+    /// (`-r`) and the seat-streamer (`--fps`) always agree. A 0 (explicit
+    /// "unset") resolves to the default tier.
+    pub fn resolved_fps(&self) -> u32 {
+        if self.fps > 0 {
+            self.fps
+        } else {
+            default_fps()
+        }
+    }
+}
 fn default_stun() -> String {
     "stun://stun.l.google.com:19302".to_string()
 }
@@ -198,7 +218,7 @@ impl Default for TogetherConfig {
             spawn_local_orchestrator: true,
             encoder: default_encoder(),
             bitrate: default_bitrate(),
-            fps: 0,
+            fps: default_fps(),
             stun: default_stun(),
             turn: None,
         }

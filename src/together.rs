@@ -133,9 +133,7 @@ fn spawn_seat_streamer(
         .args(["--encoder", &cfg.together.encoder])
         .args(["--bitrate", &cfg.together.bitrate.to_string()])
         .args(["--stun", &cfg.together.stun]);
-    if cfg.together.fps > 0 {
-        cmd.args(["--fps", &cfg.together.fps.to_string()]);
-    }
+    cmd.args(["--fps", &cfg.together.resolved_fps().to_string()]);
     if instance.width > 0 && instance.height > 0 {
         cmd.args(["--width", &instance.width.to_string()]);
         cmd.args(["--height", &instance.height.to_string()]);
