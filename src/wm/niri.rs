@@ -14,6 +14,20 @@ struct NiriWindow {
     is_floating: bool,
 }
 
+/// Whether `pid`'s process is a gamescope binary. Used to identify gamescope
+/// windows when the compositor reports no app_id (e.g. Proton titles on niri).
+/// Checks the exe symlink first (most reliable), then the thread comm name.
+fn pid_is_gamescope(pid: u64) -> bool {
+    if let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) {
+        if exe.to_string_lossy().to_lowercase().contains("gamescope") {
+            return true;
+        }
+    }
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .map(|c| c.to_lowercase().contains("gamescope"))
+        .unwrap_or(false)
+}
+
 pub struct NiriManager {
     target_monitor: Option<String>,
     bar_manager: StatusBarManager,
@@ -144,8 +158,15 @@ impl NiriManager {
         if let Some(arr) = windows.as_array() {
             for win in arr {
                 let app_id = win["app_id"].as_str().unwrap_or("");
-                // Match gamescope variants
-                if app_id.to_lowercase().contains("gamescope") {
+                // Primary match: app_id carries "gamescope" (native games). But
+                // gamescope's libdecor app_id doesn't always reach the host
+                // compositor — Proton titles on niri surface with an UNSET
+                // app_id (the title is the game name instead), so app_id-only
+                // matching silently finds 0 windows and the launch times out.
+                // Fall back to the window's PID: niri exposes it, and a window
+                // backed by a gamescope binary is ours regardless of app_id.
+                let pid_is_gs = win["pid"].as_u64().is_some_and(pid_is_gamescope);
+                if app_id.to_lowercase().contains("gamescope") || pid_is_gs {
                     if let Some(id) = win["id"].as_u64() {
                         result.push(NiriWindow {
                             id,
