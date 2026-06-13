@@ -46,6 +46,16 @@ fn seat_id(i: usize) -> String {
     format!("seat-{}", i + 1)
 }
 
+/// PipeWire node name for instance `i`'s gamescope capture. Each together
+/// instance must advertise a UNIQUE node name, otherwise a seat-streamer
+/// matching by name binds every seat to the first gamescope node (all seats
+/// capture one instance). gamescope reads this from `GAMESCOPE_PIPEWIRE_NODE`
+/// (set on its launch in build_cmds) and the matching seat-streamer targets it
+/// via `--pw-name`. Keep the two in lockstep through this one helper.
+pub fn node_name_for_instance(i: usize) -> String {
+    format!("gamescope-{}", seat_id(i))
+}
+
 /// A ~22-char URL-safe random invite token.
 fn gen_token() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -129,7 +139,10 @@ fn spawn_seat_streamer(
         .args(["--invite-token", token])
         .args(["--signalling", &cfg.together.signalling_uri])
         .args(["--source", "pipewire"])
-        .args(["--pw-name", "gamescope"])
+        // Target THIS seat's gamescope node specifically. Must match the
+        // GAMESCOPE_PIPEWIRE_NODE that build_cmds sets on the matching gamescope
+        // launch — both derive from the seat, so seat-N captures instance-N.
+        .args(["--pw-name", &format!("gamescope-{seat}")])
         .args(["--encoder", &cfg.together.encoder])
         .args(["--bitrate", &cfg.together.bitrate.to_string()])
         .args(["--stun", &cfg.together.stun]);

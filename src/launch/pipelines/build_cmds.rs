@@ -146,6 +146,14 @@ pub fn launch_cmds(
         gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
         if let Some(seat) = seat_devices {
             gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
+            // Give this instance's PipeWire capture a unique, targetable node
+            // name so its seat-streamer (--pw-name gamescope-seat-N) binds to
+            // THIS gamescope and not another seat's. Without it, all seats'
+            // streamers match the first "gamescope" node and capture one game.
+            cmd.env(
+                "GAMESCOPE_PIPEWIRE_NODE",
+                crate::together::node_name_for_instance(i),
+            );
         }
         gamescope::add_separator(&mut cmd);
 
