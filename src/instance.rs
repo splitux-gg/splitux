@@ -53,6 +53,11 @@ pub struct Instance {
     /// How this remote player's input reaches the game (ignored unless
     /// `together`).
     pub together_input: TogetherInput,
+    /// Number of remote Together seats this instance owns. Normally 1 when
+    /// `together` (online/LAN: one instance ↔ one seat). For a local-split
+    /// (couch-co-op) game the players collapse into a single instance that owns
+    /// N seats — N browsers driving the one shared game. 0 when not `together`.
+    pub together_seats: u8,
 }
 
 pub fn set_instance_resolutions(

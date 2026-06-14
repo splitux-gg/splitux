@@ -18,3 +18,4 @@ pub use operations::blocking::{get_evdev_hidraw_blocking_args, get_js_blocking_a
 pub use operations::devices::{
     get_assigned_gamepad_paths, glob_js_devices, log_assigned_devices,
 };
+pub use pure::matching::build_allowlist_args;

@@ -64,6 +64,28 @@ pub fn build_blocking_args(paths_to_block: &[&str]) -> Vec<String> {
     args
 }
 
+/// Build bwrap args that expose ONLY `allowed_paths` under `/dev/input`:
+/// `--tmpfs /dev/input` empties the directory, then each allowed node is bound
+/// back with `--dev-bind`. Every other device node is then absent (ENOENT),
+/// which input enumerators — SDL2 and raw-evdev engines like Godot — skip
+/// cleanly, unlike a `/dev/null`-bound node (which opens, then fails its ioctl
+/// and aborts Godot's whole scan). One mechanism, all engines.
+///
+/// Empty `allowed_paths` still tmpfs-empties `/dev/input` (full isolation: the
+/// instance sees no input devices). Callers that want "see everything" must skip
+/// calling this entirely (InputIsolation::None).
+pub fn build_allowlist_args(allowed_paths: &[&str]) -> Vec<String> {
+    let mut args = vec!["--tmpfs".to_string(), "/dev/input".to_string()];
+    for path in allowed_paths {
+        args.extend([
+            "--dev-bind".to_string(),
+            path.to_string(),
+            path.to_string(),
+        ]);
+    }
+    args
+}
+
 /// Get evdev paths for gamepads NOT assigned to this instance (pure filter).
 pub fn filter_unassigned_gamepad_evdev(
     input_devices: &[DeviceInfo],

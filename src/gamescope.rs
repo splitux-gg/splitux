@@ -98,25 +98,31 @@ pub fn add_input_holding_args(
     }
 }
 
+/// Drive a together instance's nested compositor at the fps tier.
+///
+/// Set ONCE per together instance (independent of how many seats it carries):
+/// the PipeWire capture is clocked at the compositor's refresh, and the headless
+/// backend otherwise defaults to 60Hz — capping the producer at one frame per
+/// vblank. `resolved_fps()` is the same source the seat-streamer `--fps` uses,
+/// so capture and encode rates always agree. Local splitscreen (no together
+/// seats) keeps the monitor's native refresh.
+pub fn add_together_refresh_rate(cmd: &mut Command, cfg: &SplituxConfig) {
+    cmd.args(["-r", &cfg.together.resolved_fps().to_string()]);
+}
+
 /// Hold a splitux-together remote seat's virtual keyboard + mouse.
 ///
 /// These are ALWAYS held (independent of the seat's Gamepad/Kb+Mouse type) so
 /// that input the remote browser sends over those devices reaches the game's
 /// gamescope instead of leaking to the host desktop. Requires gamescope-splitux
 /// (input holding), which is also the PipeWire capture source the seat streams.
+/// Call once per seat — gamescope accepts repeated `--libinput-hold-dev`, so a
+/// local-split instance can hold every one of its seats' kbd/mice.
 pub fn add_seat_hold_args(
     cmd: &mut Command,
     seat: &crate::together::TogetherSeatDevices,
     cfg: &SplituxConfig,
 ) {
-    // Drive the nested compositor's refresh at the seat's fps tier so the
-    // PipeWire capture is clocked at that rate (the headless backend otherwise
-    // defaults to 60Hz, capping the producer at one frame per vblank). Set on
-    // together seats only — local splitscreen keeps the monitor's native
-    // refresh. `resolved_fps()` is the same source the seat-streamer `--fps`
-    // uses, so capture and encode rates always agree.
-    cmd.args(["-r", &cfg.together.resolved_fps().to_string()]);
-
     if !cfg.input_holding {
         return;
     }

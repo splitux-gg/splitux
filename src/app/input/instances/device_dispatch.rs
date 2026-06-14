@@ -107,6 +107,7 @@ impl Splitux {
                                 height: 0,
                                 together: false,
                                 together_input: crate::instance::TogetherInput::Gamepad,
+                                together_seats: 0,
                             });
                         }
                     }

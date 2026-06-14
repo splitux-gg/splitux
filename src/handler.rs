@@ -31,6 +31,48 @@ fn is_default_backend(b: &MultiplayerBackend) -> bool {
     *b == MultiplayerBackend::None
 }
 
+/// Co-op topology: how this game's together players map to game instances.
+#[derive(Clone, Copy, Serialize, Deserialize, Default, PartialEq, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub enum CoopMode {
+    /// One game instance per player (online/LAN co-op — Terraria, V Rising).
+    /// Each instance runs its own backend/overlay and joins over the network.
+    #[default]
+    Separate,
+    /// One game instance shared by N controllers (local splitscreen / couch
+    /// co-op — Brotato). All together seats drive the single instance.
+    LocalSplit,
+}
+
+fn is_default_coop_mode(m: &CoopMode) -> bool {
+    *m == CoopMode::Separate
+}
+
+/// How a game instance's input devices are isolated from other instances' / the
+/// host's devices inside the bwrap container.
+#[derive(Clone, Copy, Serialize, Deserialize, Default, PartialEq, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub enum InputIsolation {
+    /// Universal allowlist: the container's `/dev/input` is emptied (tmpfs) and
+    /// only this instance's assigned devices are bound back. Unassigned devices
+    /// become ENOENT (absent), which every enumerator — SDL2 AND raw-evdev
+    /// engines like Godot — skips cleanly. This is the modern default and makes
+    /// the SDL-only path unnecessary.
+    #[default]
+    Evdev,
+    /// Legacy SDL2 path: set `SDL_JOYSTICK_DEVICE` and `/dev/null`-bind unassigned
+    /// devices. Works only for SDL2 games — a `/dev/null`'d node poisons raw-evdev
+    /// enumeration (Godot opens it, the ioctl fails, and the whole scan aborts).
+    Sdl,
+    /// No input isolation — every device is visible to the instance. Correct for
+    /// single-instance local-split (all pads drive the one game) or debugging.
+    None,
+}
+
+fn is_default_input_isolation(m: &InputIsolation) -> bool {
+    *m == InputIsolation::Evdev
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Handler {
     // Members that are determined by context (not serialized)
@@ -85,6 +127,11 @@ pub struct Handler {
     /// DEPRECATED: Use `backend: goldberg` instead. Kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_goldberg: bool,
+    /// Co-op topology over splitux-together. `separate` (default) = one game
+    /// instance per player (online/LAN). `local-split` = a single game instance
+    /// shared by N controllers (couch co-op, e.g. Brotato).
+    #[serde(default, skip_serializing_if = "is_default_coop_mode")]
+    pub coop_mode: CoopMode,
     /// Game-specific Goldberg settings files.
     /// Keys are filenames (e.g., "force_lobby_type.txt", "invite_all.txt")
     /// Values are file contents (use empty string for empty files)
@@ -148,8 +195,13 @@ pub struct Handler {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disable_bwrap: bool,
     /// Disable input device isolation (for games where mods handle input internally)
+    /// DEPRECATED: equivalent to `input_isolation: none`. Kept for compatibility.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disable_input_isolation: bool,
+    /// How input devices are isolated inside the container. Default `evdev`
+    /// (universal allowlist — works for SDL2 and raw-evdev engines like Godot).
+    #[serde(default, skip_serializing_if = "is_default_input_isolation")]
+    pub input_isolation: InputIsolation,
 
     /// gptokeyb settings for controller→keyboard/mouse translation
     /// Enable for games without native controller support
@@ -214,6 +266,7 @@ impl Default for Handler {
 
             backend: MultiplayerBackend::None,
             use_goldberg: false,
+            coop_mode: CoopMode::Separate,
             steam_appid: None,
             platform: None,
             goldberg_settings: std::collections::HashMap::new(),
@@ -235,6 +288,7 @@ impl Default for Handler {
             game_null_paths: Vec::new(),
             disable_bwrap: false,
             disable_input_isolation: false,
+            input_isolation: InputIsolation::Evdev,
             gptokeyb: GptokeybSettings::default(),
             game_patches: HashMap::new(),
 
@@ -396,6 +450,22 @@ impl Handler {
     /// Check if Standalone backend is enabled
     pub fn has_standalone(&self) -> bool {
         self.standalone.is_some()
+    }
+
+    /// Whether this game uses local-splitscreen co-op (one instance, N pads)
+    /// rather than the default per-player-instance (online/LAN) topology.
+    pub fn is_local_split(&self) -> bool {
+        self.coop_mode == CoopMode::LocalSplit
+    }
+
+    /// Resolve the input-isolation strategy, folding in the legacy
+    /// `disable_input_isolation` bool (which maps to `None`).
+    pub fn effective_input_isolation(&self) -> InputIsolation {
+        if self.disable_input_isolation {
+            InputIsolation::None
+        } else {
+            self.input_isolation
+        }
     }
 
     /// Get display string for enabled backends (e.g., "Goldberg", "Photon, Facepunch")

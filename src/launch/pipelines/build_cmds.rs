@@ -39,7 +39,7 @@ pub fn launch_cmds(
     cfg: &SplituxConfig,
     audio_sink_envs: &[String],
     gptokeyb_virtual_devices: &[Option<PathBuf>],
-    together_devices: &[Option<crate::together::TogetherSeatDevices>],
+    together_devices: &[Vec<crate::together::TogetherSeatDevices>],
 ) -> Result<Vec<(std::process::Command, usize)>, Box<dyn std::error::Error>> {
     let win = h.win();
     let exec = Path::new(&h.exec);
@@ -134,22 +134,30 @@ pub fn launch_cmds(
             }
         }
 
-        // splitux-together: this instance's remote seat (if any). Its virtual
-        // kbd/mouse are ALWAYS held by gamescope (so remote keystrokes reach the
-        // game, not the host desktop); its pad is wired into the game's SDL
-        // below only when the player is set to Gamepad input.
-        let seat_devices = together_devices.get(i).and_then(|v| v.as_ref());
+        // splitux-together: this instance's remote seats (if any). One in the
+        // online/LAN case; N for a local-split (couch-co-op) game where several
+        // browsers drive the one instance. Each seat's virtual kbd/mouse are
+        // ALWAYS held by gamescope (so remote keystrokes reach the game, not the
+        // host desktop); their pads are wired into the game's SDL below only when
+        // the player is set to Gamepad input.
+        let seats: &[crate::together::TogetherSeatDevices] =
+            together_devices.get(i).map(Vec::as_slice).unwrap_or(&[]);
 
         // 3. Add gamescope arguments
         gamescope::add_args(&mut cmd, instance, monitors, cfg);
         let virtual_device = gptokeyb_virtual_devices.get(i).and_then(|v| v.as_ref());
         gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
-        if let Some(seat) = seat_devices {
-            gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
-            // Give this instance's PipeWire capture a unique, targetable node
-            // name so its seat-streamer (--pw-name gamescope-seat-N) binds to
-            // THIS gamescope and not another seat's. Without it, all seats'
-            // streamers match the first "gamescope" node and capture one game.
+        if !seats.is_empty() {
+            // Drive the compositor at the fps tier once for the instance, then
+            // hold EVERY seat's kbd/mouse (gamescope takes repeated
+            // --libinput-hold-dev). Give the instance's PipeWire capture a
+            // unique, targetable node name so its seat-streamer(s) bind to THIS
+            // gamescope; all of this instance's seats share that one node
+            // (multi-consumer) — which is exactly how local-split fans out.
+            gamescope::add_together_refresh_rate(&mut cmd, cfg);
+            for seat in seats {
+                gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
+            }
             cmd.env(
                 "GAMESCOPE_PIPEWIRE_NODE",
                 crate::together::node_name_for_instance(i),
@@ -163,11 +171,12 @@ pub fn launch_cmds(
 
             // Get gamepad paths for this instance
             let mut gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
-            // A remote seat set to Gamepad input contributes its virtual pad, so
+            // Remote seats set to Gamepad input contribute their virtual pad, so
             // the game's SDL reads the friend's controller. Kb+Mouse seats add no
-            // pad (no phantom controller for a pad-based game).
-            if let Some(seat) = seat_devices {
-                if instance.together_input == crate::instance::TogetherInput::Gamepad {
+            // pad (no phantom controller for a pad-based game). A local-split
+            // instance carries several gamepad seats → several pads on one game.
+            if instance.together_input == crate::instance::TogetherInput::Gamepad {
+                for seat in seats {
                     if let Some(pad) = &seat.pad {
                         gamepad_paths.push(pad.to_string_lossy().to_string());
                     }
@@ -177,9 +186,11 @@ pub fn launch_cmds(
                 println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(","));
             }
 
-            // Set up SDL environment inside container
-            // Skip SDL config entirely if input isolation disabled (like test-repo.sh)
-            if !h.disable_input_isolation {
+            // Set up SDL environment inside container. Keep it for both isolation
+            // modes: it forces SDL onto evdev (HIDAPI off) and pins the device,
+            // which keeps SDL games well-behaved alongside the evdev allowlist.
+            // Skip only when isolation is fully off.
+            if h.effective_input_isolation() != crate::handler::InputIsolation::None {
                 bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
             }
 

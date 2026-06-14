@@ -141,6 +141,11 @@ fn launch(game: &str, players: &[String]) -> i32 {
         }
     }
 
+    // Local-split (couch co-op) games fold their remote players into ONE game
+    // instance owning N seats — do this before sizing so it lays out as a single
+    // fullscreen window, not an N-way split. Online/LAN handlers are unchanged.
+    let mut instances = crate::together::collapse_for_local_split(instances, &handler);
+
     // Same pre-launch sizing/naming the GUI does.
     if cfg.gamescope_sdl_backend {
         set_instance_resolutions_multimonitor(&mut instances, &monitors, &cfg);
@@ -153,7 +158,7 @@ fn launch(game: &str, players: &[String]) -> i32 {
     let master = cfg.master_profile.clone();
     let ready = AtomicBool::new(false);
 
-    let remote = instances.iter().filter(|i| i.together).count();
+    let remote: usize = instances.iter().map(|i| i.together_seats as usize).sum();
     println!(
         "[splitux] launching '{}' headlessly — {} player(s), {} remote seat(s). \
          Together invite URLs print below once the game is up.",
@@ -227,5 +232,6 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
         height: 0,
         together,
         together_input,
+        together_seats: if together { 1 } else { 0 },
     })
 }

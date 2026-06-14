@@ -128,6 +128,7 @@ fn spawn_seat_streamer(
     name: &str,
     token: &str,
     instance: &Instance,
+    pw_node: &str,
 ) -> std::io::Result<Child> {
     let log_path = format!("/tmp/splitux-together-{seat}.log");
     let log = std::fs::File::create(&log_path)?;
@@ -139,10 +140,11 @@ fn spawn_seat_streamer(
         .args(["--invite-token", token])
         .args(["--signalling", &cfg.together.signalling_uri])
         .args(["--source", "pipewire"])
-        // Target THIS seat's gamescope node specifically. Must match the
-        // GAMESCOPE_PIPEWIRE_NODE that build_cmds sets on the matching gamescope
-        // launch — both derive from the seat, so seat-N captures instance-N.
-        .args(["--pw-name", &format!("gamescope-{seat}")])
+        // Target this seat's HOST INSTANCE gamescope node. Must match the
+        // GAMESCOPE_PIPEWIRE_NODE build_cmds sets on that gamescope launch. In
+        // online/LAN each seat has its own instance (seat-N → instance-N node);
+        // in local-split every seat shares instance-0's node (multi-consumer).
+        .args(["--pw-name", pw_node])
         .args(["--encoder", &cfg.together.encoder])
         .args(["--bitrate", &cfg.together.bitrate.to_string()])
         .args(["--stun", &cfg.together.stun]);
@@ -222,11 +224,13 @@ pub fn setup_together_seats(
     instances: &[Instance],
     cfg: &SplituxConfig,
     game_label: &str,
-) -> (Vec<Child>, Vec<Option<TogetherSeatDevices>>, Vec<InviteLink>) {
+) -> (Vec<Child>, Vec<Vec<TogetherSeatDevices>>, Vec<InviteLink>) {
     let n = instances.len();
-    let remote_count = instances.iter().filter(|inst| inst.together).count();
+    // Total remote seats across all instances. Normally one per `together`
+    // instance (online/LAN); a local-split game folds N seats onto one instance.
+    let remote_count: usize = instances.iter().map(|inst| inst.together_seats as usize).sum();
     if remote_count == 0 {
-        return (Vec::new(), vec![None; n], Vec::new());
+        return (Vec::new(), vec![Vec::new(); n], Vec::new());
     }
     if !BIN_SEAT_STREAMER.exists() {
         println!(
@@ -234,7 +238,7 @@ pub fn setup_together_seats(
              skipping remote seats",
             BIN_SEAT_STREAMER.display()
         );
-        return (Vec::new(), vec![None; n], Vec::new());
+        return (Vec::new(), vec![Vec::new(); n], Vec::new());
     }
     if !cfg.input_holding {
         println!(
@@ -247,56 +251,98 @@ pub fn setup_together_seats(
     println!("[splitux] together - setting up {remote_count} remote seat(s) → {}", cfg.together.signalling_uri);
 
     let mut handles: Vec<Child> = Vec::new();
-    let mut devices: Vec<Option<TogetherSeatDevices>> = vec![None; n];
+    let mut devices: Vec<Vec<TogetherSeatDevices>> = vec![Vec::new(); n];
     let mut links: Vec<InviteLink> = Vec::new();
 
     if let Some(orch) = ensure_orchestrator(cfg) {
         handles.push(orch);
     }
 
+    // Seat ids are allocated from one global counter so every seat is unique even
+    // when several share an instance (local-split). The PipeWire node, in
+    // contrast, is keyed by the HOST INSTANCE: all of an instance's seats capture
+    // its one gamescope (multi-consumer), so they target the same node name that
+    // build_cmds stamps onto that gamescope via GAMESCOPE_PIPEWIRE_NODE.
+    let mut seat_index = 0usize;
     for (i, instance) in instances.iter().enumerate() {
-        if !instance.together {
+        if instance.together_seats == 0 {
             continue; // local player — untouched
         }
-        let seat = seat_id(i);
-        let name = if remote_count == 1 {
-            game_label.to_string()
-        } else {
-            format!("{game_label} — Player {}", i + 1)
-        };
-        let token = gen_token();
+        let node = node_name_for_instance(i);
+        for _ in 0..instance.together_seats {
+            let seat = seat_id(seat_index);
+            let name = if remote_count == 1 {
+                game_label.to_string()
+            } else {
+                format!("{game_label} — Player {}", seat_index + 1)
+            };
+            let token = gen_token();
 
-        match spawn_seat_streamer(cfg, &seat, &name, &token, instance) {
-            Ok(child) => handles.push(child),
-            Err(e) => {
-                println!("[splitux] together - seat {seat}: spawn failed: {e}");
-                continue;
+            match spawn_seat_streamer(cfg, &seat, &name, &token, instance, &node) {
+                Ok(child) => handles.push(child),
+                Err(e) => {
+                    println!("[splitux] together - seat {seat}: spawn failed: {e}");
+                    seat_index += 1;
+                    continue;
+                }
             }
-        }
 
-        // The virtual devices appear a beat after the streamer starts; gamescope
-        // must hold them at launch, so block until they exist (bounded).
-        let devs = wait_for_seat_devices(&seat, Duration::from_secs(10));
-        if devs.kbd.is_none() || devs.mouse.is_none() || devs.pad.is_none() {
-            println!(
-                "[splitux] together - seat {seat}: virtual devices incomplete (pad={:?} kbd={:?} mouse={:?}) — \
-                 check /tmp/splitux-together-{seat}.log",
-                devs.pad, devs.kbd, devs.mouse
-            );
-        } else {
-            println!(
-                "[splitux] together - seat {seat}: pad={} kbd={} mouse={}",
-                devs.pad.as_ref().unwrap().display(),
-                devs.kbd.as_ref().unwrap().display(),
-                devs.mouse.as_ref().unwrap().display()
-            );
-        }
-        devices[i] = Some(devs);
+            // The virtual devices appear a beat after the streamer starts;
+            // gamescope must hold them at launch, so block until they exist.
+            let devs = wait_for_seat_devices(&seat, Duration::from_secs(10));
+            if devs.kbd.is_none() || devs.mouse.is_none() || devs.pad.is_none() {
+                println!(
+                    "[splitux] together - seat {seat}: virtual devices incomplete (pad={:?} kbd={:?} mouse={:?}) — \
+                     check /tmp/splitux-together-{seat}.log",
+                    devs.pad, devs.kbd, devs.mouse
+                );
+            } else {
+                println!(
+                    "[splitux] together - seat {seat}: pad={} kbd={} mouse={}",
+                    devs.pad.as_ref().unwrap().display(),
+                    devs.kbd.as_ref().unwrap().display(),
+                    devs.mouse.as_ref().unwrap().display()
+                );
+            }
+            devices[i].push(devs);
 
-        links.push(InviteLink { seat, name, url: build_invite_url(cfg, &token) });
+            links.push(InviteLink { seat, name, url: build_invite_url(cfg, &token) });
+            seat_index += 1;
+        }
     }
 
     (handles, devices, links)
+}
+
+/// Fold a local-split handler's together players into a single game instance
+/// that owns all their remote seats (one game process, N browsers). Online/LAN
+/// handlers (the default) are returned unchanged — every player keeps its own
+/// instance. Local (non-together) pads are merged onto the shared instance so a
+/// host can sit at the same couch game.
+pub fn collapse_for_local_split(
+    instances: Vec<Instance>,
+    handler: &crate::handler::Handler,
+) -> Vec<Instance> {
+    if !handler.is_local_split() || instances.len() <= 1 {
+        return instances;
+    }
+    let seats: u32 = instances
+        .iter()
+        .filter(|inst| inst.together)
+        .map(|inst| inst.together_seats.max(1) as u32)
+        .sum();
+    // Base the shared instance on the first player (its profile owns the single
+    // overlay/prefix), but gather every player's local input devices onto it.
+    let mut base = instances[0].clone();
+    base.devices = instances.iter().flat_map(|inst| inst.devices.iter().copied()).collect();
+    base.together = seats > 0;
+    base.together_seats = seats.min(u8::MAX as u32) as u8;
+    if base.together {
+        // Local-split is gamepad-only (games lock kb/m to P1); every seat's pad
+        // is wired into the one game's SDL device list.
+        base.together_input = crate::instance::TogetherInput::Gamepad;
+    }
+    vec![base]
 }
 
 /// Show the invite URLs to the host so they can hand them to friends. Also
@@ -337,5 +383,78 @@ pub fn terminate_all(handles: &mut Vec<Child>) {
     for mut child in handles.drain(..) {
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handler::{CoopMode, Handler};
+    use crate::instance::{Instance, TogetherInput};
+
+    fn together_instance(devices: Vec<usize>) -> Instance {
+        Instance {
+            devices,
+            profname: String::new(),
+            profselection: 0,
+            monitor: 0,
+            width: 0,
+            height: 0,
+            together: true,
+            together_input: TogetherInput::Gamepad,
+            together_seats: 1,
+        }
+    }
+
+    fn handler_with(coop: CoopMode) -> Handler {
+        Handler { coop_mode: coop, ..Handler::default() }
+    }
+
+    #[test]
+    fn separate_handler_is_left_untouched() {
+        let instances = vec![together_instance(vec![]), together_instance(vec![])];
+        let out = collapse_for_local_split(instances.clone(), &handler_with(CoopMode::Separate));
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|i| i.together_seats == 1));
+    }
+
+    #[test]
+    fn local_split_folds_players_into_one_instance() {
+        let instances = vec![together_instance(vec![]), together_instance(vec![])];
+        let out = collapse_for_local_split(instances, &handler_with(CoopMode::LocalSplit));
+        assert_eq!(out.len(), 1, "two players collapse to one game instance");
+        assert_eq!(out[0].together_seats, 2, "the one instance owns both seats");
+        assert!(out[0].together);
+        assert_eq!(out[0].together_input, TogetherInput::Gamepad);
+    }
+
+    #[test]
+    fn local_split_merges_local_pads_onto_the_instance() {
+        // A host local pad (instance with devices [3], not together) plus two
+        // remote seats should yield one instance carrying the local pad and 2
+        // remote seats.
+        let mut local = together_instance(vec![3]);
+        local.together = false;
+        local.together_seats = 0;
+        let instances = vec![local, together_instance(vec![]), together_instance(vec![])];
+        let out = collapse_for_local_split(instances, &handler_with(CoopMode::LocalSplit));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].together_seats, 2, "only together players become seats");
+        assert!(out[0].devices.contains(&3), "host's local pad is preserved");
+    }
+
+    #[test]
+    fn single_player_is_not_collapsed() {
+        let instances = vec![together_instance(vec![])];
+        let out = collapse_for_local_split(instances, &handler_with(CoopMode::LocalSplit));
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn node_name_is_keyed_per_instance() {
+        // All seats on one instance must resolve to that instance's node so they
+        // share its single gamescope capture (multi-consumer fan-out).
+        assert_eq!(node_name_for_instance(0), "gamescope-seat-1");
+        assert_eq!(node_name_for_instance(1), "gamescope-seat-2");
     }
 }

@@ -155,19 +155,50 @@ pub fn launch_game(
             std::thread::sleep(std::time::Duration::from_secs_f64(input_init_delay));
         }
 
-        // Build fresh device blocking args right before spawn (spawn-time permission check).
+        // Build fresh device isolation args right before spawn (spawn-time permission check).
         // These must be inserted as bwrap args, before the child command (proton/game).
-        let blocking_args = if !h.disable_bwrap && !h.disable_input_isolation {
-            let initial_js_devices = bwrap::glob_js_devices();
-            let mut args = bwrap::get_js_blocking_args(&initial_js_devices, i);
-            args.extend(bwrap::get_evdev_hidraw_blocking_args(
-                input_devices,
-                &instances[i].devices,
-                i,
-            ));
-            args
-        } else {
+        use crate::handler::InputIsolation;
+        let blocking_args = if h.disable_bwrap {
             Vec::new()
+        } else {
+            match h.effective_input_isolation() {
+                InputIsolation::None => Vec::new(),
+                // Legacy SDL-only path: /dev/null-bind unassigned devices. Breaks
+                // raw-evdev engines (Godot) — kept only for explicit opt-in.
+                InputIsolation::Sdl => {
+                    let initial_js_devices = bwrap::glob_js_devices();
+                    let mut args = bwrap::get_js_blocking_args(&initial_js_devices, i);
+                    args.extend(bwrap::get_evdev_hidraw_blocking_args(
+                        input_devices,
+                        &instances[i].devices,
+                        i,
+                    ));
+                    args
+                }
+                // Universal allowlist: expose ONLY this instance's assigned input
+                // devices (local pads + remote seat pads); everything else becomes
+                // ENOENT, which SDL2 and raw-evdev engines (Godot) both skip cleanly.
+                InputIsolation::Evdev => {
+                    let mut allowed =
+                        bwrap::get_assigned_gamepad_paths(input_devices, &instances[i].devices);
+                    if let Some(seats) = together_devices.get(i) {
+                        for seat in seats {
+                            if let Some(pad) = &seat.pad {
+                                allowed.push(pad.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                    allowed.retain(|p| std::path::Path::new(p).exists());
+                    println!(
+                        "[splitux] Instance {}: evdev allowlist — exposing {} device(s): {:?}",
+                        i,
+                        allowed.len(),
+                        allowed
+                    );
+                    let refs: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
+                    bwrap::build_allowlist_args(&refs)
+                }
+            }
         };
 
         // Reconstruct command with blocking args inserted at the bwrap/child boundary
