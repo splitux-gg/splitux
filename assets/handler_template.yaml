@@ -1,139 +1,149 @@
 # Splitux Handler Template
 # ========================
 # Copy this file to ~/.local/share/splitux/handlers/<game-name>/handler.yaml
-# and customize it for your game.
+# and customise it for your game.
 #
-# See HANDLER_OPTIONS.md for complete documentation of all options.
+# To get going: fill in the 4 fields under "BASIC" below, then uncomment the ONE
+# backend block that matches how your game does multiplayer. Delete everything
+# you don't use.
+#
+# Full reference for every field + emulator tuning knob:
+#   docs/HANDLER_OPTIONS.md
+#
+# Schema note: this template uses the canonical "nested block" form
+# (goldberg:, eos:, ...). Older dot-notation (goldberg.settings.x.txt) still
+# loads, but new handlers should use nested blocks.
 
 # ============================================
-# BASIC CONFIGURATION (Required)
+# BASIC (required)
 # ============================================
 
-# Game display name
-name: My Game
+name: My Game            # Display name in the launcher
+exec: game.exe           # Executable, relative to the game root (.exe/.bat = Proton)
+spec_ver: 3              # Handler format version (do not change)
 
-# Executable path (relative to game root folder)
-exec: game.exe
-
-# Handler specification version (do not change)
-spec_ver: 3
-
-# ============================================
-# GAME LOCATION (choose one)
-# ============================================
-
-# Option 1: Steam game (recommended - auto-detects install location)
-# steam_appid: 123456
-
-# Option 2: Manual path (for non-Steam games)
-# path_gameroot: /path/to/game/folder
+# Game location — choose ONE:
+steam_appid: 123456      # Steam app id (recommended; auto-locates + fetches art)
+# path_gameroot: /path/to/game/folder   # ...or an explicit path for non-Steam games
 
 # ============================================
-# MULTIPLAYER BACKEND (choose one)
+# MULTIPLAYER BACKEND — uncomment ONE block
+# (backends are auto-detected by the block being present)
 # ============================================
 
-# --- Goldberg Steam Emulator ---
-# For games using Steam networking (most common)
-# backend: goldberg
-# goldberg_settings:
-#   force_lobby_type.txt: "2"    # 0=private, 1=friends, 2=public
-#   invite_all.txt: ""            # Auto-invite all players (empty file)
+# --- Goldberg: Steam emulation via gbe_fork (Steam P2P / lobby games) ---
+# goldberg:
+#   disable_networking: false       # true = ownership-only shim (pair w/ native LAN or EOS)
+#   settings:                       # any gbe_fork settings file (filename: contents)
+#     force_lobby_type.txt: "2"     # 0=private 1=friends 2=public
+#     invite_all.txt: ""
+#   plugin:                         # optional BepInEx plugin (e.g. a P2P fix)
+#     source: thunderstore
+#     community: riskofrain2
+#     package: owner/Package
+#     version: "1.0.0"
 
-# --- Photon/BepInEx ---
-# For Unity games using Photon networking
-# backend: photon
-# photon_settings:
+# --- EOS: Epic Online Services co-op via the splitux EOS LAN emu (UE games) ---
+# eos:
+#   appid: "MyGame"                 # informational; identity derives from the username
+#   enable_lan: true
+#   disable_online_networking: true
+# # EOS emu tuning goes in env (see HANDLER_OPTIONS.md "EOSLAN_*"):
+# #   EOSLAN_LOCALHOST_MODE=1   loopback discovery for 2 instances on one box (usually needed)
+# #   EOSLAN_P2P_BASE_PORT=N    move the emu off 7777 if the game's own netdriver wants it
+# env: "EOSLAN_LOCALHOST_MODE=1"
+# # Steam builds of Epic games still need a Steam ownership shim to boot:
+# goldberg:
+#   disable_networking: false
+
+# --- Photon: Unity Photon games (BepInEx LocalMultiplayer mod) ---
+# photon:
 #   config_path: "AppData/LocalLow/Company/Game/LocalMultiplayer/global.cfg"
 #   shared_files:
 #     - "AppData/LocalLow/Company/Game/LocalMultiplayer/GlobalSave"
-# required_mods:
-#   - name: "LocalMultiplayer"
-#     url: "https://example.com/mod"
-#     dest_path: "BepInEx/plugins"
-#     file_pattern: "*.dll"
+#   plugin:                         # optional auto-fetch; omit to require manual install
+#     source: thunderstore
+#     community: mygame
+#     package: owner/LocalMultiplayer
+#     version: "1.0.0"
 
-# --- Standalone (BepInEx + Mods) ---
-# For games where mods handle their own multiplayer (e.g., DSP with Nebula)
-# Plugins are auto-downloaded from Thunderstore. Version defaults to latest.
+# --- Facepunch: Unity games using Facepunch.Steamworks ---
+# facepunch:
+#   spoof_identity: true
+#   force_valid: true
+#   photon_bypass: false
+
+# --- Standalone: community mods handle multiplayer (BepInEx + Thunderstore) ---
 # standalone:
-#   community: dyson-sphere-program    # Thunderstore community
-#   bepinex_package: xiaoye97/BepInEx  # BepInEx package (default: bbepis/BepInExPack)
+#   community: dyson-sphere-program
+#   bepinex_package: xiaoye97/BepInEx       # optional; default bbepis/BepInExPack
 #   plugins:
-#     - gabrielgad/NebulaMultiplayerMod            # Simple format (latest version)
-#     - package: quackandcheese/LocalMultiplayer   # Object format with pinned version
+#     - owner/MultiplayerMod                # latest version
+#     - package: owner/OtherMod             # pinned version
 #       version: "1.0.4"
 
-# ============================================
-# GAME CONFIG PATCHES
-# ============================================
-# Modify game config files with key-value replacements.
-# Supports: set-style (set key "value"), ini-style (key=value), space-style (key value)
-#
-# game_patches:
-#   conf/settings.cfg:           # File path relative to game root
-#     some_key: new_value        # Key to find and value to set
-#   another/config.ini:
-#     setting1: value1
-#     setting2: value2
+# Mods the user must install by hand (no auto-fetch source):
+# required_mods:
+#   - name: "LocalMultiplayer"
+#     description: "Steam account spoofing for local co-op"
+#     url: "https://thunderstore.io/c/mygame/p/owner/LocalMultiplayer/"
+#     dest_path: "overlay/BepInEx/plugins"
+#     file_pattern: "*.dll"
 
 # ============================================
-# OPTIONAL METADATA
+# CO-OP TOPOLOGY
 # ============================================
-
-# author: Your Name
-# version: "1.0"
-# info: |
-#   Notes about this handler.
-#   Can be multiple lines.
+# separate (default) = one instance per player (online/LAN co-op)
+# local-split        = one instance shared by N controllers (couch co-op)
+# coop_mode: separate
 
 # ============================================
 # LAUNCH OPTIONS
 # ============================================
+# pause_between_starts: 5.0        # seconds between instance launches (EOS/UE: 10-15)
+# args: -windowed -novid           # game CLI args ($PROFILE, $WIDTH, $RESOLUTION, ...)
+# env: PROTON_LOG=1 SOME_VAR=value # extra environment (KEY=VALUE, space-separated)
+# proton_path: "Proton - Experimental"   # Windows games
+# runtime: soldier                 # native Linux runtime: scout | soldier | empty
+# sdl2_override: No                # No | Srt | Sys  (old native games w/ pad issues)
 
-# Delay between starting each instance (seconds)
-# pause_between_starts: 2.0
+# ============================================
+# OPTIONAL METADATA
+# ============================================
+# author: Your Name
+# version: "1.0"
+# info: |
+#   Notes shown to the player (setup steps, quirks).
+#   Can be multiple lines.
 
-# Command line arguments passed to game
-# args: -windowed -novid
-
-# Environment variables (space-separated KEY=VALUE pairs)
-# env: PROTON_LOG=1 SOME_VAR=value
-
-# Proton version (uses system default if not specified)
-# proton_path: "Proton - Experimental"
+# ============================================
+# GAME CONFIG PATCHES
+# ============================================
+# Rewrite entries in the game's own config files (set/ini/space styles auto-detected).
+# game_patches:
+#   conf/settings.cfg:             # path relative to game root
+#     some_key: new_value
 
 # ============================================
 # SAVE GAME INTEGRATION
 # ============================================
-# Copy original saves to profiles and optionally sync back after play.
-#
-# Path to original save data. Supports:
-# - ~ or $HOME for home directory
-# - For Windows games: relative paths like "AppData/LocalLow/Company/Game"
-#   are relative to the Wine prefix user directory
-# - Absolute paths work for any game type
-#
-# original_save_path: "~/.local/share/GameName/saves"
 # original_save_path: "AppData/LocalLow/Company/GameName"
-#
-# Sync saves back to original location after session (default: false)
-# Uses the first named (non-guest) profile's saves.
-# Original saves are always backed up to ~/.local/share/splitux/save_backups/
-#
-# save_sync_back: true
+# save_sync_back: true             # sync first named profile's saves back after play
+# save_steam_id_remap: true        # rename saves to each profile's Goldberg Steam ID
 
 # ============================================
-# ADVANCED OPTIONS
+# ADVANCED  (see docs/HANDLER_OPTIONS.md)
 # ============================================
-
-# Linux runtime for native games: scout, soldier, or leave empty
-# runtime: soldier
-
-# SDL2 override for older native games with controller issues
-# Values: No (default), Srt (Steam Runtime 32-bit), Sys (System)
-# sdl2_override: No
-
-# Paths inside game folder to redirect to /dev/null
-# game_null_paths:
+# game_null_paths:                 # redirect game subpaths to /dev/null
 #   - logs/
 #   - crash_dumps/
+# disable_bwrap: false             # skip the bubblewrap sandbox
+# disable_input_isolation: false   # let every instance see every input device
+# gptokeyb:                        # gamepad -> keyboard/mouse for pad-less games
+#   profile: fps                   # built-in profile, or "custom" (handler_dir/gptokeyb.gptk)
+#   mouse_scale: 512
+#   deadzone: 2000
+# runtime_patches:                 # BepInEx managed-method patches
+#   - class: SteamManager
+#     method: Initialize
+#     action: force_steam_loaded

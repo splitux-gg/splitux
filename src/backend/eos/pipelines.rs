@@ -16,7 +16,9 @@ pub fn create_all_overlays(
     instances: &[Instance],
     is_windows: bool,
     game_root: &Path,
-    appid: &str,
+    // Accepted from the handler's `eos.appid` for documentation/forward-compat,
+    // but the splitux EOS emu derives identity from the username and ignores it.
+    _appid: &str,
     enable_lan: bool,
     disable_online_networking: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -37,25 +39,12 @@ pub fn create_all_overlays(
     let mut overlay_dirs = Vec::new();
 
     for (idx, instance) in instances.iter().enumerate() {
-        // Generate unique IDs for each instance
-        let epicid = format!("{:040x}", idx + 1);
-        let productuserid = format!("{:040x}", idx + 0x1000);
-
-        // Build broadcast ports (all other instance ports)
-        let broadcast_ports: Vec<u16> = instance_ports
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != idx)
-            .map(|(_, p)| *p)
-            .collect();
-
+        // The emu derives its per-instance EpicAccountId + ProductUserId
+        // deterministically from the username (set as EOSLAN_USERNAME at launch);
+        // no ids/ports are written to a config file here.
         let config = EosConfig {
-            appid: appid.to_string(),
             username: instance.profname.clone(),
-            epicid,
-            productuserid,
             listen_port: instance_ports[idx],
-            broadcast_ports,
         };
 
         let overlay_dir = create_instance_overlay(

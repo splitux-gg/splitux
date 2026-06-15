@@ -9,7 +9,6 @@ use crate::backend::operations::prepare_overlay_dir;
 use crate::paths::PATH_ASSETS;
 
 use super::super::types::{EosConfig, EosDll};
-use super::write_settings::write_eos_settings;
 
 /// Create an EOS emulator overlay for a single game instance
 ///
@@ -62,29 +61,12 @@ pub fn create_instance_overlay(
                 src_path.display()
             );
         }
-
-        // Create nepice_settings next to DLL (Nemirtingas config directory)
-        let settings_dir = target_dir.join("nepice_settings");
-        write_eos_settings(&settings_dir, config, enable_lan, disable_online_networking)?;
     }
 
-    // For native Linux games, also create nepice_settings at overlay root
-    // The emulator looks for config next to the executable
-    if !is_windows {
-        let root_settings_dir = overlay_dir.join("nepice_settings");
-        if !root_settings_dir.exists() {
-            write_eos_settings(
-                &root_settings_dir,
-                config,
-                enable_lan,
-                disable_online_networking,
-            )?;
-            println!(
-                "[splitux] EOS overlay {}: Also created nepice_settings at game root",
-                instance_idx
-            );
-        }
-    }
+    // No emulator config file is written: the splitux EOS emu (eos_sdk_emu) is
+    // hand-rolled and configured entirely via its native EOSLAN_* env at launch
+    // (EOSLAN_USERNAME per instance + the handler's EOSLAN_LOCALHOST_MODE /
+    // EOSLAN_P2P_BASE_PORT). We do NOT use the Nemirtingas JSON.
 
     println!(
         "[splitux] EOS overlay {} created: User {}, Port {}, enable_lan: {}, disable_online: {}",

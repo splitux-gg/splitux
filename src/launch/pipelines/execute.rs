@@ -1,6 +1,32 @@
 //! Game execution pipeline
 
 use std::process::Child;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+// Ctrl+C / SIGTERM on the `splitux launch` terminal must tear the WHOLE session
+// down (kill games + gamescope, unmount overlays, restore the bar) instead of
+// orphaning it — the CLI launch otherwise has no signal handler, so Ctrl+C killed
+// splitux and left everything running (and waybar dead). The handler only flips a
+// flag (async-signal-safe); the supervise loop polls it and falls through to the
+// normal teardown path below. A second Ctrl+C force-exits in case teardown wedges.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+static SIGINT_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+extern "C" fn on_interrupt(_sig: libc::c_int) {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+    if SIGINT_COUNT.fetch_add(1, Ordering::SeqCst) >= 1 {
+        // second signal while tearing down — bail hard rather than hang
+        unsafe { libc::_exit(130) };
+    }
+}
+
+fn install_interrupt_handler() {
+    let h = on_interrupt as extern "C" fn(libc::c_int);
+    unsafe {
+        libc::signal(libc::SIGINT, h as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, h as libc::sighandler_t);
+    }
+}
 
 use crate::app::{SplituxConfig, WindowManagerType};
 use crate::audio::{
@@ -246,8 +272,33 @@ pub fn launch_game(
     // friend their single-URL link.
     crate::together::popup_invites(&together_invites);
 
-    for mut handle in handles {
-        handle.wait()?;
+    // Supervise the session: wait for all games to exit OR a Ctrl+C/SIGTERM.
+    // Either way we fall through to the teardown below (stop slice, unmount
+    // overlays, restore the bar) so the CLI launch never orphans the session.
+    install_interrupt_handler();
+    loop {
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            println!("[splitux] interrupt received — tearing down session…");
+            for handle in handles.iter_mut() {
+                let _ = handle.kill();
+            }
+            for handle in handles.iter_mut() {
+                let _ = handle.wait();
+            }
+            break;
+        }
+        let mut all_exited = true;
+        for handle in handles.iter_mut() {
+            match handle.try_wait() {
+                Ok(Some(_)) => {}
+                Ok(None) => all_exited = false,
+                Err(_) => {}
+            }
+        }
+        if all_exited {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     // Stop the launch slice (kills any lingering instance scope + its cgroup),

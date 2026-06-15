@@ -33,13 +33,15 @@
 ## Features
 
 - **Split-screen multiplayer** - Run multiple game instances with automatic window tiling
+- **Remote play (splitux-together)** - Stream instances to friends' browsers over WebRTC; they play a seat from anywhere
 - **Controller isolation** - Each instance only sees its assigned controllers
 - **Keyboard & mouse support** - Per-instance input isolation via custom Gamescope fork
 - **Steam artwork integration** - Automatically fetches game icons and banners from your local Steam library
-- **LAN multiplayer emulation** - Play online-only games locally via Goldberg Steam Emulator
+- **Steam & Epic LAN emulation** - Play online-only games locally via the Goldberg (Steam) and EOS LAN (Epic Online Services) emulators
 - **Proton support** - Run Windows games through Proton/UMU Launcher
 - **Per-player profiles** - Separate saves, settings, and Steam identities per player
-- **Hyprland & KDE Plasma** - Native window manager integration
+- **Headless CLI** - Discover and launch sessions from a script or over SSH, no GUI
+- **niri, Hyprland & KDE Plasma** - Native window manager integration
 
 ## How It Works
 
@@ -70,19 +72,24 @@ Each instance runs in:
 
 | Backend | Use Case |
 |---------|----------|
-| **Goldberg** | Steam P2P games - emulates Steam networking for LAN play |
+| **Goldberg** | Steam P2P games - emulates Steam networking (gbe_fork) for LAN play |
+| **EOS** | Epic Online Services co-op - LAN-emulates Epic sessions/presence/P2P (UE games, Satisfactory, Palworld, V Rising) |
 | **Photon** | Unity Photon games - injects LocalMultiplayer mod via BepInEx |
 | **Facepunch** | Unity games using Facepunch.Steamworks - spoofs Steam identity via BepInEx |
+| **Standalone** | Games whose own community mods handle multiplayer - installs BepInEx + Thunderstore plugins |
 | **None** | Games with native LAN support or single-player |
 
-Backends are auto-detected by presence of config fields. Multiple backends can coexist (e.g., Goldberg + Facepunch).
+Backends are auto-detected by the presence of their config block. Multiple backends can coexist (e.g., **EOS + Goldberg**, where EOS carries co-op and Goldberg is the Steam-ownership boot shim).
+
+See **[docs/HANDLER_OPTIONS.md](docs/HANDLER_OPTIONS.md)** for every backend's tuning knobs (including the full `EOSLAN_*` emulator environment).
 
 ## Installation
 
 ### Requirements
 
-- **Window Manager**: Hyprland or KDE Plasma
+- **Window Manager**: niri, Hyprland, or KDE Plasma
 - **Dependencies**: Gamescope, Bubblewrap, fuse-overlayfs, SDL2
+- **For remote play (splitux-together)**: PipeWire (instance capture) and a working hardware/software H.264 encoder
 
 ### GitHub Releases
 
@@ -186,7 +193,7 @@ cd splitux
 cargo build --release
 ```
 
-The binary will be at `target/release/splitux`. Copy the `res/` directory alongside it for bundled dependencies.
+The binary will be at `target/release/splitux`. Bundled dependencies live in `assets/`; at runtime splitux looks for them under a system install (`/usr/share/splitux`), a user install (`~/.local/share/splitux`), and finally `assets/` next to the binary.
 
 ## Configuration
 
@@ -202,16 +209,20 @@ splitux/
 
 ### Handler Format
 
-Games are configured via YAML handlers using dot notation:
+Games are configured via YAML handlers using nested backend blocks. A handler
+needs three fields plus a way to find the game, then one backend block:
 
 ```yaml
-name: "Game Name"
-exec: "game.exe"
+name: Game Name
+exec: game.exe
+spec_ver: 3
 steam_appid: 12345
 
-# Goldberg backend (auto-detected by presence)
-goldberg.settings.force_lobby_type.txt: "2"
-goldberg.settings.invite_all.txt: ""
+# Goldberg backend (auto-detected by the block being present)
+goldberg:
+  settings:
+    force_lobby_type.txt: "2"
+    invite_all.txt: ""
 
 # Optional launch settings
 args: "-windowed"
@@ -220,25 +231,85 @@ proton_path: "Proton - Experimental"
 pause_between_starts: 5.0
 ```
 
-**Backend Examples:**
+**Backend examples:**
 
 ```yaml
-# Goldberg (Steam networking emulation)
-goldberg.disable_networking: false
-goldberg.settings.force_lobby_type.txt: "2"
+# EOS (Epic Online Services co-op via the EOS LAN emu)
+eos:
+  appid: "MyGame"
+  enable_lan: true
+  disable_online_networking: true
+env: "EOSLAN_LOCALHOST_MODE=1"   # EOS emu tuning goes through env (EOSLAN_*)
 
 # Photon (Unity games with BepInEx mod)
-photon.config_path: "AppData/LocalLow/Company/Game/config.cfg"
-photon.shared_files:
-  - "AppData/LocalLow/Company/Game/SharedSave"
+photon:
+  config_path: "AppData/LocalLow/Company/Game/config.cfg"
+  shared_files:
+    - "AppData/LocalLow/Company/Game/SharedSave"
 
 # Facepunch (Unity games using Facepunch.Steamworks)
-facepunch.spoof_identity: true
-facepunch.force_valid: true
-facepunch.photon_bypass: true
+facepunch:
+  spoof_identity: true
+  force_valid: true
+  photon_bypass: true
 ```
 
-Browse and download community handlers from the in-app handler registry, or create your own using `res/handler_template.yaml` as reference.
+Start from [`assets/handler_template.yaml`](assets/handler_template.yaml) and see
+**[docs/HANDLER_OPTIONS.md](docs/HANDLER_OPTIONS.md)** for the complete field and
+emulator-tuning reference. Or browse and download community handlers from the
+in-app handler registry.
+
+> Older handlers written in dot-notation (`goldberg.settings.x.txt: "2"`) and the
+> legacy `backend:` form still load — they're expanded/migrated automatically —
+> but new handlers should use nested blocks.
+
+## Window Layouts
+
+Each player count has selectable layout presets, chosen per-count in the launcher:
+
+- **2P**: Top / Bottom, Side by Side
+- **3P**: Side by Side, Stacked
+- **4P**: Grid, Rows, Columns
+- **Fullscreen ("Independent")**: every instance gets its own full-resolution
+  output instead of a tile — useful for multi-monitor setups and for remote
+  (splitux-together) seats.
+
+Window placement is handled natively per WM (niri, Hyprland, KWin). Launched game
+processes are contained in a systemd cgroup scope tied to splitux, so a crash or
+exit cleans up every child (gamescope, Proton, wine) with it.
+
+## Remote Play (splitux-together)
+
+splitux-together streams launched instances to friends over the internet — no
+splitscreen required. When enabled, each instance gets a seat-streamer sidecar
+that owns a virtual gamepad/keyboard/mouse and captures that instance's gamescope
+output over PipeWire, H.264-encoding it to a remote browser over WebRTC.
+
+splitux shows one invite URL per seat (`{base}/j/{token}`); hand each link to a
+friend, who opens it in a browser and auto-joins that seat. Their input drives the
+instance exactly like a local controller. Combine with the **Fullscreen** layout
+so each remote player gets a full-resolution stream.
+
+## Headless CLI
+
+Discover and launch sessions without the GUI — handy over SSH or from a script. A
+plain `splitux` (no subcommand) still opens the GUI.
+
+```bash
+# List what's available
+splitux list games
+splitux list profiles
+splitux list inputs
+
+# Launch a session: one --player per seat
+splitux launch --game "Satisfactory" \
+  --player profile=Gabe,input=together:gamepad \
+  --player profile=Ruth,input=together:kbm
+```
+
+`--player` takes comma-separated `key=val`: `profile=<name>` (default `Guest`) and
+`input=together:gamepad|together:kbm` (remote-seat inputs). The CLI reuses the
+exact scan + launch pipeline the GUI drives.
 
 ## Controls
 
