@@ -4,7 +4,6 @@
 
 mod create_overlay;
 mod find_dlls;
-mod write_settings;
 
 pub use create_overlay::create_instance_overlay;
 pub use find_dlls::find_eos_dlls;

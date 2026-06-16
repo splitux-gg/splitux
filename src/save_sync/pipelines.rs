@@ -332,14 +332,26 @@ pub fn sync_master_saves_back(
     };
 
     // Backup master profile saves before sync (preserves session progress)
+    // Best-effort: this is session data we're about to copy out, not the
+    // irreplaceable original, so a failure here shouldn't abort.
     if let Err(e) = backup_saves(&profile_save_path) {
         println!("[splitux] Warning: Failed to backup master profile: {}", e);
     }
 
-    // Backup original saves before overwriting
+    // Backup original saves before overwriting.
+    // HARD GATE: we are about to destroy the original (real PC progress). If we
+    // cannot first secure a backup of it, abort the sync-back rather than risk
+    // losing it. Better to leave the original untouched than overwrite it blind.
     if original_path.exists() {
         if let Err(e) = backup_saves(&original_path) {
-            println!("[splitux] Warning: Failed to backup original: {}", e);
+            return Err(format!(
+                "Aborting sync-back: failed to backup original saves at {} ({}). \
+                 Original left untouched; session progress remains in master profile '{}'.",
+                original_path.display(),
+                e,
+                master
+            )
+            .into());
         }
     }
 
@@ -419,10 +431,19 @@ pub fn sync_saves_back(h: &Handler, instances: &[Instance]) -> Result<(), Box<dy
         None
     };
 
-    // Always backup before overwriting
+    // Backup original saves before overwriting.
+    // HARD GATE: same rule as sync_master_saves_back — never destroy the
+    // original (real PC progress) without first securing a backup of it.
     if original_path.exists() {
         if let Err(e) = backup_saves(&original_path) {
-            println!("[splitux] Warning: Backup failed: {}", e);
+            return Err(format!(
+                "Aborting sync-back: failed to backup original saves at {} ({}). \
+                 Original left untouched; session progress remains in profile '{}'.",
+                original_path.display(),
+                e,
+                profile_name
+            )
+            .into());
         }
     }
 

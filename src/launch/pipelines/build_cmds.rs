@@ -134,6 +134,48 @@ pub fn launch_cmds(
             }
         }
 
+        // EOS emulator (splitux eos_sdk_emu) identity. The emu is configured
+        // entirely through its native EOSLAN_* env (no Nemirtingas JSON). Each
+        // instance MUST get a distinct, stable username: the emu derives a
+        // deterministic per-instance EpicAccountId + ProductUserId from it, and
+        // UE's account registry enforces one puid <-> one epic, so a shared
+        // username collides and breaks the EOS join. profname is unique per
+        // instance and stable across the game's (multi-)process launch.
+        if h.has_eos() {
+            cmd.env("EOSLAN_USERNAME", &instance.profname);
+            // Diagnostic: capture the emu's own debug log per instance to a
+            // persistent path. It MUST live outside the sandbox's private
+            // `--tmpfs /tmp` (which is discarded at teardown) — PATH_PARTY is
+            // bind-visible under `--dev-bind / /` and survives. Without this the
+            // emu log (EOSLAN_DEBUG=1) goes nowhere under splitux, unlike the
+            // bench which sets EOSLAN_LOG_PATH. Wine maps the unix path via Z:.
+            let eos_log = PATH_PARTY.join(format!("eos-emu-{}.log", instance.profname));
+            cmd.env("EOSLAN_LOG_PATH", &eos_log);
+        }
+
+        // Goldberg force-logging. A release steam_api64.dll only writes its
+        // debug log when GSE_FORCE_LOG is set (our gbe_fork upgrade). Per-instance
+        // log on a persistent path so the bridge (and discovery/connect) is
+        // observable, mirroring the bench. Unlike the EOS emu, goldberg wants a
+        // Windows-style path, so prefix the unix path with wine's Z: drive (maps
+        // to /). The log MUST live outside the sandbox's `--tmpfs /tmp` — PATH_PARTY
+        // is bind-visible under `--dev-bind / /` and survives teardown.
+        if h.has_goldberg() {
+            let gse_log = PATH_PARTY.join(format!("gse-{}.log", instance.profname));
+            cmd.env("GSE_FORCE_LOG", "1");
+            cmd.env("GSE_LOG_PATH", format!("Z:{}", gse_log.display()));
+        }
+
+        // Goldberg raw-UDP <-> legacy-Steam-P2P bridge (goldberg.p2p_bridge,
+        // opt-in). Mirrors the bench's GSE_IP_P2P_BRIDGE: for IP-LAN games whose
+        // host listens via legacy ISteamNetworking P2P while joiners connect
+        // raw. The goldberg DLL only activates the bridge when this env is set,
+        // so it stays inert for games that don't need it.
+        if h.goldberg_ref().map(|g| g.p2p_bridge).unwrap_or(false) {
+            cmd.env("GSE_IP_P2P_BRIDGE", "1");
+            println!("[splitux] Instance {}: GSE_IP_P2P_BRIDGE=1 (goldberg P2P bridge)", i);
+        }
+
         // splitux-together: this instance's remote seats (if any). One in the
         // online/LAN case; N for a local-split (couch-co-op) game where several
         // browsers drive the one instance. Each seat's virtual kbd/mouse are
@@ -175,7 +217,22 @@ pub fn launch_cmds(
             // the game's SDL reads the friend's controller. Kb+Mouse seats add no
             // pad (no phantom controller for a pad-based game). A local-split
             // instance carries several gamepad seats → several pads on one game.
-            if instance.together_input == crate::instance::TogetherInput::Gamepad {
+            //
+            // EXCEPTION — EOS games: a session JOIN only completes once the game
+            // has a device-backed local player. UE CommonUser binds a UserIdx on
+            // a "controller connection changed" event; a Kb+Mouse seat is injected
+            // by gamescope and exposes NO input device, so the joiner never binds a
+            // local player and the EOS join silently aborts to the menu (E007) —
+            // the game receives JoinSession=EOS_Success but then makes no further
+            // EOS calls and never travels. The seat-streamer always creates a
+            // virtual pad (wait_for_seat_devices requires pad+kbd+mouse), so for
+            // EOS games we wire it in for Kb+Mouse seats too: it gives the joiner
+            // the controller-connection it needs to bind a local player while
+            // keyboard/mouse still drive gameplay via gamescope injection.
+            let wire_seat_pads = instance.together_input
+                == crate::instance::TogetherInput::Gamepad
+                || h.has_eos();
+            if wire_seat_pads {
                 for seat in seats {
                     if let Some(pad) = &seat.pad {
                         gamepad_paths.push(pad.to_string_lossy().to_string());
@@ -284,6 +341,21 @@ pub fn launch_cmds(
 
         // 8. Game executable
         cmd.arg(&path_exec);
+
+        // Diagnostic (opt-in): pass UE `-LogCmds` to EOS games when the
+        // SPLITUX_GAME_LOGCMDS env var is set, e.g.
+        //   SPLITUX_GAME_LOGCMDS="LogOnlineServices Verbose, LogNet Verbose"
+        // The whole value carries spaces, so it's emitted as ONE argv element;
+        // wine wraps the space-containing arg in quotes when building the Windows
+        // command line, so UE sees a single `-LogCmds=<value>` token (no inner
+        // quoting needed). Used to surface why an EOS join aborts post-Success.
+        if h.has_eos() {
+            if let Ok(logcmds) = std::env::var("SPLITUX_GAME_LOGCMDS") {
+                if !logcmds.trim().is_empty() {
+                    cmd.arg(format!("-LogCmds={logcmds}"));
+                }
+            }
+        }
 
         // 9. Handler arguments with variable substitution
         for arg in h.args.split_whitespace() {

@@ -11,14 +11,15 @@ pub struct EosDll {
     pub is_64bit: bool,
 }
 
-/// Configuration for an EOS emulator instance
+/// Configuration for an EOS emulator instance.
+///
+/// The splitux EOS emu (eos_sdk_emu) is hand-rolled and configured via its
+/// native EOSLAN_* env at launch (see build_cmds: EOSLAN_USERNAME per instance,
+/// plus the handler's EOSLAN_LOCALHOST_MODE / EOSLAN_P2P_BASE_PORT). No
+/// Nemirtingas JSON is written, so the old epic/product-id + appid fields are
+/// gone — identity is derived deterministically by the emu from the username.
 #[derive(Debug, Clone)]
 pub struct EosConfig {
-    pub appid: String,
     pub username: String,
-    pub epicid: String,
-    pub productuserid: String,
     pub listen_port: u16,
-    /// Ports of other instances for LAN discovery
-    pub broadcast_ports: Vec<u16>,
 }

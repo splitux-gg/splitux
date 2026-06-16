@@ -13,6 +13,7 @@ mod instance;
 mod launch;
 mod mods;
 mod monitor;
+mod netns;
 mod paths;
 mod platform;
 mod profile_prefs;

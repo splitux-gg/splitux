@@ -24,6 +24,8 @@ pub fn migrate_legacy_backends(handler: &mut Handler) {
                 networking_sockets: handler.goldberg_networking_sockets,
                 settings: handler.goldberg_settings.clone(),
                 plugin: None,
+                bridged_lan: false,
+                p2p_bridge: false,
             });
         }
     }
@@ -126,6 +128,8 @@ mod tests {
             networking_sockets: true,
             settings: HashMap::new(),
             plugin: None,
+            bridged_lan: false,
+            p2p_bridge: false,
         };
         h.goldberg = Some(existing);
         // Set legacy fields that would normally trigger migration
