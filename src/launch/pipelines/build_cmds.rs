@@ -153,6 +153,16 @@ pub fn launch_cmds(
             cmd.env("EOSLAN_LOG_PATH", &eos_log);
         }
 
+        // Goldberg raw-UDP <-> legacy-Steam-P2P bridge (goldberg.p2p_bridge,
+        // opt-in). Mirrors the bench's GSE_IP_P2P_BRIDGE: for IP-LAN games whose
+        // host listens via legacy ISteamNetworking P2P while joiners connect
+        // raw. The goldberg DLL only activates the bridge when this env is set,
+        // so it stays inert for games that don't need it.
+        if h.goldberg_ref().map(|g| g.p2p_bridge).unwrap_or(false) {
+            cmd.env("GSE_IP_P2P_BRIDGE", "1");
+            println!("[splitux] Instance {}: GSE_IP_P2P_BRIDGE=1 (goldberg P2P bridge)", i);
+        }
+
         // splitux-together: this instance's remote seats (if any). One in the
         // online/LAN case; N for a local-split (couch-co-op) game where several
         // browsers drive the one instance. Each seat's virtual kbd/mouse are

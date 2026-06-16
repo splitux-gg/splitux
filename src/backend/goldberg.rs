@@ -42,6 +42,20 @@ pub struct GoldbergSettings {
     #[serde(default)]
     pub settings: HashMap<String, String>,
 
+    /// Per-instance network namespace + veth into a shared Linux bridge
+    /// (goldberg.bridged_lan). Each co-located instance becomes a distinct LAN
+    /// host (own IP, own loopback) so each can bind the game port and goldberg's
+    /// broadcast LAN discovery flows between them over the bridge. Off by default.
+    #[serde(default)]
+    pub bridged_lan: bool,
+
+    /// Enable goldberg's opt-in raw-UDP <-> legacy-Steam-P2P bridge by setting
+    /// GSE_IP_P2P_BRIDGE=1 for the game (goldberg.p2p_bridge). For IP-LAN games
+    /// whose host listens via legacy ISteamNetworking P2P while joiners connect
+    /// raw. Off by default.
+    #[serde(default)]
+    pub p2p_bridge: bool,
+
     /// Plugin source for BepInEx-based plugins (goldberg.plugin.*)
     /// When specified, BepInEx will be installed and the plugin fetched from the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]

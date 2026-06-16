@@ -164,6 +164,30 @@ pub fn launch_game(
     // Delay before each spawn for input/SDL initialization
     let input_init_delay = cfg.input_init_delay.unwrap_or(1.0);
 
+    // goldberg.bridged_lan: put each instance in its own network namespace +
+    // veth into a shared Linux bridge so co-located instances are distinct LAN
+    // hosts (own IP, own loopback, own game port). Each built command is wrapped
+    // to launch inside its namespace (see the spawn loop below); the bridge and
+    // namespaces are created here, before any instance spawns, and torn down
+    // after the session ends (both the clean-exit and the Ctrl+C paths fall
+    // through to the teardown below).
+    let bridged = h.goldberg_ref().map(|g| g.bridged_lan).unwrap_or(false);
+    if bridged {
+        if h.has_eos() {
+            println!(
+                "[splitux] netns - WARNING: goldberg.bridged_lan is set together with an EOS \
+                 backend. The EOS emu's localhost mode expects a shared 127.0.0.1 and is \
+                 incompatible with split network namespaces — discovery/join may break."
+            );
+        }
+        // Hard-fail (don't silently launch un-isolated) if the host can't do it.
+        crate::netns::preflight()?;
+        crate::netns::setup_bridge()?;
+        for i in 0..instances.len() {
+            crate::netns::add_instance(i)?;
+        }
+    }
+
     let mut handles = Vec::new();
 
     // For native Linux games with Facepunch/BepInEx, redirect stdout to prevent
@@ -229,6 +253,18 @@ pub fn launch_game(
 
         // Reconstruct command with blocking args inserted at the bwrap/child boundary
         let mut cmd = rebuild_command_with_blocking(cmd, bwrap_arg_count, &blocking_args);
+
+        // goldberg.bridged_lan: wrap into instance i's network namespace. This
+        // MUST happen AFTER rebuild_command_with_blocking — that insertion uses
+        // bwrap_arg_count, an index into the ORIGINAL (gamescope-rooted) command,
+        // and the wrap re-roots the command at `sudo` (prefixing tokens). Doing
+        // the wrap last means the device-block index is computed and applied
+        // before any prefix exists, so the offset stays correct and device
+        // isolation is unaffected. (Same reasoning the scope wrap below relies
+        // on — both are outer wrappers applied post-blocking.)
+        if bridged {
+            cmd = crate::netns::wrap_command_in_netns(cmd, i);
+        }
 
         // Print the final command (with blocking args)
         print!("{}", format_launch_cmd(&cmd, i));
@@ -308,6 +344,16 @@ pub fn launch_game(
         scope::stop_slice(&launch_id);
         scope::clear_active_slice();
     }
+
+    // goldberg.bridged_lan teardown. Reached on BOTH the clean-exit and the
+    // interrupt paths: the SIGINT/SIGTERM handler only flips INTERRUPTED, the
+    // supervise loop breaks, and execution falls through here. (A SECOND Ctrl+C
+    // hard-exits via libc::_exit and skips this — but teardown is idempotent and
+    // add_instance() re-cleans stale namespaces on the next bridged launch.)
+    if bridged {
+        crate::netns::teardown(instances.len());
+    }
+
     if let Err(e) = crate::util::fuse_overlayfs_unmount_gamedirs() {
         println!("[splitux] Warning: fuse-overlayfs unmount failed: {e}");
     }
