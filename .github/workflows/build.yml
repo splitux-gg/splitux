@@ -132,12 +132,20 @@ jobs:
           cp -f /tmp/release/regular/x64/*.so res/goldberg/linux64/ 2>/dev/null || true
           cp -f /tmp/release/regular/x32/*.so res/goldberg/linux32/ 2>/dev/null || true
 
-          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/release-p2p-autoaccept/emu-win-release.7z -o /tmp/gbe-win.7z
+          # eosplus-clean: dev + GSE_FORCE_LOG gate + CI build-loop fix + steam_friends connect/Joinable
+          # auto-derive (b7430e00, the EOSPlus+Steam friend-join playbook fix). Built from
+          # splitux-gg/gbe_fork-splitux feature/eosplus-steam-connect-derive.
+          curl -fsSL https://github.com/splitux-gg/gbe_fork-splitux/releases/download/eosplus-clean/emu-win-release.7z -o /tmp/gbe-win.7z
           7z x -o/tmp/gbe-win /tmp/gbe-win.7z -y
-          cp -f /tmp/gbe-win/release/regular/steam_api64.dll res/goldberg/win/ 2>/dev/null || true
-          cp -f /tmp/gbe-win/release/regular/steam_api.dll res/goldberg/win/ 2>/dev/null || true
+          cp -f /tmp/gbe-win/release/experimental/x64/steam_api64.dll res/goldberg/win/ 2>/dev/null || true
+          cp -f /tmp/gbe-win/release/experimental/x86/steam_api.dll res/goldberg/win/ 2>/dev/null || true
           cp -f /tmp/gbe-win/release/steamnetworkingsockets/x64/*.dll res/goldberg/steamnetworkingsockets/x64/ 2>/dev/null || true
-          cp -f /tmp/gbe-win/release/steamnetworkingsockets/x32/*.dll res/goldberg/steamnetworkingsockets/x32/ 2>/dev/null || true
+          cp -f /tmp/gbe-win/release/steamnetworkingsockets/x86/*.dll res/goldberg/steamnetworkingsockets/x32/ 2>/dev/null || true
+
+          # Fail loud if the critical Windows goldberg DLL didn't land — the artifact's
+          # internal layout changed before (release/regular -> release/regular/x64) and the
+          # `|| true` guards silently shipped an empty res/goldberg/win/ for months.
+          test -s res/goldberg/win/steam_api64.dll || { echo "::error::goldberg steam_api64.dll missing from res/goldberg/win/ — check artifact layout"; exit 1; }
 
           # BepInEx 5 Mono Windows (cached)
           if [ -f "$CACHE_DIR/BepInEx_win_x64_5.4.23.2.zip" ]; then
