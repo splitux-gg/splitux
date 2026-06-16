@@ -116,26 +116,26 @@ jobs:
           rm -rf /tmp/bepinex-mono /tmp/bepinex-mono-linux /tmp/bepinex-il2cpp
           rm -rf /tmp/gbe-win /tmp/release
 
-          # Gamescope-splitux (cached - stable version)
-          if [ -f "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" ]; then
+          # Gamescope-splitux (cached - stable version, canonical splitux-gg org)
+          if [ -f "$CACHE_DIR/gamescope-splitux-v1.0.5.zip" ]; then
             echo "Using cached gamescope-splitux"
-            unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" -d res/gamescope-splitux
+            unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.5.zip" -d res/gamescope-splitux
           else
-            curl -fsSL https://github.com/gabrielgad/gamescope-splitux/releases/download/v1.0.0/gamescope-splitux-v1.0.0.zip -o "$CACHE_DIR/gamescope-splitux-v1.0.0.zip"
-            unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.0.zip" -d res/gamescope-splitux
+            curl -fsSL https://github.com/splitux-gg/gamescope-splitux/releases/download/v1.0.5/gamescope-splitux-v1.0.5.zip -o "$CACHE_DIR/gamescope-splitux-v1.0.5.zip"
+            unzip -o -q "$CACHE_DIR/gamescope-splitux-v1.0.5.zip" -d res/gamescope-splitux
           fi
 
-          # Goldberg emulator (pinned to stable release)
-          curl -fsSL https://github.com/gabrielgad/gbe_fork-splitux/releases/download/release-p2p-autoaccept/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
+          # Goldberg emulator — collective release v1.1.0 (splitux-gg/gbe_fork-splitux dev HEAD):
+          # GSE_FORCE_LOG gate + CI build-loop fix + EOSPlus/Steam friend-join (b7430e00) +
+          # raw-UDP<->legacy-Steam-P2P bridge (95d65d05, GSE_IP_P2P_BRIDGE). Supersedes the old
+          # gabrielgad/release-p2p-autoaccept (linux) + eosplus-clean (win) split pins.
+          curl -fsSL https://github.com/splitux-gg/gbe_fork-splitux/releases/download/v1.1.0/emu-linux-release.tar.bz2 -o /tmp/gbe-linux.tar.bz2
           tar -xjf /tmp/gbe-linux.tar.bz2 -C /tmp
           mkdir -p res/goldberg/{linux64,linux32,win,steamnetworkingsockets/x64,steamnetworkingsockets/x32}
           cp -f /tmp/release/regular/x64/*.so res/goldberg/linux64/ 2>/dev/null || true
           cp -f /tmp/release/regular/x32/*.so res/goldberg/linux32/ 2>/dev/null || true
 
-          # eosplus-clean: dev + GSE_FORCE_LOG gate + CI build-loop fix + steam_friends connect/Joinable
-          # auto-derive (b7430e00, the EOSPlus+Steam friend-join playbook fix). Built from
-          # splitux-gg/gbe_fork-splitux feature/eosplus-steam-connect-derive.
-          curl -fsSL https://github.com/splitux-gg/gbe_fork-splitux/releases/download/eosplus-clean/emu-win-release.7z -o /tmp/gbe-win.7z
+          curl -fsSL https://github.com/splitux-gg/gbe_fork-splitux/releases/download/v1.1.0/emu-win-release.7z -o /tmp/gbe-win.7z
           7z x -o/tmp/gbe-win /tmp/gbe-win.7z -y
           cp -f /tmp/gbe-win/release/experimental/x64/steam_api64.dll res/goldberg/win/ 2>/dev/null || true
           cp -f /tmp/gbe-win/release/experimental/x86/steam_api.dll res/goldberg/win/ 2>/dev/null || true
