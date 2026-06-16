@@ -179,11 +179,42 @@ pub fn wrap_command_in_netns(inner: Command, i: usize) -> Command {
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };
 
+    // Each instance's gamescope nests an Xwayland that auto-selects display :0.
+    // A network namespace does NOT isolate the mount table, so every instance
+    // shares the host `/tmp/.X11-unix` — and the abstract-socket + `.X0-lock`
+    // probe that normally makes the 2nd Xwayland step to :1 is per-netns, so two
+    // instances race to bind `/tmp/.X11-unix/X0` and the loser dies with
+    // "Address already in use" (only one instance spawns). Give each instance a
+    // PRIVATE `/tmp/.X11-unix` (a mount namespace + tmpfs) so each gamescope's
+    // Xwayland owns its own :0 and they can't collide. Only do this when the
+    // launch is actually gamescope-rooted (nested X server); a non-gamescope
+    // bridged game would still need the host's real X socket dir.
+    let gamescope = inner
+        .get_program()
+        .to_string_lossy()
+        .contains("gamescope");
+
     let mut cmd = Command::new("sudo");
-    cmd.arg("-n")
-        .args(["ip", "netns", "exec"])
-        .arg(&ns)
-        .arg("setpriv")
+    cmd.arg("-n").args(["ip", "netns", "exec"]).arg(&ns);
+
+    if gamescope {
+        // Run the rest in a private mount namespace with a fresh tmpfs over
+        // /tmp/.X11-unix (mode 1777, like the real one). `sh -c '… exec "$@"' sh
+        // …` forwards the remaining argv verbatim (each as a separate arg), so
+        // the env K=V tokens below keep their exact values with no re-quoting.
+        cmd.args([
+            "unshare",
+            "--mount",
+            "--propagation",
+            "private",
+            "sh",
+            "-c",
+            "mount -t tmpfs -o mode=1777 none /tmp/.X11-unix && exec \"$@\"",
+            "sh",
+        ]);
+    }
+
+    cmd.arg("setpriv")
         .arg(format!("--reuid={uid}"))
         .arg(format!("--regid={gid}"))
         .arg("--init-groups")

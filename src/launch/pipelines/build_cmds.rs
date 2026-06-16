@@ -153,6 +153,19 @@ pub fn launch_cmds(
             cmd.env("EOSLAN_LOG_PATH", &eos_log);
         }
 
+        // Goldberg force-logging. A release steam_api64.dll only writes its
+        // debug log when GSE_FORCE_LOG is set (our gbe_fork upgrade). Per-instance
+        // log on a persistent path so the bridge (and discovery/connect) is
+        // observable, mirroring the bench. Unlike the EOS emu, goldberg wants a
+        // Windows-style path, so prefix the unix path with wine's Z: drive (maps
+        // to /). The log MUST live outside the sandbox's `--tmpfs /tmp` — PATH_PARTY
+        // is bind-visible under `--dev-bind / /` and survives teardown.
+        if h.has_goldberg() {
+            let gse_log = PATH_PARTY.join(format!("gse-{}.log", instance.profname));
+            cmd.env("GSE_FORCE_LOG", "1");
+            cmd.env("GSE_LOG_PATH", format!("Z:{}", gse_log.display()));
+        }
+
         // Goldberg raw-UDP <-> legacy-Steam-P2P bridge (goldberg.p2p_bridge,
         // opt-in). Mirrors the bench's GSE_IP_P2P_BRIDGE: for IP-LAN games whose
         // host listens via legacy ISteamNetworking P2P while joiners connect
