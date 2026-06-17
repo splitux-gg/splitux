@@ -129,6 +129,10 @@ fn spawn_seat_streamer(
     token: &str,
     instance: &Instance,
     pw_node: &str,
+    launch_id: &str,
+    seat_idx: usize,
+    main_scope: Option<&str>,
+    scoping: bool,
 ) -> std::io::Result<Child> {
     let log_path = format!("/tmp/splitux-together-{seat}.log");
     let log = std::fs::File::create(&log_path)?;
@@ -160,6 +164,18 @@ fn spawn_seat_streamer(
     // that silently kills the gst `va` plugin (AMD card). The bench forces it too.
     cmd.env("LIBVA_DRIVER_NAME", "radeonsi");
     cmd.env("RUST_LOG", "info");
+
+    // Scope the streamer into the per-launch slice so it shares the launch
+    // lifecycle — it dies with the launch (slice teardown + BindsTo cascade +
+    // startup sweep all reap it), instead of orphaning as a bare child and
+    // keeping its virtual input devices alive to poison the next launch's
+    // gamescope --libinput-hold-dev grab. stdio is applied AFTER the wrap because
+    // wrap_seat_command copies program/args/env/cwd but not stdio.
+    let mut cmd = if scoping {
+        crate::launch::scope::wrap_seat_command(cmd, launch_id, seat_idx, main_scope)
+    } else {
+        cmd
+    };
     cmd.stdout(Stdio::from(log));
     cmd.stderr(Stdio::from(log_err));
 
@@ -224,6 +240,9 @@ pub fn setup_together_seats(
     instances: &[Instance],
     cfg: &SplituxConfig,
     game_label: &str,
+    launch_id: &str,
+    main_scope: Option<&str>,
+    scoping: bool,
 ) -> (Vec<Child>, Vec<Vec<TogetherSeatDevices>>, Vec<InviteLink>) {
     let n = instances.len();
     // Total remote seats across all instances. Normally one per `together`
@@ -278,7 +297,10 @@ pub fn setup_together_seats(
             };
             let token = gen_token();
 
-            match spawn_seat_streamer(cfg, &seat, &name, &token, instance, &node) {
+            match spawn_seat_streamer(
+                cfg, &seat, &name, &token, instance, &node,
+                launch_id, seat_index, main_scope, scoping,
+            ) {
                 Ok(child) => handles.push(child),
                 Err(e) => {
                     println!("[splitux] together - seat {seat}: spawn failed: {e}");

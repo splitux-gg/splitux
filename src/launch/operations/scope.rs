@@ -218,8 +218,38 @@ pub fn wrap_command(
     main_scope: Option<&str>,
 ) -> Command {
     let unit = format!("splitux-{launch_id}-i{instance_idx}.scope");
-    let slice = slice_name(launch_id);
+    wrap_in_scope(inner, &unit, &slice_name(launch_id), main_scope)
+}
 
+/// Like [`wrap_command`] but for a per-launch together seat-streamer.
+///
+/// Uses a `-seat{idx}` unit name so it never collides with instance (`-i{idx}`)
+/// scopes, and joins the SAME launch slice — so the seat-streamer lives and dies
+/// with the launch. Killing splitux by any means cascades the `BindsTo` teardown
+/// to this scope, and the launch slice stop / startup sweep reap it too. Without
+/// this, seat-streamers spawned as bare children orphan on a hard kill and keep
+/// their virtual input devices alive, poisoning the next launch's gamescope
+/// `--libinput-hold-dev` grab (the "input not passed to the game" failure).
+pub fn wrap_seat_command(
+    inner: Command,
+    launch_id: &str,
+    seat_idx: usize,
+    main_scope: Option<&str>,
+) -> Command {
+    let unit = format!("splitux-{launch_id}-seat{seat_idx}.scope");
+    wrap_in_scope(inner, &unit, &slice_name(launch_id), main_scope)
+}
+
+/// Core: wrap `inner` into a transient `--scope` named `unit` under `slice`,
+/// bound to `main_scope` so it dies with splitux. Carries the inner program,
+/// args, env (incl. removals) and cwd across; stdio is intentionally NOT copied
+/// (set it on the returned command if needed — `Command::get_*` can't read it).
+fn wrap_in_scope(
+    inner: Command,
+    unit: &str,
+    slice: &str,
+    main_scope: Option<&str>,
+) -> Command {
     let mut cmd = Command::new("systemd-run");
     cmd.args([
         "--user",
