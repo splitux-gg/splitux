@@ -165,6 +165,20 @@ fn spawn_seat_streamer(
     cmd.env("LIBVA_DRIVER_NAME", "radeonsi");
     cmd.env("RUST_LOG", "info");
 
+    // The Vulkan zero-copy encoder needs the custom `dmabufvulkanupload` plugin
+    // (libgstdmabufvulkan.so) — it imports gamescope's NV12 dmabuf straight into
+    // the encoder (no per-frame copy), which is what lets the HW encoder sustain
+    // the full fps tier instead of bottlenecking ~128fps on the upload. It lives
+    // in splitux's data dir, NOT a default GStreamer scan path, so without this
+    // the seat-streamer fails with `no element "dmabufvulkanupload"` and the
+    // session zero-videos. Append to any inherited path so a bench override wins.
+    let plugin_dir = PATH_PARTY.join("gst-plugins");
+    let gst_plugin_path = match std::env::var("GST_PLUGIN_PATH") {
+        Ok(existing) if !existing.is_empty() => format!("{}:{}", plugin_dir.display(), existing),
+        _ => plugin_dir.display().to_string(),
+    };
+    cmd.env("GST_PLUGIN_PATH", gst_plugin_path);
+
     // Scope the streamer into the per-launch slice so it shares the launch
     // lifecycle — it dies with the launch (slice teardown + BindsTo cascade +
     // startup sweep all reap it), instead of orphaning as a bare child and
