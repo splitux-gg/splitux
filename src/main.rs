@@ -22,6 +22,7 @@ mod proton;
 mod registry;
 mod save_sync;
 mod together;
+mod tui;
 mod util;
 mod wm;
 

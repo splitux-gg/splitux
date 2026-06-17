@@ -101,6 +101,9 @@ enum Command {
         #[arg(long = "display", value_name = "CONNECTOR")]
         displays: Vec<String>,
     },
+    /// Interactive terminal UI: pick a game, assign profiles/inputs, launch, and
+    /// watch / kill / restart running sessions (a keyboard-driven GUI replacement).
+    Tui,
     /// Print a shell completion script (bash, zsh, fish, elvish, powershell).
     Completions {
         /// Target shell.
@@ -158,7 +161,7 @@ pub fn run_if_cli() -> Option<i32> {
     let first = std::env::args().nth(1);
     if !matches!(
         first.as_deref(),
-        Some("list") | Some("launch") | Some("completions")
+        Some("list") | Some("launch") | Some("completions") | Some("tui")
     ) {
         return None;
     }
@@ -175,6 +178,7 @@ pub fn run_if_cli() -> Option<i32> {
             layout,
             displays,
         } => launch(&game, &players, layout, &displays),
+        Command::Tui => crate::tui::run(),
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "splitux", &mut std::io::stdout());
             0
