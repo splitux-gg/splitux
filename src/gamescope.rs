@@ -72,11 +72,23 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, _monitors: &[Monitor], c
         cmd.arg("--force-grab-cursor");
     }
 
-    // X11 session: use SDL backend with display-index (legacy path)
-    // Wayland session: skip, WM handles positioning
-    if !is_wayland_session() && cfg.gamescope_sdl_backend {
+    // SDL backend (cfg.gamescope_sdl_backend, default on). gamescope owns an SDL
+    // window and takes input through SDL/XWayland rather than running as a
+    // headless wayland client. This is REQUIRED for reliable mouse/keyboard under
+    // remote streaming (Sunshine/Moonlight) on Wayland/niri: the default wayland
+    // backend doesn't cleanly take the host's injected input, so menu clicks die.
+    // It matches what Lutris uses. Previously gated to X11 only ("WM handles
+    // positioning"), which silently disabled the flag on Wayland.
+    if cfg.gamescope_sdl_backend {
         cmd.arg("--backend=sdl");
-        cmd.arg(format!("--display-index={}", instance.monitor));
+        if is_wayland_session() {
+            // SDL needs a real video driver; use XWayland (x11). setup_env removed
+            // SDL_VIDEODRIVER for the wayland backend, and runs before add_args, so
+            // this re-set wins. The niri WM still positions the SDL toplevel.
+            cmd.env("SDL_VIDEODRIVER", "x11");
+        } else {
+            cmd.arg(format!("--display-index={}", instance.monitor));
+        }
     }
 }
 
