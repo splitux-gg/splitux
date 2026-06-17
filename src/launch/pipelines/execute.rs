@@ -62,13 +62,47 @@ pub fn launch_game(
     let (mut gptokeyb_handles, gptokeyb_virtual_devices) =
         setup_gptokeyb_daemons(h, input_devices, instances);
 
+    // Process containment must be established BEFORE spawning together
+    // seat-streamers, so each streamer launches inside the per-launch slice and
+    // therefore shares the launch lifecycle (instead of orphaning as a bare
+    // child on a hard kill and keeping its virtual input devices alive). Killing
+    // splitux by any signal cascades teardown to the whole launch slice — game
+    // cgroup AND seat-streamers.
+    let scoping = scope::enabled();
+    let launch_id = scope::new_launch_id();
+    let main_scope = scope::current_main_scope();
+    if scoping {
+        // Reap leftover units from any previous crashed/killed run first.
+        scope::sweep_orphan_units();
+        scope::set_active_slice(&launch_id);
+        if main_scope.is_none() {
+            println!(
+                "[splitux] scope - Warning: not running inside a splitux-main scope; \
+                 launch slice won't auto-die with splitux (self-scope re-exec may have failed)"
+            );
+        }
+        println!(
+            "[splitux] scope - Launch slice {} (main scope: {:?})",
+            scope::slice_name(&launch_id),
+            main_scope
+        );
+    }
+
     // Set up splitux-together remote seats (no-op unless a player is marked
     // remote). Spawns one seat-streamer per remote player BEFORE command
     // building so its virtual devices exist for gamescope's --libinput-hold-dev,
-    // exactly like gptokeyb above. Returns the per-instance virtual device paths
-    // to wire into the launch command + the invite URLs to pop up.
+    // exactly like gptokeyb above. Each streamer is scoped into the launch slice
+    // so it lives and dies with the launch. Returns the per-instance virtual
+    // device paths to wire into the launch command + the invite URLs to pop up.
     let (mut together_handles, together_devices, together_invites) =
-        crate::together::setup_together_seats(instances, cfg, &h.name);
+        crate::together::setup_together_seats(
+            instances,
+            cfg,
+            &h.name,
+            &launch_id,
+            main_scope.as_deref(),
+            scoping,
+        );
 
     let new_cmds = launch_cmds(
         h,
@@ -131,29 +165,12 @@ pub fn launch_game(
         instance_to_region,
     };
 
-    // Process containment: each instance launches into its own systemd scope
-    // under a per-launch slice, bound to splitux's main scope. Killing splitux
-    // (by any signal) cascades teardown to the whole game cgroup — wine, the EOS
-    // overlay, fuse daemons and all — instead of letting them reparent and leak.
-    let scoping = scope::enabled();
-    let launch_id = scope::new_launch_id();
-    let main_scope = scope::current_main_scope();
-    if scoping {
-        // Reap leftover units from any previous crashed/killed run first.
-        scope::sweep_orphan_units();
-        scope::set_active_slice(&launch_id);
-        if main_scope.is_none() {
-            println!(
-                "[splitux] scope - Warning: not running inside a splitux-main scope; \
-                 launch slice won't auto-die with splitux (self-scope re-exec may have failed)"
-            );
-        }
-        println!(
-            "[splitux] scope - Launch slice {} (main scope: {:?})",
-            scope::slice_name(&launch_id),
-            main_scope
-        );
-    }
+    // (Process containment / launch slice was established above, before the
+    // together seat-streamers were spawned, so `scoping`, `launch_id` and
+    // `main_scope` are already in scope here for wrapping each game instance.)
+    // Each instance launches into its own scope under the launch slice, bound to
+    // splitux's main scope, so killing splitux cascades teardown to the whole
+    // game cgroup — wine, the EOS overlay, fuse daemons and all.
 
     println!("[splitux] Setting up {} window manager", wm.name());
     wm.setup(&ctx)?;
