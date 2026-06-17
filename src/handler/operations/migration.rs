@@ -26,6 +26,7 @@ pub fn migrate_legacy_backends(handler: &mut Handler) {
                 plugin: None,
                 bridged_lan: false,
                 p2p_bridge: false,
+                generate_interfaces: true,
             });
         }
     }
@@ -130,6 +131,7 @@ mod tests {
             plugin: None,
             bridged_lan: false,
             p2p_bridge: false,
+            generate_interfaces: true,
         };
         h.goldberg = Some(existing);
         // Set legacy fields that would normally trigger migration

@@ -24,6 +24,7 @@ pub fn create_instance_overlay(
     is_windows: bool,
     handler_settings: &HashMap<String, String>,
     disable_networking: bool,
+    interfaces_by_dll: &HashMap<PathBuf, String>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let overlay_dir = prepare_overlay_dir("goldberg", instance_idx)?;
 
@@ -78,7 +79,14 @@ pub fn create_instance_overlay(
         // Create steam_settings next to DLL
         let settings_dir = target_dir.join("steam_settings");
         fs::create_dir_all(&settings_dir)?;
-        write_steam_settings(&settings_dir, config, handler_settings, disable_networking)?;
+        let generated_interfaces = interfaces_by_dll.get(&dll.rel_path).map(|s| s.as_str());
+        write_steam_settings(
+            &settings_dir,
+            config,
+            handler_settings,
+            disable_networking,
+            generated_interfaces,
+        )?;
     }
 
     // For native Linux games, also create steam_settings and steam_appid.txt at overlay root
@@ -87,11 +95,14 @@ pub fn create_instance_overlay(
         let root_settings_dir = overlay_dir.join("steam_settings");
         if !root_settings_dir.exists() {
             fs::create_dir_all(&root_settings_dir)?;
+            // Native game root: any located .so shares the same interface set; use the first.
+            let root_interfaces = interfaces_by_dll.values().next().map(|s| s.as_str());
             write_steam_settings(
                 &root_settings_dir,
                 config,
                 handler_settings,
                 disable_networking,
+                root_interfaces,
             )?;
             println!(
                 "[splitux] Goldberg overlay {}: Also created steam_settings at game root",

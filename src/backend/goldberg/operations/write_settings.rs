@@ -16,12 +16,18 @@ use super::super::types::GoldbergConfig;
 /// - configs.main.ini (networking settings)
 /// - custom_broadcasts.txt (LAN discovery ports)
 /// - auto_accept_invite.txt, auto_send_invite.txt
+/// - steam_interfaces.txt (when `generated_interfaces` is provided)
 /// - Any custom handler settings files
+///
+/// `generated_interfaces` (the auto-derived steam_interfaces.txt body) is written
+/// *before* the handler settings loop, so a handler that declares its own
+/// `steam_interfaces.txt` in goldberg.settings overrides the generated one.
 pub fn write_steam_settings(
     dir: &Path,
     config: &GoldbergConfig,
     handler_settings: &HashMap<String, String>,
     disable_networking: bool,
+    generated_interfaces: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // steam_appid.txt
     fs::write(dir.join("steam_appid.txt"), config.app_id.to_string())?;
@@ -69,6 +75,13 @@ share_leaderboards_over_network=0
     // Auto-accept and auto-send invites for seamless multiplayer
     fs::write(dir.join("auto_accept_invite.txt"), "")?;
     fs::write(dir.join("auto_send_invite.txt"), "")?;
+
+    // steam_interfaces.txt - derived from the game's own steam_api binary (see
+    // pure::interfaces). Written before the handler-settings loop so a handler that
+    // declares its own steam_interfaces.txt in goldberg.settings takes precedence.
+    if let Some(interfaces) = generated_interfaces {
+        fs::write(dir.join("steam_interfaces.txt"), interfaces)?;
+    }
 
     // Write handler-specific Goldberg settings files
     for (filename, content) in handler_settings {

@@ -7,7 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::super::operations::create_instance_overlay;
-use super::super::types::{GoldbergConfig, SteamApiDll};
+use super::super::pure::interfaces_file_contents;
+use super::super::types::{GoldbergConfig, SteamApiDll, SteamDllType};
 
 use crate::bepinex::{install_plugin_dlls, UnityBackend};
 use crate::mods::{self, filter_dll_files, PluginSource};
@@ -129,10 +130,33 @@ pub fn create_all_overlays(
     disable_networking: bool,
     plugin_source: &Option<PluginSource>,
     game_dir: &Path,
+    generate_interfaces: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     // Fetch plugin DLLs if specified
     let plugin_dlls = fetch_plugin_if_needed(plugin_source)?;
     let needs_bepinex = !plugin_dlls.is_empty();
+
+    // steam_interfaces.txt is derived per-DLL from the game's own (untouched)
+    // steam_api binary. Scan once here (not per-instance): rel_path -> file body.
+    // Skips non-SteamApi DLLs and any binary where no interfaces were found.
+    let interfaces_by_dll: HashMap<PathBuf, String> = if generate_interfaces {
+        dlls.iter()
+            .filter(|d| d.dll_type == SteamDllType::SteamApi)
+            .filter_map(|d| {
+                let src = game_dir.join(&d.rel_path);
+                let bytes = fs::read(&src).ok()?;
+                let body = interfaces_file_contents(&bytes)?;
+                println!(
+                    "[splitux] Goldberg steam_interfaces.txt generated for {} ({} interfaces)",
+                    d.rel_path.display(),
+                    body.lines().count()
+                );
+                Some((d.rel_path.clone(), body))
+            })
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     // Get community for BepInExPack download
     let community = plugin_source
@@ -158,6 +182,7 @@ pub fn create_all_overlays(
             is_windows,
             handler_settings,
             disable_networking,
+            &interfaces_by_dll,
         )?;
 
         // Install BepInEx + plugin if needed

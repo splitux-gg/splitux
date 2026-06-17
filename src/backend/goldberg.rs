@@ -27,8 +27,12 @@ use operations::find_steam_api_dlls;
 use pipelines::create_all_overlays as pipeline_create_all_overlays;
 use types::{GoldbergConfig, SteamDllType};
 
+fn default_true() -> bool {
+    true
+}
+
 /// Goldberg settings from handler YAML (dot-notation: goldberg.*)
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GoldbergSettings {
     /// Disable Steam networking (goldberg.disable_networking)
     #[serde(default)]
@@ -60,6 +64,31 @@ pub struct GoldbergSettings {
     /// When specified, BepInEx will be installed and the plugin fetched from the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginSource>,
+
+    /// Auto-generate steam_settings/steam_interfaces.txt by scanning the game's own
+    /// steam_api DLL/.so at deploy time (goldberg.generate_interfaces). On by default.
+    /// steam_interfaces.txt is a derived fact about the binary (like steam_appid.txt),
+    /// so it lives in the deploy layer — but the handler config layer stays the source
+    /// of truth: a handler that declares goldberg.settings."steam_interfaces.txt"
+    /// overrides the generated file, and `false` disables generation entirely.
+    /// Generating it lets goldberg resolve every interface version the game requests,
+    /// instead of fatally exiting on an unknown one (the "Missing interface" class).
+    #[serde(default = "default_true")]
+    pub generate_interfaces: bool,
+}
+
+impl Default for GoldbergSettings {
+    fn default() -> Self {
+        Self {
+            disable_networking: false,
+            networking_sockets: false,
+            settings: std::collections::HashMap::new(),
+            bridged_lan: false,
+            p2p_bridge: false,
+            plugin: None,
+            generate_interfaces: true,
+        }
+    }
 }
 
 /// Goldberg backend implementation
@@ -139,6 +168,7 @@ impl Backend for Goldberg {
             self.settings.disable_networking,
             &self.settings.plugin,
             game_root,
+            self.settings.generate_interfaces,
         )
     }
 }
