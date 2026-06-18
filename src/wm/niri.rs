@@ -256,7 +256,12 @@ impl NiriManager {
 
         // Fullscreen layout has its own placement path (per-instance monitor,
         // each window a full-width column) rather than splitting one monitor.
-        if get_layout_type(ctx.preset.id) == LayoutType::Fullscreen {
+        // A single gamescope window also owns the whole monitor, so always give
+        // it that true-fullscreen path (edge-to-edge) instead of a tiled column:
+        // tiling leaves niri's border/gap insets, so the game renders slightly
+        // under-res (e.g. 1894x1054 instead of 1920x1080) and softens bench text.
+        // Local-split couch games collapse to one instance, so this covers them.
+        if get_layout_type(ctx.preset.id) == LayoutType::Fullscreen || windows.len() == 1 {
             return self.position_windows_fullscreen(ctx, &windows);
         }
 
