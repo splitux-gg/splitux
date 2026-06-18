@@ -160,9 +160,14 @@ fn spawn_seat_streamer(
     if let Some(turn) = &cfg.together.turn {
         cmd.args(["--turn", turn]);
     }
-    // FORCE radeonsi: this box's session can carry a stale LIBVA_DRIVER_NAME=nvidia
-    // that silently kills the gst `va` plugin (AMD card). The bench forces it too.
-    cmd.env("LIBVA_DRIVER_NAME", "radeonsi");
+    // Align the seat-streamer's HW video encoder with the configured GPU vendor
+    // (gpu_vendor=auto detects from the DRM render node). Replaces a hardcoded
+    // LIBVA_DRIVER_NAME=radeonsi: a stale/foreign LIBVA driver (e.g. a session
+    // carrying LIBVA_DRIVER_NAME=nvidia on an AMD card) silently kills the gst
+    // `va` plugin, and the vulkan encoder path wants the matching driver too.
+    for (k, v) in cfg.gpu_vendor.driver_env() {
+        cmd.env(k, v);
+    }
     cmd.env("RUST_LOG", "info");
 
     // The Vulkan zero-copy encoder needs the custom `dmabufvulkanupload` plugin

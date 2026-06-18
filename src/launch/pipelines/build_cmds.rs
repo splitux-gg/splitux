@@ -89,6 +89,14 @@ pub fn launch_cmds(
         // 2. Set up gamescope environment
         gamescope::setup_env(&mut cmd);
 
+        // Align the game's graphics driver with the configured GPU vendor
+        // (gpu_vendor=auto detects from the DRM render node). Centralizes the
+        // LIBVA/GLX/GBM driver env so native GL/Vulkan games and Proton resolve
+        // the right driver instead of inheriting a stale/foreign one.
+        for (k, v) in cfg.gpu_vendor.driver_env() {
+            cmd.env(k, v);
+        }
+
         // Proton debug logging
         cmd.env("PROTON_LOG", "1");
         cmd.env("WINEDEBUG", "trace+dinput,trace+xinput");
