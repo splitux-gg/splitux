@@ -131,6 +131,7 @@ pub fn create_all_overlays(
     plugin_source: &Option<PluginSource>,
     game_dir: &Path,
     generate_interfaces: bool,
+    steamclient: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     // Fetch plugin DLLs if specified
     let plugin_dlls = fetch_plugin_if_needed(plugin_source)?;
@@ -183,6 +184,7 @@ pub fn create_all_overlays(
             handler_settings,
             disable_networking,
             &interfaces_by_dll,
+            steamclient,
         )?;
 
         // Install BepInEx + plugin if needed

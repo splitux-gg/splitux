@@ -52,6 +52,42 @@ pub fn setup_env(
     if let Some(appid) = handler.get_steam_appid() {
         cmd.env("SteamAppId", appid.to_string());
         cmd.env("SteamGameId", appid.to_string());
+
+        // umu-run REQUIRES a GAMEID and, when unset, defaults it to "umu-default"
+        // — from which it derives STEAM_COMPAT_APP_ID/SteamAppId/SteamGameId =
+        // "default" (umu_run.py: SteamAppId = the substring after "umu-"). That
+        // bogus appid is what actually reaches the game inside pressure-vessel
+        // (umu overwrites the SteamAppId we set above). steam_api goldberg games
+        // shrug it off — their DLL reads the appid from steam_settings/steam_appid.txt
+        // — but a goldberg STEAMCLIENT game (and its Steamworks wrapper) takes the
+        // appid from the env, gets "default", fails Steam init and pops a modal
+        // "Steam Error" dialog. Setting GAMEID=umu-<appid> makes umu derive the
+        // real appid. Scope it to steamclient games to leave the validated
+        // steam_api games' umu behaviour (protonfix lookup) untouched.
+        let wants_steamclient = handler
+            .goldberg_ref()
+            .map(|g| g.steamclient)
+            .unwrap_or(false);
+        if wants_steamclient {
+            cmd.env("GAMEID", format!("umu-{appid}"));
+
+            // Force the game to use goldberg's WINDOWS steamclient64.dll (deployed
+            // into the prefix), NOT Proton's native bridge. By default Proton's
+            // builtin lsteamclient.dll bridges every steam interface to the host's
+            // native real-Steam steamclient.so ({Steam}/linux64/steamclient.so) —
+            // so goldberg's steamclient, though loaded, is never called and the
+            // game errors (verified via the `+steamclient` WINEDEBUG channel).
+            // Disabling lsteamclient makes the game load goldberg's steamclient
+            // directly in-prefix, exactly like goldberg's ColdClientLoader scenario.
+            cmd.env("WINEDLLOVERRIDES", "lsteamclient=d");
+
+            // Steam launch-context env that the ColdClientLoader normally sets, so
+            // the game's Steamworks wrapper believes it was launched by Steam.
+            cmd.env("SteamClientLaunch", "1");
+            cmd.env("SteamEnv", "1");
+            cmd.env("SteamAppUser", "splitux");
+            cmd.env("SteamUser", "splitux");
+        }
     }
 }
 

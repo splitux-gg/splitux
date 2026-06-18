@@ -25,6 +25,7 @@ pub fn create_instance_overlay(
     handler_settings: &HashMap<String, String>,
     disable_networking: bool,
     interfaces_by_dll: &HashMap<PathBuf, String>,
+    steamclient: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let overlay_dir = prepare_overlay_dir("goldberg", instance_idx)?;
 
@@ -89,9 +90,16 @@ pub fn create_instance_overlay(
         )?;
     }
 
-    // For native Linux games, also create steam_settings and steam_appid.txt at overlay root
-    // Goldberg looks for config next to the executable, not just next to the .so
-    if !is_windows {
+    // Also create steam_settings + steam_appid.txt at the overlay ROOT (next to
+    // the executable) when:
+    //   - native Linux: goldberg looks for config next to the executable, or
+    //   - steamclient mode: the goldberg steamclient resolves its config dir from
+    //     GseAppPath (which splitux pins to the game root / exe dir), NOT from
+    //     beside the replaced steam_api DLL — which for these games can be buried
+    //     deep (e.g. Patch Quest's Plugins/x86_64/). Without a root steam_settings
+    //     the steamclient would fall back to defaults and lose per-instance
+    //     identity (steam_id/account/port). See goldberg.steamclient.
+    if !is_windows || steamclient {
         let root_settings_dir = overlay_dir.join("steam_settings");
         if !root_settings_dir.exists() {
             fs::create_dir_all(&root_settings_dir)?;
