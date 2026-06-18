@@ -164,6 +164,47 @@ pub fn launch_cmds(
             let gse_log = PATH_PARTY.join(format!("gse-{}.log", instance.profname));
             cmd.env("GSE_FORCE_LOG", "1");
             cmd.env("GSE_LOG_PATH", format!("Z:{}", gse_log.display()));
+
+            // Goldberg save/userdata base. Pin GseSavePath to a stable absolute
+            // per-profile dir so goldberg's save path (and GetUserDataFolder) is
+            // deterministic and never falls back to its in-sandbox default
+            // resolution — which can degrade to a relative module-name base
+            // ("libsteam_api.so/userdata/...") and abort games that build their
+            // data dir from it (e.g. Chronicon). A handler may override the base
+            // via goldberg.save_path. goldberg reads GseSavePath verbatim, so the
+            // Windows (Proton/wine) path needs the Z: drive prefix; native .so
+            // builds take the plain unix path.
+            let save_base = h
+                .goldberg_ref()
+                .and_then(|g| g.save_path.clone())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    PATH_PARTY
+                        .join("profiles")
+                        .join(&instance.profname)
+                        .join("goldberg-saves")
+                });
+            let _ = std::fs::create_dir_all(&save_base);
+            if h.win() {
+                cmd.env("GseSavePath", format!("Z:{}", save_base.display()));
+            } else {
+                cmd.env("GseSavePath", &save_base);
+            }
+
+            // Goldberg program/app path. goldberg's get_full_program_path() falls
+            // back to the dirname of the loaded steam_api lib path — but in the
+            // sandbox that lib can resolve to the bare relative module name
+            // ("libsteam_api.so"), which has no dirname, yielding a bogus
+            // "libsteam_api.so/" base. Games that build their data dir from it then
+            // try to mkdir under a *file* and abort (Chronicon:
+            // "libsteam_api.so/userdata/<id>/<appid>"). Pin GseAppPath to the
+            // absolute sandbox game dir so it's always a real directory. Windows
+            // (Proton/wine) needs the Z: drive prefix; native takes the unix path.
+            if h.win() {
+                cmd.env("GseAppPath", format!("Z:{}", cwd.display()));
+            } else {
+                cmd.env("GseAppPath", cwd);
+            }
         }
 
         // Goldberg raw-UDP <-> legacy-Steam-P2P bridge (goldberg.p2p_bridge,

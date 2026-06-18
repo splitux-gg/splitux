@@ -75,6 +75,17 @@ pub struct GoldbergSettings {
     /// instead of fatally exiting on an unknown one (the "Missing interface" class).
     #[serde(default = "default_true")]
     pub generate_interfaces: bool,
+
+    /// Override the goldberg save/userdata base directory (goldberg.save_path).
+    /// splitux always pins GseSavePath to a stable absolute per-profile dir so
+    /// goldberg's GetUserDataFolder/saves are deterministic and never fall back to
+    /// its in-sandbox default path resolution — which can degrade to a relative
+    /// module-name base ("libsteam_api.so/userdata/...") and crash games that
+    /// build their data dir from it (e.g. Chronicon). This overrides that default
+    /// for the rare game that needs its saves elsewhere. Absolute path; None = the
+    /// per-profile default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save_path: Option<String>,
 }
 
 impl Default for GoldbergSettings {
@@ -87,6 +98,7 @@ impl Default for GoldbergSettings {
             p2p_bridge: false,
             plugin: None,
             generate_interfaces: true,
+            save_path: None,
         }
     }
 }
