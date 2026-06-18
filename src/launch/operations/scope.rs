@@ -267,21 +267,26 @@ fn wrap_in_scope(
         cmd.arg(format!("--property=After={scope}"));
     }
 
+    // Propagate the inner env via --setenv (systemd-run OPTIONS, so they must
+    // precede `--`). A `--scope` child inherits the systemd --user MANAGER's
+    // environment, which can carry stale vars (classically LIBVA_DRIVER_NAME=nvidia
+    // on an AMD box) — setting env on this systemd-run CLIENT with cmd.env() does
+    // NOT override those inside the scope (that was a long-standing footgun: the
+    // GPU driver env was silently lost). --setenv sets the var in the scope itself,
+    // so the inner command's env reliably wins over whatever the manager imported.
+    for (key, val) in inner.get_envs() {
+        if let (Some(k), Some(v)) = (key.to_str(), val.and_then(|v| v.to_str())) {
+            cmd.arg(format!("--setenv={k}={v}"));
+        }
+        // None == env_remove; not expressible as --setenv. The scoped launch
+        // commands don't remove inherited env, so there's nothing to carry here.
+    }
+
     cmd.arg("--");
 
-    // Carry over the inner program, args, env (including removals) and cwd.
+    // Carry over the inner program, args and cwd (env handled above via --setenv).
     cmd.arg(inner.get_program());
     cmd.args(inner.get_args());
-    for (key, val) in inner.get_envs() {
-        match val {
-            Some(v) => {
-                cmd.env(key, v);
-            }
-            None => {
-                cmd.env_remove(key);
-            }
-        }
-    }
     if let Some(dir) = inner.get_current_dir() {
         cmd.current_dir(dir);
     }

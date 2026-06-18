@@ -19,6 +19,61 @@ pub enum WindowManagerType {
     GamescopeOnly,
 }
 
+/// GPU vendor for driver/library alignment. Centralizes the per-vendor graphics
+/// env (LIBVA video driver, NVIDIA GLX/GBM selection) so launched games AND the
+/// seat-streamer's HW video encoder all resolve the right driver stack, instead
+/// of scattered hardcodes (this replaces a hardcoded `LIBVA_DRIVER_NAME=radeonsi`
+/// in the together seat spawn). `Auto` detects from the active DRM render node.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum GpuVendor {
+    #[default]
+    Auto,
+    Amd,
+    Nvidia,
+    Intel,
+}
+
+impl GpuVendor {
+    /// Resolve `Auto` to a concrete vendor from the PCI vendor id of the first DRM
+    /// render node (0x1002 AMD, 0x10de NVIDIA, 0x8086 Intel). Falls back to AMD if
+    /// nothing is detectable.
+    pub fn resolve(self) -> GpuVendor {
+        if self != GpuVendor::Auto {
+            return self;
+        }
+        for n in 128..136 {
+            let p = format!("/sys/class/drm/renderD{n}/device/vendor");
+            if let Ok(s) = std::fs::read_to_string(&p) {
+                match s.trim() {
+                    "0x10de" => return GpuVendor::Nvidia,
+                    "0x8086" => return GpuVendor::Intel,
+                    "0x1002" => return GpuVendor::Amd,
+                    _ => continue,
+                }
+            }
+        }
+        GpuVendor::Amd
+    }
+
+    /// Driver/library env that aligns a launched game (and the seat-streamer's HW
+    /// encoder) with the active GPU. Applied to both the game command and the
+    /// seat-streamer command so neither inherits a stale/foreign driver name.
+    pub fn driver_env(self) -> Vec<(&'static str, &'static str)> {
+        match self.resolve() {
+            GpuVendor::Amd => vec![("LIBVA_DRIVER_NAME", "radeonsi")],
+            GpuVendor::Intel => vec![("LIBVA_DRIVER_NAME", "iHD")],
+            GpuVendor::Nvidia => vec![
+                ("LIBVA_DRIVER_NAME", "nvidia"),
+                ("__GLX_VENDOR_LIBRARY_NAME", "nvidia"),
+                ("GBM_BACKEND", "nvidia-drm"),
+            ],
+            // resolve() never returns Auto
+            GpuVendor::Auto => vec![],
+        }
+    }
+}
+
 /// Photon App IDs for LocalMultiplayer mod
 /// Get free App IDs from https://dashboard.photonengine.com
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -127,6 +182,10 @@ pub struct SplituxConfig {
     /// Allows previous instance's SDL/libinput to complete before spawning next
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_init_delay: Option<f64>,
+    /// GPU vendor for driver/library alignment (LIBVA video driver, NVIDIA
+    /// GLX/GBM). `auto` (default) detects from the active DRM render node.
+    #[serde(default)]
+    pub gpu_vendor: GpuVendor,
     /// splitux-together: stream launched instances to remote players over WebRTC.
     #[serde(default)]
     pub together: TogetherConfig,
@@ -251,6 +310,7 @@ impl Default for SplituxConfig {
             layout: LayoutState::default(),
             device_aliases: HashMap::new(),
             input_init_delay: None,
+            gpu_vendor: GpuVendor::Auto,
             together: TogetherConfig::default(),
         }
     }
