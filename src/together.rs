@@ -179,6 +179,16 @@ fn spawn_seat_streamer(
     };
     cmd.env("GST_PLUGIN_PATH", gst_plugin_path);
 
+    // Pass through the CQP quality knobs for the vulkan-zerocopy encoder so the
+    // QP point can be swept live (RADV's vbr/cbr ignore the bitrate target; CQP
+    // is the only working lever). The systemd-run scope wrapper does not inherit
+    // arbitrary env, so forward them explicitly when present.
+    for k in ["GSE_CQP_QP_I", "GSE_CQP_QP_P"] {
+        if let Ok(v) = std::env::var(k) {
+            cmd.env(k, v);
+        }
+    }
+
     // Scope the streamer into the per-launch slice so it shares the launch
     // lifecycle — it dies with the launch (slice teardown + BindsTo cascade +
     // startup sweep all reap it), instead of orphaning as a bare child and

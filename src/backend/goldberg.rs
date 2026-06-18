@@ -60,6 +60,23 @@ pub struct GoldbergSettings {
     #[serde(default)]
     pub p2p_bridge: bool,
 
+    /// Deploy a goldberg `steamclient64.dll`/`steamclient.dll` for games that
+    /// resolve Steam through the **steamclient** path instead of `steam_api`
+    /// (goldberg.steamclient). Some Windows/Proton titles (e.g. Facepunch /
+    /// certain IL2CPP Unity games) never load `steam_api64.dll`; their
+    /// `lsteamclient` loads `C:\…\Steam\steamclient64.dll` directly, which under
+    /// Proton is the REAL Steam client copied from
+    /// `STEAM_COMPAT_CLIENT_INSTALL_PATH/legacycompat/` — so the game falls
+    /// through to real Steam (steam://run) and goldberg never engages. When set,
+    /// splitux shadows that copy source with goldberg's experimental steamclient
+    /// (ro-bind inside the sandbox), so Proton copies goldberg's steamclient into
+    /// the prefix and the game loads the emulator offline. Per-instance identity
+    /// still flows through GseAppPath/steam_settings. Off by default. See the
+    /// goldberg-steamclient-gap memory. Requires the steamclient DLLs to be present
+    /// in the goldberg/win asset dir (shipped from gbe_fork's experimental build).
+    #[serde(default)]
+    pub steamclient: bool,
+
     /// Plugin source for BepInEx-based plugins (goldberg.plugin.*)
     /// When specified, BepInEx will be installed and the plugin fetched from the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,6 +113,7 @@ impl Default for GoldbergSettings {
             settings: std::collections::HashMap::new(),
             bridged_lan: false,
             p2p_bridge: false,
+            steamclient: false,
             plugin: None,
             generate_interfaces: true,
             save_path: None,
@@ -172,7 +190,7 @@ impl Backend for Goldberg {
             })
             .collect();
 
-        pipeline_create_all_overlays(
+        let overlays = pipeline_create_all_overlays(
             &dlls,
             &configs,
             is_windows,
@@ -181,6 +199,42 @@ impl Backend for Goldberg {
             &self.settings.plugin,
             game_root,
             self.settings.generate_interfaces,
-        )
+            self.settings.steamclient,
+        )?;
+
+        // SteamStub DRM shadow: some steamclient games (e.g. Patch Quest) ship a
+        // SteamStub-wrapped exe (a `.bind` PE section). Run under goldberg it errors
+        // with "Application load error 3:0000065432" because the stub can't validate
+        // ownership/decrypt without real Steam. The fix is a DRM-free exe produced by
+        // Steamless. To keep the real install pristine we DON'T patch in place —
+        // `ensure_stripped` produces (once) a Steamless-stripped copy cached under
+        // `{PATH_PARTY}/steamless/{appid}/`, and we copy it into each instance overlay
+        // at the exe's path so fuse-overlayfs serves the stripped exe over the real
+        // one. Returns None when the exe isn't DRM-wrapped (no shadow needed).
+        if self.settings.steamclient {
+            if let Some(appid) = handler.get_steam_appid() {
+                let exec_rel = std::path::Path::new(&handler.exec);
+                if let Some(stripped) = operations::ensure_stripped(game_root, exec_rel, appid) {
+                    for overlay in &overlays {
+                        let dst = overlay.join(exec_rel);
+                        if let Some(parent) = dst.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        match std::fs::copy(&stripped, &dst) {
+                            Ok(_) => println!(
+                                "[splitux] goldberg.steamclient: shadowing DRM exe with Steamless-stripped {} -> {}",
+                                stripped.display(),
+                                dst.display()
+                            ),
+                            Err(e) => println!(
+                                "[splitux] goldberg.steamclient: failed to shadow stripped exe: {e}"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(overlays)
     }
 }

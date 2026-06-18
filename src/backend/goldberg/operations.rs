@@ -4,7 +4,9 @@
 
 mod create_overlay;
 mod find_dlls;
+mod steamless;
 mod write_settings;
 
 pub use create_overlay::create_instance_overlay;
 pub use find_dlls::find_steam_api_dlls;
+pub use steamless::ensure_stripped;

@@ -13,7 +13,7 @@ use crate::handler::{Handler, SDL2Override};
 use crate::input::DeviceInfo;
 use crate::instance::Instance;
 use crate::monitor::Monitor;
-use crate::paths::{PATH_PARTY, PATH_STEAM};
+use crate::paths::{PATH_ASSETS, PATH_PARTY, PATH_STEAM};
 use crate::proton;
 use crate::util::*;
 
@@ -251,6 +251,111 @@ pub fn launch_cmds(
         // 4. Add bwrap container (unless disabled)
         if !h.disable_bwrap {
             bwrap::add_base_args(&mut cmd);
+
+            // goldberg.steamclient: shadow Proton's steamclient COPY SOURCE with
+            // goldberg's experimental steamclient. These games resolve Steam via
+            // the steamclient path (lsteamclient -> C:\…\Steam\steamclient64.dll)
+            // and never load goldberg's steam_api. Proton copies that DLL from
+            // {STEAM_COMPAT_CLIENT_INSTALL_PATH}/legacycompat/ into the prefix on
+            // EVERY launch (try_copy clobbers unconditionally), so pre-placing
+            // goldberg's in the prefix is futile — and ro-binding over the prefix
+            // copy *target* would crash Proton (its os.remove() of a bind mount
+            // hits EBUSY, which try_copy doesn't forgive). Instead we ro-bind
+            // goldberg's steamclient over the copy *source* inside the sandbox:
+            // Proton reads it and copies GOLDBERG's steamclient into the prefix, so
+            // the game's lsteamclient loads the offline emulator instead of real
+            // Steam (which would otherwise fall through to steam://run and exit).
+            // Per-instance identity flows via GseAppPath/steam_settings (root
+            // steam_settings is created in the goldberg overlay for this mode).
+            if win && h.goldberg_ref().map(|g| g.steamclient).unwrap_or(false) {
+                let gb_win = PATH_ASSETS.join("goldberg/win");
+
+                // (a) Deploy goldberg's steamclient directly into THIS instance's
+                // prefix Steam dir. Proton only re-copies steamclient when the
+                // prefix config changes (cold / version-bumped prefix); on a WARM
+                // prefix it SKIPS the copy, so the source-shadow below never fires
+                // and the prefix keeps whatever steamclient it had — real Steam's,
+                // which falls through to steam://run and exits. Writing goldberg's
+                // here makes the warm path correct; the shadow (b) covers the
+                // cold/copy-runs path (Proton then copies goldberg, not real Steam).
+                let pfx_steam = proton::get_prefix_path(cfg, i)
+                    .join("drive_c/Program Files (x86)/Steam");
+                match std::fs::create_dir_all(&pfx_steam) {
+                    Ok(()) => {
+                        for dll in [
+                            "steamclient64.dll",
+                            "steamclient.dll",
+                            "GameOverlayRenderer64.dll",
+                            "GameOverlayRenderer.dll",
+                        ] {
+                            let src = gb_win.join(dll);
+                            if !src.exists() {
+                                continue;
+                            }
+                            let dst = pfx_steam.join(dll);
+                            // Skip the (multi-MB) copy when the prefix already holds
+                            // this exact build (size match) — common on warm prefixes.
+                            let same = std::fs::metadata(&dst).map(|m| m.len()).ok()
+                                == std::fs::metadata(&src).map(|m| m.len()).ok();
+                            if same {
+                                continue;
+                            }
+                            match std::fs::copy(&src, &dst) {
+                                Ok(_) => println!(
+                                    "[splitux] Instance {}: goldberg.steamclient deploy -> prefix: {}",
+                                    i, dll
+                                ),
+                                Err(e) => println!(
+                                    "[splitux] Instance {}: goldberg.steamclient deploy {} failed: {}",
+                                    i, dll, e
+                                ),
+                            }
+                        }
+                    }
+                    Err(e) => println!(
+                        "[splitux] Instance {}: goldberg.steamclient: couldn't create prefix Steam dir: {}",
+                        i, e
+                    ),
+                }
+
+                // (b) Source-shadow: ro-bind goldberg's steamclient over Proton's
+                // legacycompat copy source so the cold/version-bumped copy installs
+                // goldberg's DLL into the prefix instead of real Steam's.
+                let legacy = PATH_STEAM.join("legacycompat");
+                // 64-bit pair covers modern titles; the 32-bit steamclient is bound
+                // too when present so 32-bit games are handled. Each bind is applied
+                // only if both the goldberg source and the legacycompat target exist.
+                for dll in ["steamclient64.dll", "GameOverlayRenderer64.dll", "steamclient.dll"] {
+                    let src = gb_win.join(dll);
+                    let dst = legacy.join(dll);
+                    if src.exists() && dst.exists() {
+                        // legacycompat/{steamclient64,GameOverlayRenderer64}.dll are
+                        // SYMLINKS into the Steam root; bwrap can't create a file
+                        // mountpoint over a symlink ("Can't mkdir parents"). Resolve
+                        // to the real target and shadow THAT — Proton's try_copy
+                        // follows the symlink when reading the source, so shadowing
+                        // the resolved file makes the copy pick up goldberg's DLL.
+                        let dst = dst.canonicalize().unwrap_or(dst);
+                        cmd.args([
+                            "--ro-bind",
+                            &src.to_string_lossy(),
+                            &dst.to_string_lossy(),
+                        ]);
+                        println!(
+                            "[splitux] Instance {}: goldberg steamclient shadow {} -> {}",
+                            i,
+                            src.display(),
+                            dst.display()
+                        );
+                    } else if !src.exists() {
+                        println!(
+                            "[splitux] Instance {}: WARNING goldberg.steamclient set but asset missing: {}",
+                            i,
+                            src.display()
+                        );
+                    }
+                }
+            }
 
             // Get gamepad paths for this instance
             let mut gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
