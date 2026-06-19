@@ -184,11 +184,20 @@ fn spawn_seat_streamer(
     };
     cmd.env("GST_PLUGIN_PATH", gst_plugin_path);
 
-    // Pass through the CQP quality knobs for the vulkan-zerocopy encoder so the
-    // QP point can be swept live (RADV's vbr/cbr ignore the bitrate target; CQP
-    // is the only working lever). The systemd-run scope wrapper does not inherit
-    // arbitrary env, so forward them explicitly when present.
-    for k in ["GSE_CQP_QP_I", "GSE_CQP_QP_P"] {
+    // Pass through the vulkan-zerocopy encoder tuning knobs so they can be swept
+    // live (RADV's vbr/cbr ignore the bitrate target; CQP is the only rate lever,
+    // and quality/b-frames are the EFFICIENCY levers that cut bitrate at the same
+    // quality+fps). The scope wrapper forwards these via --setenv.
+    for k in [
+        "GSE_CQP_QP_I",
+        "GSE_CQP_QP_P",
+        "GSE_ENC_QUALITY",
+        "GSE_BFRAMES",
+        "GSE_H264_PROFILE",
+        "GSE_CODEC",
+        "GSE_FORCE_FPS",
+        "GSE_PAD_DEBUG",
+    ] {
         if let Ok(v) = std::env::var(k) {
             cmd.env(k, v);
         }
