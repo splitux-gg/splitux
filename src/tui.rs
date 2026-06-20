@@ -10,6 +10,7 @@
 //! and shells out to `splitux launch` (this same binary) + `systemctl --user` so
 //! a launched session runs independently of the TUI process.
 
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::StatefulImage;
 
 use crate::handler::scan_handlers;
 use crate::profiles::scan_profiles;
@@ -79,6 +83,18 @@ struct App {
     filter: String,
     game_cursor: usize, // index into the *filtered* list
 
+    // Per-game cover image FILE (parallel to `games`); None when a game has no
+    // resolvable local/Steam-cache art. Rendered in the picker preview pane via
+    // a terminal graphics protocol (kitty/sixel/iterm), when one is available.
+    covers: Vec<Option<PathBuf>>,
+    // Graphics-protocol picker (queried once from the terminal). None when the
+    // terminal can't do inline images — the preview pane then shows a hint.
+    picker: Option<Picker>,
+    // Cached render protocol for the currently-previewed game: (games index,
+    // protocol). Rebuilt only when the selection changes (encoding is costly),
+    // not every frame.
+    cover_proto: Option<(usize, StatefulProtocol)>,
+
     // build screen
     game: Option<usize>, // index into games
     together: bool,
@@ -95,14 +111,20 @@ struct App {
 
     status: String,
     quit: bool,
+
+    // Together invite link(s), read from together-invites.txt after a together
+    // launch (the detached `splitux launch` writes it asynchronously).
+    invite_url: Option<String>,
+    awaiting_invite: Option<Instant>,
 }
 
 impl App {
     fn new() -> Self {
-        let games: Vec<String> = scan_handlers()
-            .into_iter()
-            .map(|h| h.display().to_string())
-            .collect();
+        // Scan once and keep both the display name and the cover path per game
+        // (same art resolution the GUI uses), parallel to `games`.
+        let handlers = scan_handlers();
+        let games: Vec<String> = handlers.iter().map(|h| h.display().to_string()).collect();
+        let covers: Vec<Option<PathBuf>> = handlers.iter().map(|h| h.cover_path()).collect();
         let mut profiles = scan_profiles(true);
         if profiles.is_empty() {
             profiles.push("Guest".to_string());
@@ -113,6 +135,9 @@ impl App {
             screen: Screen::Games,
             filter: String::new(),
             game_cursor: 0,
+            covers,
+            picker: None,
+            cover_proto: None,
             game: None,
             together: false,
             players: Vec::new(),
@@ -123,6 +148,8 @@ impl App {
             last_launch: None,
             status: "Pick a game — type to filter, Enter to select.".to_string(),
             quit: false,
+            invite_url: None,
+            awaiting_invite: None,
         };
         app.refresh_sessions();
         app
@@ -175,19 +202,76 @@ impl App {
                     self.players.len(),
                     if self.together { "together" } else { "local" }
                 );
+                if self.together {
+                    self.invite_url = None;
+                    self.awaiting_invite = Some(Instant::now());
+                    self.status =
+                        format!("Launched '{}' (together) — fetching invite link…", self.games[gi]);
+                }
                 self.refresh_sessions();
             }
             Err(e) => self.status = format!("Launch failed: {e}"),
         }
     }
+
+    /// After a together launch the detached `splitux launch` writes the invite
+    /// link(s) to together-invites.txt asynchronously; poll for it and surface the
+    /// URL(s). Gives up after a timeout. Cheap to call every tick.
+    fn poll_invite(&mut self) {
+        let Some(since) = self.awaiting_invite else {
+            return;
+        };
+        if since.elapsed() > Duration::from_secs(25) {
+            self.awaiting_invite = None;
+            self.status =
+                "Together launched, but no invite link appeared (check the launch log).".to_string();
+            return;
+        }
+        let file = crate::paths::PATH_PARTY.join("together-invites.txt");
+        let Ok(meta) = std::fs::metadata(&file) else {
+            return;
+        };
+        // Only accept a file written AFTER we launched (ignore a stale one).
+        let fresh = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .map(|age| age < since.elapsed())
+            .unwrap_or(false);
+        if !fresh {
+            return;
+        }
+        let Ok(body) = std::fs::read_to_string(&file) else {
+            return;
+        };
+        let urls: Vec<String> = body
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| l.starts_with("https://"))
+            .map(|l| l.to_string())
+            .collect();
+        if urls.is_empty() {
+            return;
+        }
+        self.awaiting_invite = None;
+        self.invite_url = Some(urls.join("\n"));
+        self.status = "Together ready — share the invite link below.".to_string();
+    }
 }
 
 /// Entry point for the `splitux tui` subcommand.
 pub fn run() -> i32 {
+    // Query the terminal for its graphics protocol + font size BEFORE entering
+    // the alternate screen, so cover art can render inline (kitty/sixel/iterm).
+    // Falls back to None on terminals that don't support it — the preview pane
+    // then shows a hint instead of an image.
+    let picker = Picker::from_query_stdio().ok();
     let mut terminal = ratatui::init();
     let mut app = App::new();
+    app.picker = picker;
 
     let res = loop {
+        app.poll_invite();
         if let Err(e) = terminal.draw(|f| draw(f, &mut app)) {
             break Err(e);
         }
@@ -380,13 +464,18 @@ fn handle_sessions(app: &mut App, code: KeyCode) {
 // ---------------------------------------------------------------------------
 
 fn draw(f: &mut Frame, app: &mut App) {
+    let has_invite = app.invite_url.is_some();
+    let mut constraints = vec![
+        Constraint::Length(3), // title
+        Constraint::Min(5),    // body
+    ];
+    if has_invite {
+        constraints.push(Constraint::Length(4)); // invite box
+    }
+    constraints.push(Constraint::Length(3)); // footer
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // title
-            Constraint::Min(5),    // body
-            Constraint::Length(3), // footer
-        ])
+        .constraints(constraints)
         .split(f.area());
 
     draw_title(f, chunks[0], app);
@@ -395,7 +484,25 @@ fn draw(f: &mut Frame, app: &mut App) {
         Screen::Build => draw_build(f, chunks[1], app),
         Screen::Sessions => draw_sessions(f, chunks[1], app),
     }
-    draw_footer(f, chunks[2], app);
+    let mut idx = 2;
+    if has_invite {
+        draw_invite(f, chunks[idx], app);
+        idx += 1;
+    }
+    draw_footer(f, chunks[idx], app);
+}
+
+fn draw_invite(f: &mut Frame, area: Rect, app: &App) {
+    let url = app.invite_url.as_deref().unwrap_or("");
+    let p = Paragraph::new(url)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Together invite — share this link (select to copy) "),
+        )
+        .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+        .wrap(Wrap { trim: true });
+    f.render_widget(p, area);
 }
 
 fn draw_title(f: &mut Frame, area: Rect, app: &App) {
@@ -429,6 +536,12 @@ fn draw_title(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_games(f: &mut Frame, area: Rect, app: &mut App) {
+    // Split: game list on the left, cover-art preview on the right.
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(area);
+
     let filtered = app.filtered();
     let items: Vec<ListItem> = filtered
         .iter()
@@ -452,7 +565,63 @@ fn draw_games(f: &mut Frame, area: Rect, app: &mut App) {
     if !filtered.is_empty() {
         state.select(Some(app.game_cursor.min(filtered.len() - 1)));
     }
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_stateful_widget(list, cols[0], &mut state);
+
+    draw_game_preview(f, cols[1], app);
+}
+
+/// Cover-art preview for the highlighted game. Loads the cover lazily and caches
+/// the encoded protocol, rebuilding only when the selection changes. Degrades to
+/// a text hint when the game has no art or the terminal can't render images.
+fn draw_game_preview(f: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::default().borders(Borders::ALL).title(" Preview ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let hint = |f: &mut Frame, msg: &str| {
+        f.render_widget(
+            Paragraph::new(msg)
+                .style(Style::default().fg(Color::DarkGray))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+    };
+
+    let filtered = app.filtered();
+    if filtered.is_empty() {
+        app.cover_proto = None;
+        return;
+    }
+    let gi = filtered[app.game_cursor.min(filtered.len() - 1)];
+
+    if app.picker.is_none() {
+        app.cover_proto = None;
+        hint(f, "(this terminal can't show inline images — try kitty or a sixel-capable terminal)");
+        return;
+    }
+    let cover = app.covers.get(gi).cloned().flatten();
+    let Some(path) = cover else {
+        app.cover_proto = None;
+        hint(f, "No cover art for this game.\n\nDrop a PNG/JPG in the handler's imgs/ folder, or own it on Steam so its library art is cached.");
+        return;
+    };
+
+    // (Re)build the encoded protocol only when the highlighted game changed.
+    let need = !matches!(&app.cover_proto, Some((idx, _)) if *idx == gi);
+    if need {
+        let proto = app.picker.as_ref().and_then(|picker| {
+            image::ImageReader::open(&path)
+                .ok()
+                .and_then(|r| r.decode().ok())
+                .map(|img| picker.new_resize_protocol(img))
+        });
+        app.cover_proto = proto.map(|p| (gi, p));
+    }
+
+    match &mut app.cover_proto {
+        Some((_, proto)) => f.render_stateful_widget(StatefulImage::default(), inner, proto),
+        None => hint(f, "Couldn't load this game's cover image."),
+    }
 }
 
 fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {

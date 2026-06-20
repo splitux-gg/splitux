@@ -58,6 +58,15 @@ pub struct Instance {
     /// (couch-co-op) game the players collapse into a single instance that owns
     /// N seats — N browsers driving the one shared game. 0 when not `together`.
     pub together_seats: u8,
+    /// True when a LOCAL (non-Together) player drives this instance — i.e. the
+    /// host sits at this shared game with their own kb/m or pad. Only meaningful
+    /// for a collapsed local-split instance that ALSO owns remote seats: gamescope
+    /// holds the seats' virtual devices, which otherwise blocks ALL parent
+    /// compositor input, so the host's focus-driven kb/m would be locked out.
+    /// When set, splitux passes gamescope `--libinput-allow-parent` so the host's
+    /// input still reaches the game alongside the held remote devices. See
+    /// [`crate::together::collapse_for_local_split`].
+    pub local_input: bool,
 }
 
 pub fn set_instance_resolutions(

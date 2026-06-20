@@ -249,6 +249,16 @@ pub fn launch_cmds(
             for seat in seats {
                 gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
             }
+            // Mixed couch session: a local host shares this collapsed instance
+            // with the remote seat(s). Holding the seat devices blocks parent
+            // compositor input by default, so re-open it for the host's kb/m.
+            if instance.local_input {
+                gamescope::add_libinput_allow_parent(&mut cmd, cfg);
+                println!(
+                    "[splitux] Instance {}: --libinput-allow-parent (local host shares this together instance)",
+                    i
+                );
+            }
             cmd.env(
                 "GAMESCOPE_PIPEWIRE_NODE",
                 crate::together::node_name_for_instance(i),

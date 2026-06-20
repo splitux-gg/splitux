@@ -53,6 +53,37 @@ impl Handler {
         self.get_platform().hero_uri()
     }
 
+    /// Resolve a local cover image FILE for this handler, for renderers that
+    /// need a real path on disk rather than an egui `file://` URI (e.g. the TUI,
+    /// which loads it through the `image` crate). Resolution mirrors the GUI's
+    /// art order: a handler-local image, then the Steam cache box art, then the
+    /// Steam icon. Returns None when nothing local is available (caller draws a
+    /// text fallback). The platform URIs are `file://`-prefixed, so strip it.
+    pub fn cover_path(&self) -> Option<PathBuf> {
+        if let Some(p) = self.get_imgs().into_iter().next() {
+            return Some(p);
+        }
+        for name in ["icon.png", "icon.jpg"] {
+            let p = self.path_handler.join(name);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        for uri in [self.box_art(), self.icon_uri_opt()] {
+            if let Some(path) = uri.as_deref().and_then(|u| u.strip_prefix("file://")) {
+                return Some(PathBuf::from(path));
+            }
+        }
+        None
+    }
+
+    /// `icon()` returns an egui `ImageSource` (with a baked-in fallback), which
+    /// isn't a path. This exposes just the Steam-cache icon URI (or None) so
+    /// `cover_path` can fall back to it as a real file.
+    fn icon_uri_opt(&self) -> Option<String> {
+        self.get_platform().icon_uri()
+    }
+
     /// Get local images from handler's imgs directory
     pub(crate) fn get_imgs(&self) -> Vec<PathBuf> {
         let mut out = Vec::new();

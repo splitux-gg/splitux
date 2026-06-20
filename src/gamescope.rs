@@ -143,6 +143,22 @@ pub fn add_seat_hold_args(
     }
 }
 
+/// Keep parent-compositor input flowing even while seat devices are held.
+///
+/// Holding a seat's virtual kbd/mouse (`--libinput-hold-dev`) switches
+/// gamescope-splitux to libinput-only input and blocks ALL parent-compositor
+/// (host desktop) input — correct for a pure-remote seat, but it locks out a
+/// LOCAL host sharing the same collapsed local-split instance. This flag tells
+/// gamescope to keep the held devices AND still accept the focused window's
+/// kb/m, so the host plays alongside the remote seat(s). No-op without
+/// input_holding (the flag only exists in gamescope-splitux).
+pub fn add_libinput_allow_parent(cmd: &mut Command, cfg: &SplituxConfig) {
+    if !cfg.input_holding {
+        return;
+    }
+    cmd.arg("--libinput-allow-parent");
+}
+
 /// Add the separator between gamescope args and the inner command
 pub fn add_separator(cmd: &mut Command) {
     cmd.arg("--");

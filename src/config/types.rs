@@ -247,10 +247,13 @@ fn default_encoder() -> String {
 fn default_bitrate() -> u32 {
     20000
 }
-/// Default per-seat fps tier. The architecture targets 200/144/100/72; an unset
-/// `together.fps` resolves to the top tier.
+/// Default per-seat fps tier. 120 is the locked Together default: browser WebRTC
+/// clients software-decode the stream (no HW WebRTC decode on Linux Chromium; flaky
+/// elsewhere), and 1080p200 (H.264 level 5.2) overruns software-decode budgets on
+/// every client. 120 stays within them while matching common 120/144Hz displays.
+/// 200 is the native/local ideal — raise it only with a hardware-decoding client.
 pub fn default_fps() -> u32 {
-    200
+    120
 }
 
 impl TogetherConfig {

@@ -415,5 +415,9 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
         together,
         together_input,
         together_seats: if together { 1 } else { 0 },
+        // A standalone local player is its own instance with no held seats, so
+        // gamescope never blocks parent input — only a collapsed local-split
+        // instance needs this set, which collapse_for_local_split handles.
+        local_input: false,
     })
 }

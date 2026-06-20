@@ -122,6 +122,21 @@ fn wait_for_seat_devices(seat: &str, timeout: Duration) -> TogetherSeatDevices {
 
 /// Spawn one seat-streamer for `seat`, announcing `token` so `/j/<token>`
 /// auto-joins it. Output goes to `/tmp/splitux-together-<seat>.log`.
+/// Resolve the default sink's monitor source (e.g.
+/// "alsa_output.pci-….analog-stereo.monitor") for use as `pulsesrc device=`.
+/// Works on PulseAudio and pipewire-pulse. None if pactl is unavailable.
+fn default_sink_monitor() -> Option<String> {
+    let out = Command::new("pactl").arg("get-default-sink").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sink = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if sink.is_empty() {
+        return None;
+    }
+    Some(format!("{sink}.monitor"))
+}
+
 fn spawn_seat_streamer(
     cfg: &SplituxConfig,
     seat: &str,
@@ -153,6 +168,13 @@ fn spawn_seat_streamer(
         .args(["--bitrate", &cfg.together.bitrate.to_string()])
         .args(["--stun", &cfg.together.stun]);
     cmd.args(["--fps", &cfg.together.resolved_fps().to_string()]);
+    // Audio passthrough: stream the game's sound as an Opus track. First cut taps
+    // the default sink's monitor (captures game audio for the single-seat case;
+    // multi-seat per-instance isolation via dedicated null sinks is a follow-up).
+    // Resolve the default sink name so we can hand pulsesrc "<sink>.monitor".
+    if let Some(mon) = default_sink_monitor() {
+        cmd.args(["--audio-device", &mon]);
+    }
     if instance.width > 0 && instance.height > 0 {
         cmd.args(["--width", &instance.width.to_string()]);
         cmd.args(["--height", &instance.height.to_string()]);
@@ -391,12 +413,19 @@ pub fn collapse_for_local_split(
         .filter(|inst| inst.together)
         .map(|inst| inst.together_seats.max(1) as u32)
         .sum();
+    // A local (non-together) player among the folded set means the host plays
+    // this shared instance directly (kb/m or pad via window focus). Capture it
+    // BEFORE `base.together` is overwritten below — once the seats are folded in,
+    // gamescope holds their virtual devices and would otherwise block all parent
+    // compositor input, locking the host out. The flag re-opens that path.
+    let has_local_player = instances.iter().any(|inst| !inst.together);
     // Base the shared instance on the first player (its profile owns the single
     // overlay/prefix), but gather every player's local input devices onto it.
     let mut base = instances[0].clone();
     base.devices = instances.iter().flat_map(|inst| inst.devices.iter().copied()).collect();
     base.together = seats > 0;
     base.together_seats = seats.min(u8::MAX as u32) as u8;
+    base.local_input = has_local_player;
     if base.together {
         // Local-split is gamepad-only (games lock kb/m to P1); every seat's pad
         // is wired into the one game's SDL device list.
@@ -463,6 +492,7 @@ mod tests {
             together: true,
             together_input: TogetherInput::Gamepad,
             together_seats: 1,
+            local_input: false,
         }
     }
 

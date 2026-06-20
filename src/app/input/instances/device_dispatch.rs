@@ -108,6 +108,7 @@ impl Splitux {
                                 together: false,
                                 together_input: crate::instance::TogetherInput::Gamepad,
                                 together_seats: 0,
+                                local_input: false,
                             });
                         }
                     }

@@ -30,3 +30,6 @@ zip = "5.1.1"
 udev = "0.9"
 libc = "0.2"
 ratatui = "0.29"
+# default-features off to drop the `chafa-dyn` protocol (needs the chafa C lib);
+# kitty/sixel/iterm/halfblocks are always available. `crossterm` matches ratatui.
+ratatui-image = { version = "9.0.0", default-features = false, features = ["crossterm"] }
