@@ -38,19 +38,45 @@ impl Handler {
         egui::include_image!("../../../assets/executable_icon.png")
     }
 
-    /// Returns the box art from platform (e.g., Steam's library_600x900.jpg)
+    /// First existing handler-dir art file matching any stem (.jpg then .png),
+    /// as an egui `file://` URI. Bundled art (fetched off the web into the handler
+    /// dir) takes precedence over the local Steam cache so every game shows the
+    /// same art regardless of whether it's owned/cached on this machine.
+    fn local_art_uri(&self, stems: &[&str]) -> Option<String> {
+        self.local_art_path(stems)
+            .map(|p| format!("file://{}", p.display()))
+    }
+
+    /// Same as `local_art_uri` but returns the raw path (for the TUI).
+    fn local_art_path(&self, stems: &[&str]) -> Option<PathBuf> {
+        for stem in stems {
+            for ext in ["jpg", "png"] {
+                let p = self.path_handler.join(format!("{stem}.{ext}"));
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns the box art (portrait, ~600x900). Bundled `box_art` first, then
+    /// the Steam cache. (Not `icon` — that's the square list icon, not the cover.)
     pub fn box_art(&self) -> Option<String> {
-        self.get_platform().box_art_uri()
+        self.local_art_uri(&["box_art"])
+            .or_else(|| self.get_platform().box_art_uri())
     }
 
-    /// Returns the game logo from platform (e.g., Steam's logo.png)
+    /// Returns the game logo. Bundled `logo` first, then the Steam cache.
     pub fn logo_image(&self) -> Option<String> {
-        self.get_platform().logo_uri()
+        self.local_art_uri(&["logo"])
+            .or_else(|| self.get_platform().logo_uri())
     }
 
-    /// Returns the hero image from platform (e.g., Steam's library_hero.jpg 1920x620 banner)
+    /// Returns the hero/banner image (wide). Bundled `hero` first, then the Steam cache.
     pub fn hero_image(&self) -> Option<String> {
-        self.get_platform().hero_uri()
+        self.local_art_uri(&["hero"])
+            .or_else(|| self.get_platform().hero_uri())
     }
 
     /// Resolve a local cover image FILE for this handler, for renderers that
@@ -60,16 +86,16 @@ impl Handler {
     /// Steam icon. Returns None when nothing local is available (caller draws a
     /// text fallback). The platform URIs are `file://`-prefixed, so strip it.
     pub fn cover_path(&self) -> Option<PathBuf> {
+        // Prefer the wide bundled banner for the TUI preview, then box art,
+        // then any handler imgs/, then whatever the Steam cache offers. (Not the
+        // square `icon` — the preview wants the full cover/banner.)
+        if let Some(p) = self.local_art_path(&["hero", "box_art"]) {
+            return Some(p);
+        }
         if let Some(p) = self.get_imgs().into_iter().next() {
             return Some(p);
         }
-        for name in ["icon.png", "icon.jpg"] {
-            let p = self.path_handler.join(name);
-            if p.exists() {
-                return Some(p);
-            }
-        }
-        for uri in [self.box_art(), self.icon_uri_opt()] {
+        for uri in [self.hero_image(), self.box_art(), self.icon_uri_opt()] {
             if let Some(path) = uri.as_deref().and_then(|u| u.strip_prefix("file://")) {
                 return Some(PathBuf::from(path));
             }
@@ -82,6 +108,21 @@ impl Handler {
     /// `cover_path` can fall back to it as a real file.
     fn icon_uri_opt(&self) -> Option<String> {
         self.get_platform().icon_uri()
+    }
+
+    /// A small icon FILE for this handler (for the TUI list), preferring the
+    /// bundled portrait `icon`/`box_art` over the Steam-cache icon. None when
+    /// nothing local resolves.
+    pub fn icon_path(&self) -> Option<PathBuf> {
+        // The square `icon.jpg` only — never the full box art (a squished cover
+        // is not an icon). Falls back to the Steam-cache square icon.
+        if let Some(p) = self.local_art_path(&["icon"]) {
+            return Some(p);
+        }
+        self.icon_uri_opt()
+            .as_deref()
+            .and_then(|u| u.strip_prefix("file://"))
+            .map(PathBuf::from)
     }
 
     /// Get local images from handler's imgs directory

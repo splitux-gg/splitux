@@ -10,6 +10,7 @@
 //! and shells out to `splitux launch` (this same binary) + `systemctl --user` so
 //! a launched session runs independently of the TUI process.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -46,7 +47,18 @@ impl InputMode {
             InputMode::Gamepad => InputMode::KbMouse,
         }
     }
-    /// The `input=` value for `splitux launch` in Local (non-together) mode.
+    /// The `input=` value for `splitux launch`, honoring this player's
+    /// local-vs-together scope (mixed sessions: some players local, some remote).
+    fn spec(self, together: bool) -> String {
+        let kind = match self {
+            InputMode::KbMouse => "kbm",
+            InputMode::Gamepad => "gamepad",
+        };
+        let scope = if together { "together" } else { "local" };
+        format!("{scope}:{kind}")
+    }
+    /// Unused legacy local-only spec, kept for reference.
+    #[allow(dead_code)]
     fn local_spec(self) -> &'static str {
         match self {
             InputMode::KbMouse => "local:kbm",
@@ -59,6 +71,9 @@ impl InputMode {
 struct Player {
     profile: usize, // index into App::profiles
     input: InputMode,
+    /// false = local (drives the host directly), true = a remote Together seat.
+    /// Per-player so one session can mix local and together players.
+    together: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -87,6 +102,12 @@ struct App {
     // resolvable local/Steam-cache art. Rendered in the picker preview pane via
     // a terminal graphics protocol (kitty/sixel/iterm), when one is available.
     covers: Vec<Option<PathBuf>>,
+    // Per-game preview text (handler.info, the uniform Play/Avoid block), parallel to `games`.
+    infos: Vec<String>,
+    // Per-game small icon FILE (parallel to `games`) for the list, + a lazy cache
+    // of encoded icon protocols keyed by game index (built as rows scroll in).
+    icons: Vec<Option<PathBuf>>,
+    icon_protos: HashMap<usize, StatefulProtocol>,
     // Graphics-protocol picker (queried once from the terminal). None when the
     // terminal can't do inline images — the preview pane then shows a hint.
     picker: Option<Picker>,
@@ -97,7 +118,6 @@ struct App {
 
     // build screen
     game: Option<usize>, // index into games
-    together: bool,
     players: Vec<Player>,
     player_cursor: usize,
 
@@ -107,7 +127,7 @@ struct App {
     last_sessions_refresh: Instant,
 
     // remember last launch for restart
-    last_launch: Option<(usize, bool, Vec<Player>)>,
+    last_launch: Option<(usize, Vec<Player>)>,
 
     status: String,
     quit: bool,
@@ -125,6 +145,8 @@ impl App {
         let handlers = scan_handlers();
         let games: Vec<String> = handlers.iter().map(|h| h.display().to_string()).collect();
         let covers: Vec<Option<PathBuf>> = handlers.iter().map(|h| h.cover_path()).collect();
+        let infos: Vec<String> = handlers.iter().map(|h| h.info.trim().to_string()).collect();
+        let icons: Vec<Option<PathBuf>> = handlers.iter().map(|h| h.icon_path()).collect();
         let mut profiles = scan_profiles(true);
         if profiles.is_empty() {
             profiles.push("Guest".to_string());
@@ -136,10 +158,12 @@ impl App {
             filter: String::new(),
             game_cursor: 0,
             covers,
+            infos,
+            icons,
+            icon_protos: HashMap::new(),
             picker: None,
             cover_proto: None,
             game: None,
-            together: false,
             players: Vec::new(),
             player_cursor: 0,
             sessions: Vec::new(),
@@ -184,6 +208,7 @@ impl App {
         Player {
             profile,
             input: InputMode::Gamepad,
+            together: false,
         }
     }
 
@@ -193,20 +218,22 @@ impl App {
             self.status = "Add at least one player (a) before launching.".to_string();
             return;
         }
-        match spawn_session(&self.games[gi], self.together, &self.players, &self.profiles) {
+        let n_together = self.players.iter().filter(|p| p.together).count();
+        match spawn_session(&self.games[gi], &self.players, &self.profiles) {
             Ok(()) => {
-                self.last_launch = Some((gi, self.together, self.players.clone()));
+                self.last_launch = Some((gi, self.players.clone()));
+                let n_local = self.players.len() - n_together;
                 self.status = format!(
-                    "Launched '{}' ({} player(s), {}). Press s for sessions.",
-                    self.games[gi],
-                    self.players.len(),
-                    if self.together { "together" } else { "local" }
+                    "Launched '{}' ({} local + {} together). Press s for sessions.",
+                    self.games[gi], n_local, n_together
                 );
-                if self.together {
+                if n_together > 0 {
                     self.invite_url = None;
                     self.awaiting_invite = Some(Instant::now());
-                    self.status =
-                        format!("Launched '{}' (together) — fetching invite link…", self.games[gi]);
+                    self.status = format!(
+                        "Launched '{}' — fetching invite link(s) for {} together seat(s)…",
+                        self.games[gi], n_together
+                    );
                 }
                 self.refresh_sessions();
             }
@@ -372,12 +399,16 @@ fn handle_build(app: &mut App, code: KeyCode) {
             app.status = "Pick a game — type to filter, Enter to select.".into();
         }
         KeyCode::Char('t') => {
-            app.together = !app.together;
-            app.status = if app.together {
-                "Together: each seat gets both kb/m + gamepad (per-player input hidden).".into()
+            if let Some(pl) = app.players.get_mut(app.player_cursor) {
+                pl.together = !pl.together;
+                app.status = if pl.together {
+                    "Player set to TOGETHER (remote seat — gets an invite link).".into()
+                } else {
+                    "Player set to LOCAL (drives the host directly).".into()
+                };
             } else {
-                "Local: assign an input per player.".into()
-            };
+                app.status = "Add a player first (a), then t toggles local/together.".into();
+            }
         }
         KeyCode::Char('a') => {
             let p = app.default_player();
@@ -407,10 +438,8 @@ fn handle_build(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Char('i') => {
-            if !app.together {
-                if let Some(pl) = app.players.get_mut(app.player_cursor) {
-                    pl.input = pl.input.toggled();
-                }
+            if let Some(pl) = app.players.get_mut(app.player_cursor) {
+                pl.input = pl.input.toggled();
             }
         }
         KeyCode::Enter | KeyCode::Char('l') => app.launch(),
@@ -443,10 +472,10 @@ fn handle_sessions(app: &mut App, code: KeyCode) {
         }
         KeyCode::Char('R') => {
             // restart the last-launched config
-            if let Some((gi, together, players)) = app.last_launch.clone() {
+            if let Some((gi, players)) = app.last_launch.clone() {
                 stop_all_sessions();
                 std::thread::sleep(Duration::from_millis(500));
-                match spawn_session(&app.games[gi], together, &players, &app.profiles) {
+                match spawn_session(&app.games[gi], &players, &app.profiles) {
                     Ok(()) => app.status = format!("Restarted '{}'.", app.games[gi]),
                     Err(e) => app.status = format!("Restart failed: {e}"),
                 }
@@ -543,9 +572,13 @@ fn draw_games(f: &mut Frame, area: Rect, app: &mut App) {
         .split(area);
 
     let filtered = app.filtered();
+    // When the terminal can draw images, pad each row so a small per-game icon
+    // can be overlaid in the gap (after the highlight gutter).
+    let icons_on = app.picker.is_some();
+    let pad = if icons_on { "   " } else { "" };
     let items: Vec<ListItem> = filtered
         .iter()
-        .map(|&i| ListItem::new(app.games[i].clone()))
+        .map(|&i| ListItem::new(format!("{pad}{}", app.games[i])))
         .collect();
     let title = if app.filter.is_empty() {
         format!(" Games ({}) ", app.games.len())
@@ -567,6 +600,44 @@ fn draw_games(f: &mut Frame, area: Rect, app: &mut App) {
     }
     f.render_stateful_widget(list, cols[0], &mut state);
 
+    // Overlay a small icon on each visible row, in the padding after the
+    // 2-cell highlight gutter. Protocols are built lazily and cached per game.
+    if icons_on {
+        let inner = Block::default().borders(Borders::ALL).inner(cols[0]);
+        let (gutter, icon_w) = (2u16, 2u16);
+        if inner.width > gutter + icon_w {
+            let offset = state.offset();
+            for row in 0..inner.height as usize {
+                let fi = offset + row;
+                if fi >= filtered.len() {
+                    break;
+                }
+                let gi = filtered[fi];
+                if !app.icon_protos.contains_key(&gi) {
+                    let built = match (&app.picker, app.icons.get(gi).and_then(|o| o.as_ref())) {
+                        (Some(picker), Some(path)) => image::ImageReader::open(path)
+                            .ok()
+                            .and_then(|r| r.decode().ok())
+                            .map(|im| picker.new_resize_protocol(im)),
+                        _ => None,
+                    };
+                    if let Some(p) = built {
+                        app.icon_protos.insert(gi, p);
+                    }
+                }
+                if let Some(proto) = app.icon_protos.get_mut(&gi) {
+                    let rect = Rect {
+                        x: inner.x + gutter,
+                        y: inner.y + row as u16,
+                        width: icon_w,
+                        height: 1,
+                    };
+                    f.render_stateful_widget(StatefulImage::default(), rect, proto);
+                }
+            }
+        }
+    }
+
     draw_game_preview(f, cols[1], app);
 }
 
@@ -578,49 +649,66 @@ fn draw_game_preview(f: &mut Frame, area: Rect, app: &mut App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let hint = |f: &mut Frame, msg: &str| {
-        f.render_widget(
-            Paragraph::new(msg)
-                .style(Style::default().fg(Color::DarkGray))
-                .wrap(Wrap { trim: true }),
-            inner,
-        );
-    };
-
     let filtered = app.filtered();
     if filtered.is_empty() {
         app.cover_proto = None;
         return;
     }
     let gi = filtered[app.game_cursor.min(filtered.len() - 1)];
+    let info = app.infos.get(gi).cloned().unwrap_or_default();
 
-    if app.picker.is_none() {
-        app.cover_proto = None;
-        hint(f, "(this terminal can't show inline images — try kitty or a sixel-capable terminal)");
-        return;
-    }
-    let cover = app.covers.get(gi).cloned().flatten();
-    let Some(path) = cover else {
-        app.cover_proto = None;
-        hint(f, "No cover art for this game.\n\nDrop a PNG/JPG in the handler's imgs/ folder, or own it on Steam so its library art is cached.");
-        return;
+    // Split the pane: cover art on top, the handler's Play/Avoid text below. The
+    // text gets just the rows it needs (capped to half the pane); the cover takes
+    // the rest. With no art the cover area shows a short hint, so the text always
+    // shows regardless of whether art is available.
+    let text_rows = if info.is_empty() {
+        0
+    } else {
+        ((info.lines().count() as u16) + 1).min(inner.height / 2)
+    };
+    let parts = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(text_rows)])
+        .split(inner);
+    let art_area = parts[0];
+    let text_area = parts[1];
+
+    let hint = |f: &mut Frame, msg: &str| {
+        f.render_widget(
+            Paragraph::new(msg).style(Style::default().fg(Color::DarkGray)).wrap(Wrap { trim: true }),
+            art_area,
+        );
     };
 
-    // (Re)build the encoded protocol only when the highlighted game changed.
-    let need = !matches!(&app.cover_proto, Some((idx, _)) if *idx == gi);
-    if need {
-        let proto = app.picker.as_ref().and_then(|picker| {
-            image::ImageReader::open(&path)
-                .ok()
-                .and_then(|r| r.decode().ok())
-                .map(|img| picker.new_resize_protocol(img))
-        });
-        app.cover_proto = proto.map(|p| (gi, p));
+    // Cover art (or a hint) in the top area.
+    let cover = app.covers.get(gi).cloned().flatten();
+    if app.picker.is_none() {
+        app.cover_proto = None;
+        hint(f, "(no inline images in this terminal — try kitty)");
+    } else if let Some(path) = cover {
+        let need = !matches!(&app.cover_proto, Some((idx, _)) if *idx == gi);
+        if need {
+            let proto = app.picker.as_ref().and_then(|picker| {
+                image::ImageReader::open(&path).ok().and_then(|r| r.decode().ok())
+                    .map(|img| picker.new_resize_protocol(img))
+            });
+            app.cover_proto = proto.map(|p| (gi, p));
+        }
+        match &mut app.cover_proto {
+            Some((_, proto)) => f.render_stateful_widget(StatefulImage::default(), art_area, proto),
+            None => hint(f, "Couldn't load this game's cover image."),
+        }
+    } else {
+        app.cover_proto = None;
+        hint(f, "No cover art yet for this game.");
     }
 
-    match &mut app.cover_proto {
-        Some((_, proto)) => f.render_stateful_widget(StatefulImage::default(), inner, proto),
-        None => hint(f, "Couldn't load this game's cover image."),
+    // Play / Avoid text in the bottom area.
+    if !info.is_empty() {
+        f.render_widget(
+            Paragraph::new(info).wrap(Wrap { trim: true }),
+            text_area,
+        );
     }
 }
 
@@ -632,35 +720,30 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
 
     // left: summary
     let game = app.game.map(|i| app.games[i].as_str()).unwrap_or("(none)");
-    let mode = if app.together {
-        Span::styled("TOGETHER", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
-    } else {
-        Span::styled("LOCAL", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-    };
-    let mut lines = vec![
+    let n_together = app.players.iter().filter(|p| p.together).count();
+    let n_local = app.players.len() - n_together;
+    let lines = vec![
         Line::from(vec![Span::raw("Game:  "), Span::styled(game, Style::default().add_modifier(Modifier::BOLD))]),
-        Line::from(vec![Span::raw("Mode:  "), mode, Span::raw("   (t to toggle)")]),
+        Line::from(vec![
+            Span::raw("Mix:   "),
+            Span::styled(format!("{n_local} local"), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw(" + "),
+            Span::styled(format!("{n_together} together"), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+        ]),
         Line::from(""),
+        Line::from(Span::styled(
+            "Per player: t = local/together, i = kb-m/gamepad.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "Local drives the host; together is a remote seat",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "with an invite link. Mix freely.",
+            Style::default().fg(Color::DarkGray),
+        )),
     ];
-    if app.together {
-        lines.push(Line::from(Span::styled(
-            "Together streams kb/m + gamepad to every seat,",
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::from(Span::styled(
-            "so per-player input is not assigned.",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Local: each player drives the host via",
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::from(Span::styled(
-            "its assigned input (i to toggle).",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
@@ -675,11 +758,8 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
         .enumerate()
         .map(|(i, p)| {
             let prof = app.profiles.get(p.profile).map(|s| s.as_str()).unwrap_or("?");
-            let line = if app.together {
-                format!("P{}  {}", i + 1, prof)
-            } else {
-                format!("P{}  {:<12}  [{}]", i + 1, prof, p.input.label())
-            };
+            let scope = if p.together { "together" } else { "local" };
+            let line = format!("P{}  {:<12}  [{:<8} {}]", i + 1, prof, scope, p.input.label());
             ListItem::new(line)
         })
         .collect();
@@ -764,15 +844,11 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
 // ---------------------------------------------------------------------------
 
 /// Build the `splitux launch` arg vector for a session.
-fn launch_args(game: &str, together: bool, players: &[Player], profiles: &[String]) -> Vec<String> {
+fn launch_args(game: &str, players: &[Player], profiles: &[String]) -> Vec<String> {
     let mut args = vec!["launch".to_string(), "--game".to_string(), game.to_string()];
     for p in players {
         let prof = profiles.get(p.profile).cloned().unwrap_or_else(|| "Guest".into());
-        let input = if together {
-            "together:gamepad".to_string()
-        } else {
-            p.input.local_spec().to_string()
-        };
+        let input = p.input.spec(p.together);
         args.push("--player".to_string());
         args.push(format!("profile={prof},input={input}"));
     }
@@ -784,12 +860,11 @@ fn launch_args(game: &str, together: bool, players: &[Player], profiles: &[Strin
 /// blocks for the session's lifetime, so it must not be a child we wait on.
 fn spawn_session(
     game: &str,
-    together: bool,
     players: &[Player],
     profiles: &[String],
 ) -> std::io::Result<()> {
     let exe = std::env::current_exe()?;
-    let args = launch_args(game, together, players, profiles);
+    let args = launch_args(game, players, profiles);
     let log_path = std::env::temp_dir().join(format!(
         "splitux-tui-{}.log",
         game.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-")
