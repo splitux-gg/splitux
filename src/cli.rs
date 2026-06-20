@@ -100,6 +100,25 @@ enum Command {
         /// e.g. --display DP-3   or   --display DP-1 --display HDMI-A-1
         #[arg(long = "display", value_name = "CONNECTOR")]
         displays: Vec<String>,
+
+        // --- Save anchoring (carry real progress in, sync it back) ---
+        /// Profile that owns the canonical ("anchored") save — the master. The
+        /// master is seeded from the original save at start and (with
+        /// --save-sync-back) written back at the end. Overrides settings.json.
+        #[arg(long)]
+        master: Option<String>,
+        /// Absolute path to the original save to anchor for this launch (overrides
+        /// the handler's original_save_path). Copied into the master at start.
+        #[arg(long = "save-anchor", value_name = "PATH")]
+        save_anchor: Option<String>,
+        /// Sync the master profile's saves back to the anchored location after the
+        /// session ends. The original is always backed up first (hard-gated).
+        #[arg(long = "save-sync-back")]
+        save_sync_back: bool,
+        /// Remap Steam IDs embedded in save filenames (DRG-style) when copying
+        /// to/from profiles.
+        #[arg(long = "save-steam-id-remap")]
+        save_steam_id_remap: bool,
     },
     /// Interactive terminal UI: pick a game, assign profiles/inputs, launch, and
     /// watch / kill / restart running sessions (a keyboard-driven GUI replacement).
@@ -177,7 +196,20 @@ pub fn run_if_cli() -> Option<i32> {
             players,
             layout,
             displays,
-        } => launch(&game, &players, layout, &displays),
+            master,
+            save_anchor,
+            save_sync_back,
+            save_steam_id_remap,
+        } => launch(
+            &game,
+            &players,
+            layout,
+            &displays,
+            master,
+            save_anchor,
+            save_sync_back,
+            save_steam_id_remap,
+        ),
         Command::Tui => crate::tui::run(),
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "splitux", &mut std::io::stdout());
@@ -239,16 +271,38 @@ fn list(what: ListWhat) {
 /// Headless launch. Resolves the game + per-player specs into the same
 /// structures the GUI builds, applies any `--layout`/`--display` overrides, then
 /// runs the shared `run_session`. Returns a process exit code.
-fn launch(game: &str, players: &[String], layout: Option<Layout>, displays: &[String]) -> i32 {
+#[allow(clippy::too_many_arguments)]
+fn launch(
+    game: &str,
+    players: &[String],
+    layout: Option<Layout>,
+    displays: &[String],
+    master_override: Option<String>,
+    save_anchor: Option<String>,
+    save_sync_back: bool,
+    save_steam_id_remap: bool,
+) -> i32 {
     let mut cfg = load_cfg();
 
-    let Some(handler) = scan_handlers()
+    let Some(mut handler) = scan_handlers()
         .into_iter()
         .find(|h| h.display().eq_ignore_ascii_case(game))
     else {
         eprintln!("[splitux] game '{game}' not found — run `splitux list games`.");
         return 2;
     };
+
+    // Per-launch save-anchor overrides (set by the TUI when a Session anchors a
+    // real save). These flip the handler's save-sync fields for this run only.
+    if let Some(path) = save_anchor {
+        handler.original_save_path = path;
+    }
+    if save_sync_back {
+        handler.save_sync_back = true;
+    }
+    if save_steam_id_remap {
+        handler.save_steam_id_remap = true;
+    }
 
     let profiles = scan_profiles(true);
     let input_devices = scan_input_devices(&cfg.pad_filter_type);
@@ -323,7 +377,8 @@ fn launch(game: &str, players: &[String], layout: Option<Layout>, displays: &[St
     set_instance_names(&mut instances, &profiles);
 
     let dev_infos: Vec<DeviceInfo> = input_devices.iter().map(|d| d.info()).collect();
-    let master = cfg.master_profile.clone();
+    // --master overrides settings.json's master_profile for this launch.
+    let master = master_override.or_else(|| cfg.master_profile.clone());
     let ready = AtomicBool::new(false);
 
     let remote: usize = instances.iter().map(|i| i.together_seats as usize).sum();

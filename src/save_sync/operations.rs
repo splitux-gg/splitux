@@ -36,44 +36,26 @@ pub fn copy_dir_with_steam_id_remap(
         let entry = entry?;
         let rel_path = entry.path().strip_prefix(src)?;
 
-        // Check if filename has a Steam ID prefix
-        let filename = entry
-            .path()
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let (new_filename, detected_id) = if let Some((original_id, rest)) =
-            extract_steam_id_from_filename(&filename)
-        {
-            // Store the detected original ID (use first one found)
-            if detected_original_id.is_none() {
-                detected_original_id = Some(original_id);
-                println!(
-                    "[splitux] Detected original Steam ID in saves: {}",
-                    original_id
-                );
+        // Remap EVERY path component that is a Steam ID — not just the leaf. This
+        // handles both filename-keyed saves (DRG: "<id>_Player.sav") AND
+        // directory-keyed saves (V Rising: "CloudSaves/<id>/...", Unreal:
+        // "Saved/SaveGames/<id>/..."). The old leaf-only logic left the renamed
+        // dir empty and recreated the original-id dir for its contents.
+        let mut new_rel_path = PathBuf::new();
+        for comp in rel_path.components() {
+            let name = comp.as_os_str().to_string_lossy();
+            if let Some((original_id, rest)) = extract_steam_id_from_filename(&name) {
+                if detected_original_id.is_none() {
+                    detected_original_id = Some(original_id);
+                    println!("[splitux] Detected original Steam ID in saves: {}", original_id);
+                }
+                let remapped = format!("{}{}", target_steam_id, rest);
+                println!("[splitux] Remapping save component: {} -> {}", name, remapped);
+                new_rel_path.push(remapped);
+            } else {
+                new_rel_path.push(comp.as_os_str());
             }
-
-            let remapped = format!("{}{}", target_steam_id, rest);
-            println!(
-                "[splitux] Remapping save file: {} -> {}",
-                filename, remapped
-            );
-            (remapped, Some(original_id))
-        } else {
-            (filename.clone(), None)
-        };
-
-        // Build the new path with potentially remapped filename
-        let new_rel_path = if detected_id.is_some() {
-            rel_path.parent().map_or_else(
-                || PathBuf::from(&new_filename),
-                |parent| parent.join(&new_filename),
-            )
-        } else {
-            rel_path.to_path_buf()
-        };
+        }
 
         let new_path = dest.join(&new_rel_path);
 

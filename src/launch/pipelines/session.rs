@@ -81,4 +81,11 @@ pub fn run_session(
         println!("[splitux] Error removing tmp directory: {}", err);
         notify("Failed removing tmp directory", &format!("{err}"));
     }
+
+    // Clean teardown reached (incl. any save sync-back above): drop the runtime
+    // marker so the TUI sees this session go inactive. A force-kill SIGKILLs the
+    // main scope before here — the TUI removes the marker itself in that path.
+    if let Ok(sid) = std::env::var(crate::session_store::SESSION_ID_ENV) {
+        crate::session_store::remove_marker(&sid);
+    }
 }

@@ -86,6 +86,8 @@ impl PlatformConfig {
 mod manual;
 mod steam;
 
+/// Resolve the Proton compatdata steamuser dir for a Steam app (save anchoring).
+pub(crate) use steam::locate::find_compat_steamuser;
 pub use manual::ManualPlatform;
 pub use steam::SteamPlatform;
 

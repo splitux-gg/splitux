@@ -216,14 +216,25 @@ pub fn resolve_proton_path(proton_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// True if `dir` is currently a mount point.
+///
+/// Reads /proc/self/mountinfo directly rather than shelling out to `mountpoint(1)`:
+/// the binary reports a *dead* fuse endpoint (ENOTCONN — the fuse-overlayfs daemon
+/// is gone but the mount is still in the table) as "not a mountpoint", so the stale
+/// mount would never be unmounted and the next launch would fail to mount over it.
+/// mountinfo still lists it, so this detects and cleans it.
 pub fn is_mount_point(dir: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
-    if let Ok(status) = Command::new("mountpoint").arg(dir).status()
-        && status.success()
-    {
-        Ok(true)
-    } else {
-        Ok(false)
+    // canonicalize can itself ENOTCONN on a dead fuse mount; fall back to the path.
+    let target = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+    let target = target.to_string_lossy();
+    let data = std::fs::read_to_string("/proc/self/mountinfo")?;
+    for line in data.lines() {
+        // The mount point is the 5th space-separated field of a mountinfo line.
+        if line.split(' ').nth(4) == Some(target.as_ref()) {
+            return Ok(true);
+        }
     }
+    Ok(false)
 }
 
 pub fn fuse_overlayfs_unmount_gamedirs() -> Result<(), Box<dyn std::error::Error>> {
@@ -233,24 +244,35 @@ pub fn fuse_overlayfs_unmount_gamedirs() -> Result<(), Box<dyn std::error::Error
         return Err("Failed to read directory".into());
     };
 
+    // Best-effort: a single stuck/raced unmount must NOT abort the rest of the
+    // teardown (that left other game dirs mounted and surfaced a scary "fuse
+    // error" on kill). Unmount every game-N dir we can, collect genuine failures,
+    // and only report those.
+    let mut failures: Vec<String> = Vec::new();
     for entry_result in entries {
-        if let Ok(entry) = entry_result
-            && entry.path().is_dir()
-            && entry.file_name().to_string_lossy().starts_with("game-")
-            && is_mount_point(&entry.path())?
-        {
-            let status = Command::new("umount")
-                .arg("-l")
-                .arg("-v")
-                .arg(entry.path())
-                .status()?;
-            if !status.success() {
-                return Err(format!("Unmounting {} failed", entry.path().to_string_lossy()).into());
-            }
+        let Ok(entry) = entry_result else { continue };
+        let path = entry.path();
+        if !(path.is_dir() && entry.file_name().to_string_lossy().starts_with("game-")) {
+            continue;
+        }
+        if !is_mount_point(&path).unwrap_or(false) {
+            continue;
+        }
+        let status = Command::new("umount").arg("-l").arg("-v").arg(&path).status();
+        match status {
+            Ok(s) if s.success() => {}
+            // Raced: it got unmounted between the check and now — fine.
+            _ if !is_mount_point(&path).unwrap_or(false) => {}
+            Ok(_) => failures.push(path.to_string_lossy().into_owned()),
+            Err(e) => failures.push(format!("{} ({e})", path.to_string_lossy())),
         }
     }
 
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("failed to unmount: {}", failures.join(", ")).into())
+    }
 }
 
 pub fn clear_tmp() -> Result<(), Box<dyn Error>> {

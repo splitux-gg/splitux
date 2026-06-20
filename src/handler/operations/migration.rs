@@ -135,6 +135,7 @@ mod tests {
             p2p_bridge: false,
             generate_interfaces: true,
             save_path: None,
+            steamclient: false,
         };
         h.goldberg = Some(existing);
         // Set legacy fields that would normally trigger migration

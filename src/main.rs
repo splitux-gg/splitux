@@ -21,6 +21,7 @@ mod profiles;
 mod proton;
 mod registry;
 mod save_sync;
+mod session_store;
 mod together;
 mod tui;
 mod util;

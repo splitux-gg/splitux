@@ -86,6 +86,15 @@ pub fn launch_game(
             scope::slice_name(&launch_id),
             main_scope
         );
+        // If the TUI launched us with a session id, record a runtime marker so it
+        // can show this session ● active and target End/Kill at our exact units
+        // (the slice and main scope, which the TUI can't derive — see session_store).
+        if let (Ok(sid), Some(ms)) = (
+            std::env::var(crate::session_store::SESSION_ID_ENV),
+            main_scope.as_ref(),
+        ) {
+            crate::session_store::write_marker(&sid, &scope::slice_name(&launch_id), ms);
+        }
     }
 
     // Set up splitux-together remote seats (no-op unless a player is marked

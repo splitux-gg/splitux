@@ -5,7 +5,25 @@ use crate::handler::Handler;
 use crate::instance::Instance;
 use crate::paths::{PATH_HOME, PATH_PARTY};
 use regex::Regex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// For a Windows save path, return the portion AFTER the prefix's Windows user
+/// home (`…/drive_c/users/<user>/…`). splitux bind-mounts a profile's `windata`
+/// over that user home, so this suffix is exactly the windata-relative dest.
+/// Returns None for a path that has no `users/<user>/` segment (e.g. an already
+/// windata-relative `AppData/...` string), so callers can use it verbatim.
+fn windata_relative(p: &Path) -> Option<PathBuf> {
+    let comps: Vec<_> = p.components().collect();
+    for i in 0..comps.len() {
+        if comps[i].as_os_str() == "users" && i + 2 <= comps.len().saturating_sub(1) {
+            let rest: PathBuf = comps[i + 2..].iter().collect();
+            if !rest.as_os_str().is_empty() {
+                return Some(rest);
+            }
+        }
+    }
+    None
+}
 
 /// Expand ~ and $HOME in path
 pub fn expand_path(path: &str) -> PathBuf {
@@ -60,10 +78,17 @@ pub fn get_profile_save_path(profile_name: &str, h: &Handler) -> (PathBuf, bool)
         return (dest, false);
     }
 
-    // For Windows games or other paths, use windata if it looks like AppData
+    // Windows games: the profile's windata is bind-mounted over the prefix's
+    // drive_c/users/steamuser, so the dest is the part of the original AFTER that
+    // user home. An ABSOLUTE Proton/compatdata save (…/users/steamuser/AppData/…)
+    // maps by stripping the prefix up to and including `users/<user>/`; an already
+    // windata-relative `AppData/...` string is used verbatim. (The previous code
+    // joined the whole original, so an absolute path replaced the windata base and
+    // mapped the save onto itself.)
     if h.win() || h.original_save_path.contains("AppData") {
-        // Keep the relative structure for windata
-        let dest = profile_path.join("windata").join(&h.original_save_path);
+        let rel = windata_relative(&original)
+            .unwrap_or_else(|| PathBuf::from(&h.original_save_path));
+        let dest = profile_path.join("windata").join(rel);
         return (dest, false);
     }
 
@@ -106,4 +131,30 @@ pub fn find_first_named_profile(instances: &[Instance]) -> Option<&str> {
         .iter()
         .find(|i| !i.profname.starts_with('.'))
         .map(|i| i.profname.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windata_relative_strips_proton_prefix() {
+        // Absolute compatdata save → windata-relative AppData suffix.
+        let abs = Path::new(
+            "/mnt/games/SteamLibrary/steamapps/compatdata/1347970/pfx/drive_c/users/steamuser/AppData/LocalLow/Lychee Game Labs/Patch Quest",
+        );
+        assert_eq!(
+            windata_relative(abs),
+            Some(PathBuf::from("AppData/LocalLow/Lychee Game Labs/Patch Quest"))
+        );
+    }
+
+    #[test]
+    fn windata_relative_none_for_already_relative() {
+        // A windata-relative AppData string has no users/<user>/ segment.
+        assert_eq!(
+            windata_relative(Path::new("AppData/LocalLow/Co/Game")),
+            None
+        );
+    }
 }

@@ -10,12 +10,15 @@
 //! and shells out to `splitux launch` (this same binary) + `systemctl --user` so
 //! a launched session runs independently of the TUI process.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+};
+use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -27,6 +30,7 @@ use ratatui_image::StatefulImage;
 
 use crate::handler::scan_handlers;
 use crate::profiles::scan_profiles;
+use crate::session_store::{self, SavedPlayer, SavedSession, SaveAnchor, StoredInput};
 
 #[derive(Clone, Copy, PartialEq)]
 enum InputMode {
@@ -83,9 +87,55 @@ enum Screen {
     Sessions,
 }
 
-struct Session {
-    unit: String,
-    active: String,
+struct EditState {
+    /// Index into `App::sessions` being renamed.
+    target: usize,
+    buf: String,
+}
+
+/// Map TUI players (profile-by-index) → store players (profile-by-name).
+fn to_saved_players(players: &[Player], profiles: &[String]) -> Vec<SavedPlayer> {
+    players
+        .iter()
+        .map(|p| SavedPlayer {
+            profile: profiles.get(p.profile).cloned().unwrap_or_else(|| "Guest".into()),
+            input: match p.input {
+                InputMode::KbMouse => StoredInput::KbMouse,
+                InputMode::Gamepad => StoredInput::Gamepad,
+            },
+            together: p.together,
+        })
+        .collect()
+}
+
+/// Map store players (by name) back to TUI players (by profile index).
+fn from_saved_players(saved: &[SavedPlayer], profiles: &[String]) -> Vec<Player> {
+    saved
+        .iter()
+        .map(|s| Player {
+            profile: profiles.iter().position(|p| p == &s.profile).unwrap_or(0),
+            input: match s.input {
+                StoredInput::KbMouse => InputMode::KbMouse,
+                StoredInput::Gamepad => InputMode::Gamepad,
+            },
+            together: s.together,
+        })
+        .collect()
+}
+
+/// Compact relative-time label for a unix-secs timestamp.
+fn rel_time(then: u64) -> String {
+    let now = session_store::now_secs();
+    let d = now.saturating_sub(then);
+    if d < 60 {
+        "just now".into()
+    } else if d < 3600 {
+        format!("{}m ago", d / 60)
+    } else if d < 86400 {
+        format!("{}h ago", d / 3600)
+    } else {
+        format!("{}d ago", d / 86400)
+    }
 }
 
 struct App {
@@ -104,6 +154,10 @@ struct App {
     covers: Vec<Option<PathBuf>>,
     // Per-game preview text (handler.info, the uniform Play/Avoid block), parallel to `games`.
     infos: Vec<String>,
+    // Per-game Steam appid + handler's declared save sub-path (parallel to `games`),
+    // used to auto-discover the real on-disk save when anchoring a Session.
+    appids: Vec<Option<u32>>,
+    save_subpaths: Vec<String>,
     // Per-game small icon FILE (parallel to `games`) for the list, + a lazy cache
     // of encoded icon protocols keyed by game index (built as rows scroll in).
     icons: Vec<Option<PathBuf>>,
@@ -120,14 +174,18 @@ struct App {
     game: Option<usize>, // index into games
     players: Vec<Player>,
     player_cursor: usize,
+    /// Whether the session being built anchors the master profile's real save
+    /// (carry it in at start, sync back at end). Part of the session's config.
+    build_anchor: bool,
 
-    // sessions
-    sessions: Vec<Session>,
+    // sessions (saved presets correlated with live runtimes)
+    sessions: Vec<SavedSession>,
+    /// Session ids with a live runtime (marker's main scope still active).
+    active_ids: HashSet<String>,
     session_cursor: usize,
     last_sessions_refresh: Instant,
-
-    // remember last launch for restart
-    last_launch: Option<(usize, Vec<Player>)>,
+    /// Inline text editor (rename / anchor path) on the Sessions screen.
+    editing: Option<EditState>,
 
     status: String,
     quit: bool,
@@ -153,6 +211,9 @@ impl App {
         let covers: Vec<Option<PathBuf>> = handlers.iter().map(|h| h.cover_path()).collect();
         let infos: Vec<String> = handlers.iter().map(|h| h.info.trim().to_string()).collect();
         let icons: Vec<Option<PathBuf>> = handlers.iter().map(|h| h.icon_path()).collect();
+        let appids: Vec<Option<u32>> = handlers.iter().map(|h| h.get_steam_appid()).collect();
+        let save_subpaths: Vec<String> =
+            handlers.iter().map(|h| h.original_save_path.clone()).collect();
         let mut profiles = scan_profiles(true);
         if profiles.is_empty() {
             profiles.push("Guest".to_string());
@@ -165,6 +226,8 @@ impl App {
             game_cursor: 0,
             covers,
             infos,
+            appids,
+            save_subpaths,
             icons,
             icon_protos: HashMap::new(),
             picker: None,
@@ -172,10 +235,12 @@ impl App {
             game: None,
             players: Vec::new(),
             player_cursor: 0,
+            build_anchor: false,
             sessions: Vec::new(),
+            active_ids: HashSet::new(),
             session_cursor: 0,
             last_sessions_refresh: Instant::now(),
-            last_launch: None,
+            editing: None,
             status: "Pick a game — type to filter, Enter to select.".to_string(),
             quit: false,
             invite_url: None,
@@ -198,8 +263,30 @@ impl App {
             .collect()
     }
 
+    /// Reload saved sessions and correlate them with live runtimes. A session is
+    /// active iff its runtime marker's main scope is still an active systemd unit;
+    /// markers whose runtime is gone are pruned. Active sessions sort to the top.
     fn refresh_sessions(&mut self) {
-        self.sessions = scan_sessions();
+        let live = scan_active_units();
+        let mut active = HashSet::new();
+        for m in session_store::list_markers() {
+            if live.iter().any(|u| u == &m.main_scope) {
+                active.insert(m.session_id);
+            } else {
+                // Runtime gone (normal exit, crash, or already reaped) — drop it.
+                session_store::remove_marker(&m.session_id);
+            }
+        }
+        self.active_ids = active;
+
+        let active_ids = self.active_ids.clone();
+        let mut sessions = session_store::load();
+        sessions.sort_by(|a, b| {
+            let aa = active_ids.contains(&a.id);
+            let ab = active_ids.contains(&b.id);
+            ab.cmp(&aa).then(b.last_used.cmp(&a.last_used))
+        });
+        self.sessions = sessions;
         if self.session_cursor >= self.sessions.len() {
             self.session_cursor = self.sessions.len().saturating_sub(1);
         }
@@ -220,35 +307,176 @@ impl App {
         }
     }
 
+    /// Toggle save anchoring for the session being built and report the resolved
+    /// real-save path (or a ⚑ flag if it can't be resolved).
+    fn toggle_build_anchor(&mut self) {
+        self.build_anchor = !self.build_anchor;
+        if !self.build_anchor {
+            self.status = "Save-anchor OFF — session runs on its own profile save.".into();
+            return;
+        }
+        let Some(gi) = self.game else { return };
+        let game = self.games[gi].clone();
+        match self.resolve_anchor_path(&game) {
+            Ok(p) => self.status = format!("⚓ save-anchor ON → {p}"),
+            Err(e) => self.status = format!(
+                "⚑ save-anchor ON but can't resolve the real save ({e}) — declare original_save_path in the handler."
+            ),
+        }
+    }
+
+    /// Build the SaveAnchor for the current Build config, if anchoring is on.
+    fn current_build_anchor(&self, game: &str) -> Option<SaveAnchor> {
+        if !self.build_anchor {
+            return None;
+        }
+        let master = self
+            .players
+            .iter()
+            .filter_map(|p| self.profiles.get(p.profile).cloned())
+            .find(|p| !p.eq_ignore_ascii_case("Guest"))
+            .or_else(|| self.players.first().and_then(|p| self.profiles.get(p.profile).cloned()))
+            .unwrap_or_default();
+        Some(SaveAnchor {
+            enabled: true,
+            master_profile: master,
+            save_path: self.resolve_anchor_path(game).unwrap_or_default(),
+            steam_id_remap: game.to_lowercase().contains("deep rock"),
+        })
+    }
+
+    /// Launch from the Build screen. Records (or refreshes) the saved Session preset
+    /// WITH its configured save anchor (authoritative from the Build screen).
     fn launch(&mut self) {
         let Some(gi) = self.game else { return };
         if self.players.is_empty() {
             self.status = "Add at least one player (a) before launching.".to_string();
             return;
         }
-        let n_together = self.players.iter().filter(|p| p.together).count();
-        match spawn_session(&self.games[gi], &self.players, &self.profiles) {
-            Ok(log) => {
-                self.last_launch = Some((gi, self.players.clone()));
-                // Watch the detached launch's log so the user gets live feedback.
+        let game = self.games[gi].clone();
+        let players = self.players.clone();
+        let saved = to_saved_players(&players, &self.profiles);
+        let id = session_store::session_key(&game, &saved);
+        // The Build screen is authoritative for the anchor config.
+        let anchor = self.current_build_anchor(&game);
+        let live_anchor = anchor.clone().filter(|a| a.enabled && !a.save_path.is_empty());
+        let n_together = players.iter().filter(|p| p.together).count();
+
+        match spawn_session(&game, &players, &self.profiles, live_anchor.as_ref(), &id) {
+            Ok((log, _pid)) => {
+                let mut sessions = session_store::load();
+                session_store::upsert(&mut sessions, &game, saved);
+                // Persist the Build anchor choice onto the session.
+                if let Some(t) = sessions.iter_mut().find(|s| s.id == id) {
+                    t.anchor = anchor;
+                }
+                session_store::save(&sessions);
                 self.launch_log = Some(log);
                 self.launch_deadline = Some(Instant::now() + Duration::from_secs(30));
-                let n_local = self.players.len() - n_together;
+                let n_local = players.len() - n_together;
                 self.status = format!(
                     "Launched '{}' ({} local + {} together). Press s for sessions.",
-                    self.games[gi], n_local, n_together
+                    game, n_local, n_together
                 );
                 if n_together > 0 {
                     self.invite_url = None;
                     self.awaiting_invite = Some(Instant::now());
                     self.status = format!(
                         "Launched '{}' — fetching invite link(s) for {} together seat(s)…",
-                        self.games[gi], n_together
+                        game, n_together
                     );
                 }
                 self.refresh_sessions();
             }
             Err(e) => self.status = format!("Launch failed: {e}"),
+        }
+    }
+
+    /// Start an (inactive) saved Session from the Sessions screen.
+    fn start_saved(&mut self, idx: usize) {
+        let Some(s) = self.sessions.get(idx).cloned() else { return };
+        if self.active_ids.contains(&s.id) {
+            self.status = format!("'{}' is already running.", s.name);
+            return;
+        }
+        let players = from_saved_players(&s.players, &self.profiles);
+        let anchor = s.anchor.clone().filter(|a| a.enabled);
+        match spawn_session(&s.game, &players, &self.profiles, anchor.as_ref(), &s.id) {
+            Ok((log, _pid)) => {
+                let mut sessions = session_store::load();
+                session_store::upsert(&mut sessions, &s.game, s.players.clone()); // bump last_used
+                self.launch_log = Some(log);
+                self.launch_deadline = Some(Instant::now() + Duration::from_secs(30));
+                let anchored = if anchor.is_some() { " (save-anchored)" } else { "" };
+                self.status = format!("Starting '{}'{}…", s.name, anchored);
+                self.refresh_sessions();
+            }
+            Err(e) => self.status = format!("Start failed: {e}"),
+        }
+    }
+
+    /// Gracefully end an active Session: stop the launch SLICE (closes the games so
+    /// they flush their saves) but leave the supervisor in its main scope alive to
+    /// run its built-in save sync-back. The marker is cleared by the supervisor on
+    /// clean exit; we keep showing ● until its main scope is gone.
+    fn end_and_sync(&mut self, idx: usize) {
+        let Some(s) = self.sessions.get(idx).cloned() else { return };
+        let Some(m) = session_store::find_marker(&s.id) else {
+            self.status = format!("'{}' has no live runtime.", s.name);
+            return;
+        };
+        let _ = systemctl_stop(&m.slice);
+        let synced = match &s.anchor {
+            Some(a) if a.enabled => " — syncing save back to Steam",
+            _ => "",
+        };
+        self.status = format!("Ending '{}'{}… (closing game, then sync)", s.name, synced);
+        self.refresh_sessions();
+    }
+
+    /// Force-kill an active Session: stop the MAIN SCOPE (everything dies at once),
+    /// NO save sync. Cleans up + restores bars when no session remains active.
+    fn force_kill(&mut self, idx: usize) {
+        let Some(s) = self.sessions.get(idx).cloned() else { return };
+        if let Some(m) = session_store::find_marker(&s.id) {
+            let _ = systemctl_stop(&m.main_scope);
+            let _ = systemctl_stop(&m.slice); // belt-and-suspenders
+        }
+        session_store::remove_marker(&s.id);
+        self.refresh_sessions();
+        if self.active_ids.is_empty() {
+            cleanup_after_kill();
+            self.status = format!("Force-killed '{}' (no save sync; cleaned up).", s.name);
+        } else {
+            self.status = format!("Force-killed '{}' (no save sync).", s.name);
+        }
+    }
+
+    /// Resolve the real on-disk save path to anchor for a game: a directed absolute
+    /// path wins; otherwise auto-discover the Proton compatdata steamuser dir from
+    /// the appid and append the handler's declared sub-path. Err = flag in the TUI.
+    fn resolve_anchor_path(&self, game: &str) -> Result<String, String> {
+        let Some(gi) = self.games.iter().position(|g| g == game) else {
+            return Err("unknown game".into());
+        };
+        let sub = self.save_subpaths[gi].clone();
+        // A directed absolute/home path is used as-is.
+        if sub.starts_with('/') || sub.starts_with('~') || sub.contains("$HOME") {
+            return Ok(sub);
+        }
+        match self.appids[gi] {
+            Some(appid) => match crate::platform::find_compat_steamuser(appid) {
+                Ok(root) => {
+                    let p = if sub.trim().is_empty() {
+                        root
+                    } else {
+                        root.join(sub.trim_start_matches('/'))
+                    };
+                    Ok(p.to_string_lossy().into_owned())
+                }
+                Err(e) => Err(format!("appid {appid}: {e}")),
+            },
+            None => Err("no steam_appid for this game".into()),
         }
     }
 
@@ -333,6 +561,9 @@ pub fn run() -> i32 {
     // then shows a hint instead of an image.
     let picker = Picker::from_query_stdio().ok();
     let mut terminal = ratatui::init();
+    // Enable bracketed paste so the inline editors (rename / anchor path) receive
+    // pasted text as one Event::Paste instead of dropping it.
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     let mut app = App::new();
     app.picker = picker;
 
@@ -346,6 +577,7 @@ pub fn run() -> i32 {
         match event::poll(Duration::from_millis(1000)) {
             Ok(true) => match event::read() {
                 Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => handle_key(&mut app, k.code),
+                Ok(Event::Paste(s)) => handle_paste(&mut app, s),
                 Ok(_) => {}
                 Err(e) => break Err(e),
             },
@@ -363,6 +595,7 @@ pub fn run() -> i32 {
         }
     };
 
+    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
     ratatui::restore();
     match res {
         Ok(()) => 0,
@@ -374,6 +607,12 @@ pub fn run() -> i32 {
 }
 
 fn handle_key(app: &mut App, code: KeyCode) {
+    // Inline text editor (rename / anchor path) captures ALL keys first, so typing
+    // 'q' etc. edits text instead of quitting.
+    if app.editing.is_some() {
+        handle_edit(app, code);
+        return;
+    }
     // Global
     match code {
         KeyCode::Char('q') => {
@@ -415,9 +654,14 @@ fn handle_games(app: &mut App, code: KeyCode) {
                     app.players.push(p);
                 }
                 app.player_cursor = 0;
+                // Carry forward a prior anchor choice for this game, if any.
+                let game = app.games[gi].clone();
+                app.build_anchor = session_store::load()
+                    .iter()
+                    .any(|s| s.game == game && s.anchor.as_ref().map(|a| a.enabled).unwrap_or(false));
                 app.screen = Screen::Build;
                 app.status =
-                    "a add · d del · p profile · i input · t local/together · Enter launch".into();
+                    "a add · d del · p profile · i input · t local/together · c save-anchor · Enter launch".into();
             }
         }
         KeyCode::Backspace => {
@@ -482,6 +726,9 @@ fn handle_build(app: &mut App, code: KeyCode) {
                 pl.input = pl.input.toggled();
             }
         }
+        // Toggle save anchoring for this session (carry the master profile's real
+        // save in/out). Part of the session config — persisted on launch.
+        KeyCode::Char('c') => app.toggle_build_anchor(),
         KeyCode::Char('s') => {
             app.screen = Screen::Sessions;
             app.refresh_sessions();
@@ -492,51 +739,168 @@ fn handle_build(app: &mut App, code: KeyCode) {
 }
 
 fn handle_sessions(app: &mut App, code: KeyCode) {
+    let cursor = app.session_cursor;
+    let sel = app.sessions.get(cursor).cloned();
     match code {
         KeyCode::Esc => app.screen = if app.game.is_some() { Screen::Build } else { Screen::Games },
-        KeyCode::Char('r') => app.refresh_sessions(),
         KeyCode::Up => app.session_cursor = app.session_cursor.saturating_sub(1),
         KeyCode::Down => {
             if app.session_cursor + 1 < app.sessions.len() {
                 app.session_cursor += 1;
             }
         }
-        KeyCode::Char('k') => {
-            if let Some(s) = app.sessions.get(app.session_cursor) {
-                let unit = s.unit.clone();
-                let _ = systemctl_stop(&unit);
-                app.refresh_sessions();
-                // If that was the last session, run the same cleanup as kill-all
-                // so no stale fuse mount / orphaned seat-streamer is left behind.
-                if app.sessions.is_empty() {
-                    cleanup_after_kill();
-                    app.status = format!("Stopped {unit} (cleaned up — no sessions left).");
+        // Start an inactive session (active = no-op, handled in start_saved).
+        KeyCode::Enter | KeyCode::Char('l') => {
+            if sel.is_some() {
+                app.start_saved(cursor);
+            }
+        }
+        // End & sync (graceful — closes the game, supervisor syncs save back).
+        KeyCode::Char('E') => {
+            if let Some(s) = &sel {
+                if app.active_ids.contains(&s.id) {
+                    app.end_and_sync(cursor);
                 } else {
-                    app.status = format!("Stopped {unit}.");
+                    app.status = format!("'{}' isn't running.", s.name);
                 }
             }
         }
+        // Force-kill (no sync).
+        KeyCode::Char('k') => {
+            if let Some(s) = &sel {
+                if app.active_ids.contains(&s.id) {
+                    app.force_kill(cursor);
+                } else {
+                    app.status = format!("'{}' isn't running.", s.name);
+                }
+            }
+        }
+        // Restart: force-kill if active, then start fresh.
+        KeyCode::Char('R') => {
+            if let Some(s) = &sel {
+                if app.active_ids.contains(&s.id) {
+                    app.force_kill(cursor);
+                    std::thread::sleep(Duration::from_millis(600));
+                }
+                app.start_saved(cursor);
+                app.status = format!("Restarted '{}'.", s.name);
+            }
+        }
+        // Rename (inline editor).
+        KeyCode::Char('r') => {
+            if let Some(s) = &sel {
+                app.editing = Some(EditState {
+                    target: cursor,
+                    buf: s.name.clone(),
+                });
+                app.status = format!("Rename → {} (Enter save · Esc cancel)", s.name);
+            }
+        }
+        // Pin / unpin (protects from the 1-week GC).
+        KeyCode::Char('p') => {
+            if let Some(s) = &sel {
+                let mut sessions = session_store::load();
+                if let Some(t) = sessions.iter_mut().find(|x| x.id == s.id) {
+                    t.pinned = !t.pinned;
+                    let now_pinned = t.pinned;
+                    session_store::save(&sessions);
+                    app.status = format!(
+                        "'{}' {}.",
+                        s.name,
+                        if now_pinned { "pinned" } else { "unpinned" }
+                    );
+                }
+                app.refresh_sessions();
+            }
+        }
+        // Delete (refused while active).
+        KeyCode::Char('d') => {
+            if let Some(s) = &sel {
+                if app.active_ids.contains(&s.id) {
+                    app.status = format!("'{}' is running — End/kill it before deleting.", s.name);
+                } else {
+                    let mut sessions = session_store::load();
+                    sessions.retain(|x| x.id != s.id);
+                    session_store::save(&sessions);
+                    app.status = format!("Deleted '{}'.", s.name);
+                    app.refresh_sessions();
+                }
+            }
+        }
+        // Edit → load this session's config back into the Build screen.
+        KeyCode::Char('e') => {
+            if let Some(s) = &sel {
+                if let Some(gi) = app.games.iter().position(|g| g == &s.game) {
+                    app.game = Some(gi);
+                    app.players = from_saved_players(&s.players, &app.profiles);
+                    app.player_cursor = 0;
+                    app.build_anchor = s.anchor.as_ref().map(|a| a.enabled).unwrap_or(false);
+                    app.screen = Screen::Build;
+                    app.status = format!("Editing '{}' — tweak and Enter to launch.", s.name);
+                } else {
+                    app.status = format!("Game '{}' not installed/handler missing.", s.game);
+                }
+            }
+        }
+        // (Save anchoring is configured in the Build screen, not here — it's part
+        // of a session's config. The badge ⚓/⚑ on each row reflects it.)
+        // Kill-all (global safety net).
         KeyCode::Char('K') => {
             stop_all_sessions();
             app.refresh_sessions();
-            app.status = "Stopped all sessions cleanly (units, fuse mounts, seat-streamers).".into();
-        }
-        KeyCode::Char('R') => {
-            // restart the last-launched config
-            if let Some((gi, players)) = app.last_launch.clone() {
-                stop_all_sessions();
-                std::thread::sleep(Duration::from_millis(500));
-                match spawn_session(&app.games[gi], &players, &app.profiles) {
-                    Ok(_) => app.status = format!("Restarted '{}'.", app.games[gi]),
-                    Err(e) => app.status = format!("Restart failed: {e}"),
-                }
-                app.refresh_sessions();
-            } else {
-                app.status = "No previous launch to restart.".into();
-            }
+            app.status =
+                "Stopped ALL sessions (no sync; units, fuse mounts, seat-streamers, bars restored)."
+                    .into();
         }
         _ => {}
     }
+}
+
+/// Pasted text (bracketed paste). Routes into the active inline editor, or the
+/// game filter on the Games screen. Newlines are stripped (these are single-line).
+fn handle_paste(app: &mut App, data: String) {
+    let data: String = data.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+    if let Some(ed) = app.editing.as_mut() {
+        ed.buf.push_str(&data);
+    } else if app.screen == Screen::Games {
+        app.filter.push_str(&data);
+        app.game_cursor = 0;
+    }
+}
+
+/// Drive the inline text editor (rename / anchor path). Enter commits, Esc cancels.
+fn handle_edit(app: &mut App, code: KeyCode) {
+    let Some(ed) = app.editing.as_mut() else { return };
+    match code {
+        KeyCode::Esc => {
+            app.editing = None;
+            app.status = "Cancelled.".into();
+        }
+        KeyCode::Enter => commit_edit(app),
+        KeyCode::Backspace => {
+            ed.buf.pop();
+        }
+        KeyCode::Char(c) => ed.buf.push(c),
+        _ => {}
+    }
+}
+
+/// Persist the inline rename to the store.
+fn commit_edit(app: &mut App) {
+    let Some(ed) = app.editing.take() else { return };
+    let Some(sel) = app.sessions.get(ed.target).cloned() else { return };
+    let mut sessions = session_store::load();
+    let Some(target) = sessions.iter_mut().find(|x| x.id == sel.id) else {
+        app.refresh_sessions();
+        return;
+    };
+    let name = ed.buf.trim();
+    if !name.is_empty() {
+        target.name = name.to_string();
+        app.status = format!("Renamed → {}", target.name);
+        session_store::save(&sessions);
+    }
+    app.refresh_sessions();
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +1137,28 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
     let game = app.game.map(|i| app.games[i].as_str()).unwrap_or("(none)");
     let n_together = app.players.iter().filter(|p| p.together).count();
     let n_local = app.players.len() - n_together;
+    // Save-anchor summary line (config, set with `c`).
+    let save_line = if app.build_anchor {
+        let master = app
+            .players
+            .iter()
+            .filter_map(|p| app.profiles.get(p.profile))
+            .find(|p| !p.eq_ignore_ascii_case("Guest"))
+            .map(|s| s.as_str())
+            .unwrap_or("?");
+        Line::from(vec![
+            Span::raw("Save:  "),
+            Span::styled(
+                format!("⚓ anchored — master {master}"),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::raw("Save:  "),
+            Span::styled("fresh (press c to anchor real save)", Style::default().fg(Color::DarkGray)),
+        ])
+    };
     let lines = vec![
         Line::from(vec![Span::raw("Game:  "), Span::styled(game, Style::default().add_modifier(Modifier::BOLD))]),
         Line::from(vec![
@@ -781,6 +1167,7 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
             Span::raw(" + "),
             Span::styled(format!("{n_together} together"), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         ]),
+        save_line,
         Line::from(""),
         Line::from(Span::styled(
             "Per player: t = local/together, i = kb-m/gamepad.",
@@ -837,26 +1224,62 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
 fn draw_sessions(f: &mut Frame, area: Rect, app: &mut App) {
     let items: Vec<ListItem> = if app.sessions.is_empty() {
         vec![ListItem::new(Span::styled(
-            "  (no active splitux sessions)",
+            "  (no saved sessions yet — launch one from a game's Build screen)",
             Style::default().fg(Color::DarkGray),
         ))]
     } else {
         app.sessions
             .iter()
             .map(|s| {
-                let color = if s.active == "active" { Color::Green } else { Color::Yellow };
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("{:<10}", s.active), Style::default().fg(color)),
-                    Span::raw(s.unit.clone()),
-                ]))
+                let active = app.active_ids.contains(&s.id);
+                let (dot, dot_col) = if active {
+                    ("●", Color::Green)
+                } else {
+                    ("○", Color::DarkGray)
+                };
+                let players = s
+                    .players
+                    .iter()
+                    .map(|p| {
+                        let scope = if p.together { "together" } else { "local" };
+                        format!("{}·{}", p.profile, scope)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Anchor badge: ⚓ resolved, ⚑ enabled-but-unresolved.
+                let anchor = match &s.anchor {
+                    Some(a) if a.enabled && !a.save_path.is_empty() => " ⚓",
+                    Some(a) if a.enabled => " ⚑",
+                    _ => "",
+                };
+                let pin = if s.pinned { " ★" } else { "" };
+                let mut spans = vec![
+                    Span::styled(format!("{dot} "), Style::default().fg(dot_col)),
+                    Span::styled(
+                        s.name.clone(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                ];
+                if !anchor.is_empty() {
+                    spans.push(Span::styled(anchor, Style::default().fg(Color::Cyan)));
+                }
+                if !pin.is_empty() {
+                    spans.push(Span::styled(pin, Style::default().fg(Color::Yellow)));
+                }
+                spans.push(Span::styled(
+                    format!("  {} · {}", players, rel_time(s.last_used)),
+                    Style::default().fg(Color::DarkGray),
+                ));
+                ListItem::new(Line::from(spans))
             })
             .collect()
     };
+    let active_n = app.active_ids.len();
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Sessions ({}) ", app.sessions.len())),
+                .title(format!(" Sessions ({} · {active_n} active) ", app.sessions.len())),
         )
         .highlight_style(
             Style::default()
@@ -873,16 +1296,28 @@ fn draw_sessions(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
-    let keys = match app.screen {
-        Screen::Games => "↑↓ move · type filter · Enter select · S sessions · q quit",
-        Screen::Build => {
-            "↑↓ player · a add · d del · p profile · i input · t local/together · Enter launch · s/Tab sessions · Esc back · q quit"
+    let keys = if app.editing.is_some() {
+        "type to edit · Enter save · Esc cancel"
+    } else {
+        match app.screen {
+            Screen::Games => "↑↓ move · type filter · Enter select · S sessions · q quit",
+            Screen::Build => {
+                "↑↓ player · a add · d del · p profile · i input · t local/together · c save-anchor · Enter launch · s sessions · Esc back"
+            }
+            Screen::Sessions => {
+                "↑↓ · Enter start · E end&sync · k force-kill · R restart · r rename · p pin · d del · e edit · K kill-all · Esc back"
+            }
         }
-        Screen::Sessions => "↑↓ move · k kill · K kill-all · R restart-last · r refresh · Esc back · q quit",
+    };
+    // While editing, show the live buffer with a cursor instead of the static line.
+    let status_line = if let Some(ed) = &app.editing {
+        format!("{}_", ed.buf)
+    } else {
+        app.status.clone()
     };
     let text = vec![
         Line::from(Span::styled(keys, Style::default().fg(Color::DarkGray))),
-        Line::from(Span::styled(app.status.clone(), Style::default().fg(Color::White))),
+        Line::from(Span::styled(status_line, Style::default().fg(Color::White))),
     ];
     f.render_widget(
         Paragraph::new(text).block(Block::default().borders(Borders::ALL)),
@@ -894,14 +1329,34 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
 // Process / systemd glue
 // ---------------------------------------------------------------------------
 
-/// Build the `splitux launch` arg vector for a session.
-fn launch_args(game: &str, players: &[Player], profiles: &[String]) -> Vec<String> {
+/// Build the `splitux launch` arg vector for a session, including save-anchor
+/// overrides when the Session has an enabled anchor.
+fn launch_args(
+    game: &str,
+    players: &[Player],
+    profiles: &[String],
+    anchor: Option<&SaveAnchor>,
+) -> Vec<String> {
     let mut args = vec!["launch".to_string(), "--game".to_string(), game.to_string()];
     for p in players {
         let prof = profiles.get(p.profile).cloned().unwrap_or_else(|| "Guest".into());
         let input = p.input.spec(p.together);
         args.push("--player".to_string());
         args.push(format!("profile={prof},input={input}"));
+    }
+    if let Some(a) = anchor.filter(|a| a.enabled) {
+        if !a.master_profile.is_empty() {
+            args.push("--master".to_string());
+            args.push(a.master_profile.clone());
+        }
+        if !a.save_path.is_empty() {
+            args.push("--save-anchor".to_string());
+            args.push(a.save_path.clone());
+        }
+        args.push("--save-sync-back".to_string());
+        if a.steam_id_remap {
+            args.push("--save-steam-id-remap".to_string());
+        }
     }
     args
 }
@@ -913,9 +1368,11 @@ fn spawn_session(
     game: &str,
     players: &[Player],
     profiles: &[String],
-) -> std::io::Result<PathBuf> {
+    anchor: Option<&SaveAnchor>,
+    session_id: &str,
+) -> std::io::Result<(PathBuf, u32)> {
     let exe = std::env::current_exe()?;
-    let args = launch_args(game, players, profiles);
+    let args = launch_args(game, players, profiles, anchor);
     let log_path = std::env::temp_dir().join(format!(
         "splitux-tui-{}.log",
         game.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-")
@@ -929,47 +1386,36 @@ fn spawn_session(
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err))
+        // Tag the launch so its supervisor writes a runtime marker the TUI uses to
+        // show this session ● active and target End/Kill at its exact units.
+        .env(session_store::SESSION_ID_ENV, session_id)
         // Drop a dev GST_PLUGIN_PATH so the seat-streamer finds splitux's own
         // plugin dir (splitux sets GST_PLUGIN_PATH itself for together).
         .env_remove("GST_PLUGIN_PATH");
-    cmd.spawn().map(|_| log_path)
+    let child = cmd.spawn()?;
+    Ok((log_path, child.id()))
 }
 
-/// Enumerate active splitux systemd user units (the launch self-scopes into a
-/// `splitux-*.slice` / `.scope`).
-fn scan_sessions() -> Vec<Session> {
+/// Names of currently-active splitux systemd user units (slices + scopes). Used to
+/// decide which Sessions are live (their marker's main scope appears here).
+fn scan_active_units() -> Vec<String> {
     let out = Command::new("systemctl")
         .args([
             "--user",
             "list-units",
             "--no-legend",
             "--plain",
-            "--all",
+            "--state=active",
             "splitux*",
         ])
         .output();
     let Ok(out) = out else { return Vec::new() };
     let text = String::from_utf8_lossy(&out.stdout);
-    let mut sessions = Vec::new();
-    for line in text.lines() {
-        let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() < 3 {
-            continue;
-        }
-        let unit = f[0];
-        if !(unit.ends_with(".slice") || unit.ends_with(".scope")) {
-            continue;
-        }
-        // Skip the umbrella slice; show the per-session ones.
-        if unit == "splitux.slice" {
-            continue;
-        }
-        sessions.push(Session {
-            unit: unit.to_string(),
-            active: f[2].to_string(),
-        });
-    }
-    sessions
+    text.lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|u| u.ends_with(".slice") || u.ends_with(".scope"))
+        .map(|u| u.to_string())
+        .collect()
 }
 
 fn systemctl_stop(unit: &str) -> std::io::Result<()> {
@@ -994,13 +1440,25 @@ fn cleanup_after_kill() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+    // Restore the host status bars (waybar etc.). The launch supervisor hid them
+    // and armed a restore-on-death watcher, but a TUI `systemctl stop` kills the
+    // supervisor mid-session so it never runs its own `restore_all`, and the
+    // watcher doesn't reliably fire — so the bars stayed hidden after a kill.
+    // This reads the persisted bar state and restarts any bar not already running
+    // (idempotent: clears the state file, skips bars still up), so killing the
+    // last session always brings the desktop back.
+    crate::wm::bars::restore_from_previous_session();
 }
 
 fn stop_all_sessions() {
     // Stopping the umbrella slice tears down every per-session child...
     let _ = systemctl_stop("splitux.slice");
-    for s in scan_sessions() {
-        let _ = systemctl_stop(&s.unit);
+    for unit in scan_active_units() {
+        let _ = systemctl_stop(&unit);
+    }
+    // ...drop every runtime marker (these are hard kills — no sync)...
+    for m in session_store::list_markers() {
+        session_store::remove_marker(&m.session_id);
     }
     // ...then run the teardown the killed supervisors skipped, so no stale fuse
     // mounts or orphaned seat-streamers block the next launch.

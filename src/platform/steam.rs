@@ -7,7 +7,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 mod cache;
-mod locate;
+pub(crate) mod locate;
 
 // Re-export submodule functions for direct access if needed
 
