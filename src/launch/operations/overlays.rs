@@ -75,6 +75,15 @@ pub fn fuse_overlayfs_mount_gamedirs(
         let path_prof = PATH_PARTY.join("profiles").join(&instance.profname);
         let path_upperdir = path_prof.join("gamesaves").join(&gamename);
 
+        // Self-heal: a previous session that was force-killed (not torn down)
+        // can leave game-N as a stale fuse mount. Mounting over it fails
+        // ("Permission denied" / "Operation not permitted") and strands the
+        // launch — so lazily unmount any stale mount here before remounting.
+        if crate::util::is_mount_point(&path_game_mnt).unwrap_or(false) {
+            println!("[splitux] Clearing stale mount at {}", path_game_mnt.display());
+            let _ = Command::new("umount").arg("-l").arg(&path_game_mnt).status();
+        }
+
         std::fs::create_dir_all(&path_game_mnt)?;
         std::fs::create_dir_all(&path_workdir)?;
 

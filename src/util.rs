@@ -216,7 +216,7 @@ pub fn resolve_proton_path(proton_name: &str) -> Option<PathBuf> {
     None
 }
 
-fn is_mount_point(dir: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
+pub fn is_mount_point(dir: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
     if let Ok(status) = Command::new("mountpoint").arg(dir).status()
         && status.success()
     {

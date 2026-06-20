@@ -505,14 +505,21 @@ fn handle_sessions(app: &mut App, code: KeyCode) {
             if let Some(s) = app.sessions.get(app.session_cursor) {
                 let unit = s.unit.clone();
                 let _ = systemctl_stop(&unit);
-                app.status = format!("Stopped {unit}");
                 app.refresh_sessions();
+                // If that was the last session, run the same cleanup as kill-all
+                // so no stale fuse mount / orphaned seat-streamer is left behind.
+                if app.sessions.is_empty() {
+                    cleanup_after_kill();
+                    app.status = format!("Stopped {unit} (cleaned up — no sessions left).");
+                } else {
+                    app.status = format!("Stopped {unit}.");
+                }
             }
         }
         KeyCode::Char('K') => {
             stop_all_sessions();
-            app.status = "Stopped all splitux sessions.".into();
             app.refresh_sessions();
+            app.status = "Stopped all sessions cleanly (units, fuse mounts, seat-streamers).".into();
         }
         KeyCode::Char('R') => {
             // restart the last-launched config
@@ -974,10 +981,28 @@ fn systemctl_stop(unit: &str) -> std::io::Result<()> {
         .map(|_| ())
 }
 
+/// Cleanup the force-killed launch supervisor never ran itself: unmount stale
+/// fuse-overlayfs game dirs (else the NEXT launch fails to mount — the bug that
+/// stranded a relaunch) and reap any orphaned seat-streamers left behind. Safe
+/// to call only when no session should remain (it's global).
+fn cleanup_after_kill() {
+    if let Err(e) = crate::util::fuse_overlayfs_unmount_gamedirs() {
+        eprintln!("[splitux] tui - fuse unmount during kill: {e}");
+    }
+    let _ = Command::new("pkill")
+        .args(["-f", "share/splitux/bin/seat-streamer"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
 fn stop_all_sessions() {
-    // Stopping the umbrella slice tears down every per-session child.
+    // Stopping the umbrella slice tears down every per-session child...
     let _ = systemctl_stop("splitux.slice");
     for s in scan_sessions() {
         let _ = systemctl_stop(&s.unit);
     }
+    // ...then run the teardown the killed supervisors skipped, so no stale fuse
+    // mounts or orphaned seat-streamers block the next launch.
+    cleanup_after_kill();
 }
