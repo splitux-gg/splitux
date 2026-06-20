@@ -136,6 +136,12 @@ struct App {
     // launch (the detached `splitux launch` writes it asynchronously).
     invite_url: Option<String>,
     awaiting_invite: Option<Instant>,
+
+    // After a (detached) launch, tail this log into the status bar so the user
+    // sees real progress/errors instead of nothing. Watched until the deadline,
+    // an error line, or a session/invite shows up.
+    launch_log: Option<PathBuf>,
+    launch_deadline: Option<Instant>,
 }
 
 impl App {
@@ -174,6 +180,8 @@ impl App {
             quit: false,
             invite_url: None,
             awaiting_invite: None,
+            launch_log: None,
+            launch_deadline: None,
         };
         app.refresh_sessions();
         app
@@ -220,8 +228,11 @@ impl App {
         }
         let n_together = self.players.iter().filter(|p| p.together).count();
         match spawn_session(&self.games[gi], &self.players, &self.profiles) {
-            Ok(()) => {
+            Ok(log) => {
                 self.last_launch = Some((gi, self.players.clone()));
+                // Watch the detached launch's log so the user gets live feedback.
+                self.launch_log = Some(log);
+                self.launch_deadline = Some(Instant::now() + Duration::from_secs(30));
                 let n_local = self.players.len() - n_together;
                 self.status = format!(
                     "Launched '{}' ({} local + {} together). Press s for sessions.",
@@ -244,6 +255,34 @@ impl App {
     /// After a together launch the detached `splitux launch` writes the invite
     /// link(s) to together-invites.txt asynchronously; poll for it and surface the
     /// URL(s). Gives up after a timeout. Cheap to call every tick.
+    /// Tail the detached launch's log into the status bar so Enter→launch gives
+    /// real feedback (progress + errors) instead of nothing. Stops on an error
+    /// line, once a session is up, or at the deadline.
+    fn poll_launch(&mut self) {
+        let Some(deadline) = self.launch_deadline else {
+            return;
+        };
+        if Instant::now() > deadline {
+            self.launch_log = None;
+            self.launch_deadline = None;
+            return;
+        }
+        let Some(path) = &self.launch_log else { return };
+        let Ok(content) = std::fs::read_to_string(path) else { return };
+        let Some(line) = content.lines().rev().find(|l| !l.trim().is_empty()) else { return };
+        let line = line.trim();
+        let low = line.to_lowercase();
+        if low.contains("error") || low.contains("failed") || low.contains("not found") {
+            self.status = format!("⚠ launch failed — {line}");
+            self.launch_log = None; // stop watching; surface the error
+            self.launch_deadline = None;
+        } else {
+            // Show the latest progress line (mounting, overlays, proton, etc.).
+            // The footer Paragraph wraps, so no manual truncation needed.
+            self.status = format!("launching… {line}");
+        }
+    }
+
     fn poll_invite(&mut self) {
         let Some(since) = self.awaiting_invite else {
             return;
@@ -298,6 +337,7 @@ pub fn run() -> i32 {
     app.picker = picker;
 
     let res = loop {
+        app.poll_launch();
         app.poll_invite();
         if let Err(e) = terminal.draw(|f| draw(f, &mut app)) {
             break Err(e);
@@ -442,6 +482,10 @@ fn handle_build(app: &mut App, code: KeyCode) {
                 pl.input = pl.input.toggled();
             }
         }
+        KeyCode::Char('s') => {
+            app.screen = Screen::Sessions;
+            app.refresh_sessions();
+        }
         KeyCode::Enter | KeyCode::Char('l') => app.launch(),
         _ => {}
     }
@@ -476,7 +520,7 @@ fn handle_sessions(app: &mut App, code: KeyCode) {
                 stop_all_sessions();
                 std::thread::sleep(Duration::from_millis(500));
                 match spawn_session(&app.games[gi], &players, &app.profiles) {
-                    Ok(()) => app.status = format!("Restarted '{}'.", app.games[gi]),
+                    Ok(_) => app.status = format!("Restarted '{}'.", app.games[gi]),
                     Err(e) => app.status = format!("Restart failed: {e}"),
                 }
                 app.refresh_sessions();
@@ -825,7 +869,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let keys = match app.screen {
         Screen::Games => "↑↓ move · type filter · Enter select · S sessions · q quit",
         Screen::Build => {
-            "↑↓ player · a add · d del · p profile · i input · t local/together · Enter launch · Esc back · q quit"
+            "↑↓ player · a add · d del · p profile · i input · t local/together · Enter launch · s/Tab sessions · Esc back · q quit"
         }
         Screen::Sessions => "↑↓ move · k kill · K kill-all · R restart-last · r refresh · Esc back · q quit",
     };
@@ -862,7 +906,7 @@ fn spawn_session(
     game: &str,
     players: &[Player],
     profiles: &[String],
-) -> std::io::Result<()> {
+) -> std::io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let args = launch_args(game, players, profiles);
     let log_path = std::env::temp_dir().join(format!(
@@ -881,7 +925,7 @@ fn spawn_session(
         // Drop a dev GST_PLUGIN_PATH so the seat-streamer finds splitux's own
         // plugin dir (splitux sets GST_PLUGIN_PATH itself for together).
         .env_remove("GST_PLUGIN_PATH");
-    cmd.spawn().map(|_| ())
+    cmd.spawn().map(|_| log_path)
 }
 
 /// Enumerate active splitux systemd user units (the launch self-scopes into a
