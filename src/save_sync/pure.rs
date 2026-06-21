@@ -57,6 +57,20 @@ pub fn get_handler_name(h: &Handler) -> String {
 /// Returns (profile_save_path, is_inside_game_dir)
 pub fn get_profile_save_path(profile_name: &str, h: &Handler) -> (PathBuf, bool) {
     let profile_path = PATH_PARTY.join("profiles").join(profile_name);
+
+    // Steam Cloud / Remote Storage games: the profile copy lives where Goldberg
+    // emulates remote storage — profiles/<profile>/goldberg-saves/<appid>/remote
+    // (matches GseSavePath in build_cmds). The real save is the Steam userdata dir.
+    if h.save_steam_cloud {
+        if let Some(appid) = h.get_steam_appid() {
+            let dest = profile_path
+                .join("goldberg-saves")
+                .join(appid.to_string())
+                .join("remote");
+            return (dest, false);
+        }
+    }
+
     let original = expand_path(&h.original_save_path);
     let handler_name = get_handler_name(h);
 
@@ -97,8 +111,17 @@ pub fn get_profile_save_path(profile_name: &str, h: &Handler) -> (PathBuf, bool)
     (dest, false)
 }
 
-/// Get the original save path (just expand variables)
+/// Get the original (real) save path for a handler.
+///
+/// Steam Cloud games resolve to the local Steam userdata remote dir
+/// (`<steam>/userdata/<account>/<appid>/remote`); everything else just expands
+/// `original_save_path`.
 pub fn get_original_save_path(h: &Handler) -> Option<PathBuf> {
+    if h.save_steam_cloud {
+        return h
+            .get_steam_appid()
+            .and_then(|id| crate::platform::find_steam_userdata_remote(id).ok());
+    }
     if h.original_save_path.is_empty() {
         return None;
     }

@@ -192,7 +192,7 @@ pub fn initialize_profile_saves(
     instances: &[Instance],
     master_profile: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
-    if h.original_save_path.is_empty() {
+    if !h.save_steam_cloud && h.original_save_path.is_empty() {
         return Ok(());
     }
 
@@ -282,7 +282,7 @@ pub fn sync_master_saves_back(
     instances: &[Instance],
     master_profile: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
-    if !h.save_sync_back || h.original_save_path.is_empty() {
+    if !h.save_sync_back || (h.original_save_path.is_empty() && !h.save_steam_cloud) {
         return Ok(());
     }
 
@@ -391,7 +391,7 @@ pub fn sync_master_saves_back(
 
 /// Sync saves from first named profile back to original location
 pub fn sync_saves_back(h: &Handler, instances: &[Instance]) -> Result<(), Box<dyn Error>> {
-    if !h.save_sync_back || h.original_save_path.is_empty() {
+    if !h.save_sync_back || (h.original_save_path.is_empty() && !h.save_steam_cloud) {
         return Ok(());
     }
 

@@ -49,7 +49,7 @@ pub fn run_session(
     }
 
     // Initialize profile saves with master-based inheritance.
-    if !handler.original_save_path.is_empty() {
+    if handler.save_steam_cloud || !handler.original_save_path.is_empty() {
         if let Err(err) = save_sync::initialize_profile_saves(handler, instances, master_profile) {
             println!("[splitux] Warning: Failed to initialize saves: {}", err);
             // Non-fatal — continue.

@@ -235,6 +235,14 @@ pub struct Handler {
     /// When enabled, save files are renamed to use each profile's Goldberg Steam ID.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub save_steam_id_remap: bool,
+    /// The game stores its save in Steam Cloud / Remote Storage (no save under the
+    /// Proton prefix), e.g. Risk of Rain 2. When set, the real save is the local
+    /// Steam Cloud staging dir `<steam>/userdata/<account>/<appid>/remote/`, and
+    /// the per-profile copy lives where Goldberg emulates remote storage:
+    /// `profiles/<profile>/goldberg-saves/<appid>/remote/`. `original_save_path`
+    /// is ignored (both ends are derived from the appid).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub save_steam_cloud: bool,
 }
 
 fn is_default_spec_ver(v: &u16) -> bool {
@@ -295,6 +303,7 @@ impl Default for Handler {
             original_save_path: String::new(),
             save_sync_back: false,
             save_steam_id_remap: false,
+            save_steam_cloud: false,
         }
     }
 }

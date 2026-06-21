@@ -158,6 +158,8 @@ struct App {
     // used to auto-discover the real on-disk save when anchoring a Session.
     appids: Vec<Option<u32>>,
     save_subpaths: Vec<String>,
+    // Per-game: save lives in Steam Cloud / Remote Storage (resolve from userdata).
+    save_cloud: Vec<bool>,
     // Per-game small icon FILE (parallel to `games`) for the list, + a lazy cache
     // of encoded icon protocols keyed by game index (built as rows scroll in).
     icons: Vec<Option<PathBuf>>,
@@ -214,6 +216,7 @@ impl App {
         let appids: Vec<Option<u32>> = handlers.iter().map(|h| h.get_steam_appid()).collect();
         let save_subpaths: Vec<String> =
             handlers.iter().map(|h| h.original_save_path.clone()).collect();
+        let save_cloud: Vec<bool> = handlers.iter().map(|h| h.save_steam_cloud).collect();
         let mut profiles = scan_profiles(true);
         if profiles.is_empty() {
             profiles.push("Guest".to_string());
@@ -228,6 +231,7 @@ impl App {
             infos,
             appids,
             save_subpaths,
+            save_cloud,
             icons,
             icon_protos: HashMap::new(),
             picker: None,
@@ -459,6 +463,13 @@ impl App {
         let Some(gi) = self.games.iter().position(|g| g == game) else {
             return Err("unknown game".into());
         };
+        // Steam Cloud / Remote Storage games: real save is the userdata remote dir.
+        if self.save_cloud[gi] {
+            let appid = self.appids[gi].ok_or_else(|| "no steam_appid".to_string())?;
+            return crate::platform::find_steam_userdata_remote(appid)
+                .map(|p| p.to_string_lossy().into_owned())
+                .map_err(|e| e.to_string());
+        }
         let sub = self.save_subpaths[gi].clone();
         // A directed absolute/home path is used as-is.
         if sub.starts_with('/') || sub.starts_with('~') || sub.contains("$HOME") {

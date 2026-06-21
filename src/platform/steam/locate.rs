@@ -47,3 +47,26 @@ pub fn find_compat_steamuser(app_id: u32) -> Result<PathBuf, Box<dyn Error>> {
 
     Err(format!("no Proton compatdata for app {} (never launched, or native)", app_id).into())
 }
+
+/// Resolve the local Steam Cloud / Remote Storage staging dir for a Steam app:
+/// `<steam>/userdata/<account_id>/<appid>/remote/`. Games like Risk of Rain 2 keep
+/// their save here (synced by Steam Cloud) rather than under the Proton prefix.
+/// Picks the userdata account dir that actually has this app's `remote/` folder.
+pub fn find_steam_userdata_remote(app_id: u32) -> Result<PathBuf, Box<dyn Error>> {
+    use crate::paths::PATH_STEAM;
+    let userdata = PATH_STEAM.join("userdata");
+    if let Ok(entries) = std::fs::read_dir(&userdata) {
+        for e in entries.flatten() {
+            // account dirs are numeric (skip "0", "anonymous", etc.)
+            let name = e.file_name();
+            if !name.to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let remote = e.path().join(app_id.to_string()).join("remote");
+            if remote.is_dir() {
+                return Ok(remote);
+            }
+        }
+    }
+    Err(format!("no Steam Cloud remote dir for app {} (never synced on this account?)", app_id).into())
+}
