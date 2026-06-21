@@ -138,7 +138,7 @@ pub fn add_seat_hold_args(
     if !cfg.input_holding {
         return;
     }
-    for dev in [seat.kbd.as_ref(), seat.mouse.as_ref()].into_iter().flatten() {
+    for dev in [seat.kbd.as_ref(), seat.mouse.as_ref(), seat.ptr.as_ref()].into_iter().flatten() {
         cmd.arg(format!("--libinput-hold-dev={}", dev.display()));
     }
 }

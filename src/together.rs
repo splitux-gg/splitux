@@ -29,6 +29,9 @@ pub struct TogetherSeatDevices {
     pub pad: Option<PathBuf>,
     pub kbd: Option<PathBuf>,
     pub mouse: Option<PathBuf>,
+    /// Absolute pointer (QEMU-tablet-style ABS_X/Y) for touch clients driving
+    /// mouse-only games. Held by gamescope alongside kbd/mouse.
+    pub ptr: Option<PathBuf>,
 }
 
 /// One shareable invite: the seat it joins and the single URL that carries it.
@@ -78,6 +81,7 @@ fn wait_for_seat_devices(seat: &str, timeout: Duration) -> TogetherSeatDevices {
     let pad_name = format!("splitux-together {seat}");
     let kbd_name = format!("splitux-together {seat} kbd");
     let mouse_name = format!("splitux-together {seat} mouse");
+    let ptr_name = format!("splitux-together {seat} ptr");
 
     let deadline = Instant::now() + timeout;
     loop {
@@ -97,18 +101,20 @@ fn wait_for_seat_devices(seat: &str, timeout: Duration) -> TogetherSeatDevices {
                 }
                 let (Some(name), Some(event)) = (name, event) else { continue };
                 let path = PathBuf::from("/dev/input").join(&event);
-                // Order matters: the "kbd"/"mouse" suffixes must be checked
-                // before the bare pad name (which is a prefix of both).
+                // Order matters: the "kbd"/"mouse"/"ptr" suffixes must be checked
+                // before the bare pad name (which is a prefix of all of them).
                 if name == kbd_name {
                     devs.kbd = Some(path);
                 } else if name == mouse_name {
                     devs.mouse = Some(path);
+                } else if name == ptr_name {
+                    devs.ptr = Some(path);
                 } else if name == pad_name {
                     devs.pad = Some(path);
                 }
             }
         }
-        if devs.pad.is_some() && devs.kbd.is_some() && devs.mouse.is_some() {
+        if devs.pad.is_some() && devs.kbd.is_some() && devs.mouse.is_some() && devs.ptr.is_some() {
             return devs;
         }
         if Instant::now() >= deadline {
@@ -372,18 +378,19 @@ pub fn setup_together_seats(
             // The virtual devices appear a beat after the streamer starts;
             // gamescope must hold them at launch, so block until they exist.
             let devs = wait_for_seat_devices(&seat, Duration::from_secs(10));
-            if devs.kbd.is_none() || devs.mouse.is_none() || devs.pad.is_none() {
+            if devs.kbd.is_none() || devs.mouse.is_none() || devs.pad.is_none() || devs.ptr.is_none() {
                 println!(
-                    "[splitux] together - seat {seat}: virtual devices incomplete (pad={:?} kbd={:?} mouse={:?}) — \
+                    "[splitux] together - seat {seat}: virtual devices incomplete (pad={:?} kbd={:?} mouse={:?} ptr={:?}) — \
                      check /tmp/splitux-together-{seat}.log",
-                    devs.pad, devs.kbd, devs.mouse
+                    devs.pad, devs.kbd, devs.mouse, devs.ptr
                 );
             } else {
                 println!(
-                    "[splitux] together - seat {seat}: pad={} kbd={} mouse={}",
+                    "[splitux] together - seat {seat}: pad={} kbd={} mouse={} ptr={}",
                     devs.pad.as_ref().unwrap().display(),
                     devs.kbd.as_ref().unwrap().display(),
-                    devs.mouse.as_ref().unwrap().display()
+                    devs.mouse.as_ref().unwrap().display(),
+                    devs.ptr.as_ref().unwrap().display()
                 );
             }
             devices[i].push(devs);
