@@ -128,6 +128,35 @@ pub fn get_original_save_path(h: &Handler) -> Option<PathBuf> {
     Some(expand_path(&h.original_save_path))
 }
 
+/// The real Steam ID that owns the original save: the most-progressed steam-id
+/// subfolder of `original_save_path` (see `canonical_save_folder`). `None` for
+/// flat / Steam-Cloud layouts with no steam-id subfolder.
+pub fn anchor_steam_id(h: &crate::handler::Handler) -> Option<u64> {
+    if h.original_save_path.is_empty() {
+        return None;
+    }
+    super::operations::canonical_save_folder(&expand_path(&h.original_save_path)).map(|(id, _)| id)
+}
+
+/// The Steam ID goldberg should report for `profile_name`.
+///
+/// For a `save_steam_id_remap` game we want the game to read the user's REAL save,
+/// which is keyed by their real Steam ID. Goldberg (gbe_fork) games resolve their
+/// `user://` / data dir from the REAL passwd home — NOT the sandbox `$HOME` — so
+/// faking the id makes the game read an empty `<fake-id>/` folder (a brand-new
+/// profile) while the real save sits untouched under `<real-id>/`. So when the
+/// original save dir reveals a canonical (real) id, report THAT — the game then
+/// reads/writes the real save in place, exactly like a direct Steam launch.
+/// Falls back to the deterministic per-profile id (multiplayer / no real save).
+pub fn effective_steam_id(h: &crate::handler::Handler, profile_name: &str) -> u64 {
+    if h.save_steam_id_remap {
+        if let Some(id) = anchor_steam_id(h) {
+            return id;
+        }
+    }
+    crate::profiles::generate_steam_id(profile_name)
+}
+
 /// Steam64 ID regex pattern - matches 17-digit Steam IDs starting with 7656119
 /// Format: 76561197960265728 + account_id (0 to ~4 billion)
 pub fn steam_id_regex() -> Regex {

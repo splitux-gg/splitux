@@ -27,6 +27,7 @@ use crate::instance::{
 use crate::launch::run_session;
 use crate::monitor::get_monitors_sdl;
 use crate::profiles::scan_profiles;
+use crate::session_store::{self, SaveAnchor, SavedPlayer, StoredInput};
 use crate::wm::presets::get_presets_for_count;
 
 const LAUNCH_AFTER_HELP: &str = "\
@@ -120,6 +121,33 @@ enum Command {
         #[arg(long = "save-steam-id-remap")]
         save_steam_id_remap: bool,
     },
+    /// Save a session as a reusable, pinned template (no launch). Records the
+    /// same Session entry the GUI/TUI reads from `sessions.json`, so a template
+    /// created here shows up in the GUI session list immediately. Templates are
+    /// device-agnostic: a player's input records only kbm/gamepad + local/together
+    /// (any `local:<io>:<idx>` device index in a spec is dropped).
+    SaveSession {
+        /// Game name (case-insensitive), e.g. "Satisfactory". See `list games`.
+        #[arg(long)]
+        game: String,
+        /// One player per flag, repeatable. Same spec syntax as `launch`:
+        ///   profile=<name>,input=<spec>  where input is
+        ///   local:kbm | local:gamepad | together:kbm | together:gamepad
+        ///   (a trailing device index like local:gamepad:3 is accepted but
+        ///   dropped — templates store no device).
+        #[arg(long = "player", value_name = "SPEC", required = true)]
+        players: Vec<String>,
+        /// Profile that owns the canonical ("anchored") save — the master. Sets
+        /// the session's save anchor (master_profile).
+        #[arg(long)]
+        master: Option<String>,
+        /// Enable sync-back on the anchor (only meaningful with --master).
+        #[arg(long = "save-sync-back")]
+        save_sync_back: bool,
+        /// Override the auto-generated template name.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Interactive terminal UI: pick a game, assign profiles/inputs, launch, and
     /// watch / kill / restart running sessions (a keyboard-driven GUI replacement).
     Tui,
@@ -180,7 +208,7 @@ pub fn run_if_cli() -> Option<i32> {
     let first = std::env::args().nth(1);
     if !matches!(
         first.as_deref(),
-        Some("list") | Some("launch") | Some("completions") | Some("tui")
+        Some("list") | Some("launch") | Some("save-session") | Some("completions") | Some("tui")
     ) {
         return None;
     }
@@ -210,6 +238,13 @@ pub fn run_if_cli() -> Option<i32> {
             save_sync_back,
             save_steam_id_remap,
         ),
+        Command::SaveSession {
+            game,
+            players,
+            master,
+            save_sync_back,
+            name,
+        } => save_session(&game, &players, master, save_sync_back, name),
         Command::Tui => crate::tui::run(),
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "splitux", &mut std::io::stdout());
@@ -404,6 +439,88 @@ fn launch(
     0
 }
 
+/// Save a session as a pinned, reusable template without launching it. Resolves
+/// the game + per-player specs the same way `launch` does (same handler scan +
+/// `parse_player`), maps each Instance to a `SavedPlayer`, then upserts the entry
+/// into `sessions.json` so the GUI/TUI pick it up immediately. Returns an exit
+/// code.
+fn save_session(
+    game: &str,
+    players: &[String],
+    master: Option<String>,
+    save_sync_back: bool,
+    name: Option<String>,
+) -> i32 {
+    // Validate the game against installed handlers (same lookup as `launch`).
+    if !scan_handlers()
+        .into_iter()
+        .any(|h| h.display().eq_ignore_ascii_case(game))
+    {
+        eprintln!("[splitux] game '{game}' not found — run `splitux list games`.");
+        return 2;
+    }
+
+    let profiles = scan_profiles(true);
+
+    // Parse each player spec into an Instance (errors on unknown profile / bad
+    // input spec), then project it down to the device-agnostic SavedPlayer the
+    // session schema stores.
+    let mut saved_players: Vec<SavedPlayer> = Vec::new();
+    for spec in players {
+        let inst = match parse_player(spec, &profiles) {
+            Ok(inst) => inst,
+            Err(e) => {
+                eprintln!("[splitux] --player '{spec}': {e}");
+                return 2;
+            }
+        };
+        let input = match inst.together_input {
+            TogetherInput::Gamepad => StoredInput::Gamepad,
+            TogetherInput::KbMouse => StoredInput::KbMouse,
+        };
+        saved_players.push(SavedPlayer {
+            profile: profiles[inst.profselection].clone(),
+            input,
+            together: inst.together,
+        });
+    }
+
+    // --master must be one of the players (it anchors a player's save).
+    if let Some(m) = &master {
+        if !saved_players.iter().any(|p| p.profile.eq_ignore_ascii_case(m)) {
+            eprintln!("[splitux] master '{m}' is not one of the players.");
+            return 2;
+        }
+    }
+
+    // Upsert by (game, profile-set) — same identity the GUI/TUI dedup on — then
+    // pin it and apply name/anchor overrides on the resolved entry.
+    let mut sessions = session_store::load();
+    let id = session_store::upsert(&mut sessions, game, saved_players);
+    if let Some(entry) = sessions.iter_mut().find(|s| s.id == id) {
+        entry.pinned = true;
+        if let Some(n) = &name {
+            entry.name = n.clone();
+        }
+        if let Some(m) = master {
+            entry.anchor = Some(SaveAnchor {
+                enabled: save_sync_back,
+                master_profile: m,
+                save_path: String::new(),
+                steam_id_remap: false,
+            });
+        }
+        let label = entry.name.clone();
+        session_store::save(&sessions);
+        println!("[splitux] saved template '{label}' (id: {id}).");
+    } else {
+        // Should be unreachable: upsert guarantees the id exists.
+        eprintln!("[splitux] internal error: saved session '{id}' vanished.");
+        return 1;
+    }
+    0
+}
+
 /// Parse one `--player key=val,key=val` spec into an Instance. P2 supports
 /// `profile=<name>` and `input=together:gamepad|together:kbm`; local-device
 /// inputs (pad/kbm) land in P3.
@@ -411,6 +528,9 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
     let mut profselection = 0; // Guest
     let mut together = false;
     let mut together_input = TogetherInput::Gamepad;
+    // Physical input devices pinned to this local player (indices into
+    // `splitux list inputs`). Empty unless a `local:<io>:<idx>` spec is given.
+    let mut devices: Vec<usize> = vec![];
 
     for tok in spec.split(',') {
         let tok = tok.trim();
@@ -442,18 +562,44 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
                 // input. The CLI is general splitux; together is just one routing.
                 // Used to isolate the together streaming/virtual-input layer from
                 // the splitux base (bwrap+gamescope+overlay) when debugging.
-                "local" | "local:kbm" => {
-                    together = false;
-                    together_input = TogetherInput::KbMouse;
-                }
-                "local:gamepad" => {
-                    together = false;
-                    together_input = TogetherInput::Gamepad;
-                }
+                // Local specs may carry an optional device index from
+                // `splitux list inputs`: `local:kbm:2` / `local:gamepad:2`.
                 other => {
-                    return Err(format!(
-                        "unsupported input '{other}' (supported: together:gamepad, together:kbm, local:kbm, local:gamepad)"
-                    ))
+                    let mut parts = other.split(':');
+                    match parts.next() {
+                        Some("local") => {
+                            together = false;
+                            // io: defaults to kbm when bare `local`.
+                            together_input = match parts.next() {
+                                None | Some("kbm") => TogetherInput::KbMouse,
+                                Some("gamepad") => TogetherInput::Gamepad,
+                                Some(io) => {
+                                    return Err(format!(
+                                        "unsupported local input io '{io}' (want kbm or gamepad)"
+                                    ))
+                                }
+                            };
+                            // Optional trailing device index.
+                            if let Some(idx_str) = parts.next() {
+                                let idx: usize = idx_str.parse().map_err(|_| {
+                                    format!(
+                                        "invalid device index '{idx_str}' in '{other}' (want a non-negative integer from `splitux list inputs`)"
+                                    )
+                                })?;
+                                devices = vec![idx];
+                            }
+                            if parts.next().is_some() {
+                                return Err(format!(
+                                    "malformed input '{other}' (want local, local:kbm, local:gamepad, local:kbm:<idx>, local:gamepad:<idx>)"
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(format!(
+                                "unsupported input '{other}' (supported: together:gamepad, together:kbm, local:kbm, local:gamepad, local:kbm:<idx>, local:gamepad:<idx>)"
+                            ))
+                        }
+                    }
                 }
             },
             other => return Err(format!("unknown key '{other}' (expected profile or input)")),
@@ -461,7 +607,7 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
     }
 
     Ok(Instance {
-        devices: vec![],
+        devices,
         profname: String::new(),
         profselection,
         monitor: 0,

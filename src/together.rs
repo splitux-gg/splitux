@@ -15,6 +15,7 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use crate::app::SplituxConfig;
@@ -44,9 +45,23 @@ pub struct InviteLink {
     pub url: String,
 }
 
-/// Stable seat id for instance index `i` (0-based) → "seat-1", "seat-2", …
+/// Per-launch namespace so CONCURRENT splitux sessions don't collide. Seat ids
+/// AND pipewire node names both derive from `seat_id`, so without this a second
+/// session reusing `seat-1`/`seat-2` would (a) overwrite the first session's
+/// orchestrator registration and (b) clash on the `gamescope-seat-1` pipewire
+/// node. One value per launch PROCESS — both the gamescope node (build_cmds) and
+/// the seat-streamer args (--seat/--pw-name) are computed in this same process, so
+/// they stay in lockstep; the spawned seat-streamer receives the resolved strings
+/// as args and never recomputes them.
+static SESSION_NS: LazyLock<String> = LazyLock::new(|| {
+    const A: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    (0..5).map(|_| A[fastrand::usize(..A.len())] as char).collect()
+});
+
+/// Seat id for instance index `i` (0-based) → "<ns>-seat-1", "<ns>-seat-2", …
+/// The `<ns>` prefix is unique per launch (see [`SESSION_NS`]).
 fn seat_id(i: usize) -> String {
-    format!("seat-{}", i + 1)
+    format!("{}-seat-{}", &*SESSION_NS, i + 1)
 }
 
 /// PipeWire node name for instance `i`'s gamescope capture. Each together
@@ -549,9 +564,18 @@ mod tests {
 
     #[test]
     fn node_name_is_keyed_per_instance() {
-        // All seats on one instance must resolve to that instance's node so they
-        // share its single gamescope capture (multi-consumer fan-out).
-        assert_eq!(node_name_for_instance(0), "gamescope-seat-1");
-        assert_eq!(node_name_for_instance(1), "gamescope-seat-2");
+        // Per-instance node names must differ (so seats bind their own gamescope),
+        // share the one per-launch namespace prefix, and end with the stable
+        // `-seat-N` suffix that pairs gamescope (build_cmds) with the seat-streamer.
+        let n0 = node_name_for_instance(0);
+        let n1 = node_name_for_instance(1);
+        assert_ne!(n0, n1);
+        assert!(n0.starts_with("gamescope-") && n0.ends_with("-seat-1"), "{n0}");
+        assert!(n1.ends_with("-seat-2"), "{n1}");
+        // Same namespace for both instances of this launch.
+        let ns0 = n0.trim_start_matches("gamescope-").trim_end_matches("-seat-1");
+        let ns1 = n1.trim_start_matches("gamescope-").trim_end_matches("-seat-2");
+        assert_eq!(ns0, ns1);
+        assert!(!ns0.is_empty());
     }
 }

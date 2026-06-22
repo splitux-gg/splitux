@@ -164,14 +164,22 @@ pub fn launch_cmds(
         // Goldberg force-logging. A release steam_api64.dll only writes its
         // debug log when GSE_FORCE_LOG is set (our gbe_fork upgrade). Per-instance
         // log on a persistent path so the bridge (and discovery/connect) is
-        // observable, mirroring the bench. Unlike the EOS emu, goldberg wants a
-        // Windows-style path, so prefix the unix path with wine's Z: drive (maps
-        // to /). The log MUST live outside the sandbox's `--tmpfs /tmp` — PATH_PARTY
-        // is bind-visible under `--dev-bind / /` and survives teardown.
+        // observable, mirroring the bench. The log MUST live outside the sandbox's
+        // `--tmpfs /tmp` — PATH_PARTY is bind-visible under `--dev-bind / /` and
+        // survives teardown. A WINDOWS (Proton/wine) game wants a Windows-style
+        // path, so prefix the unix path with wine's Z: drive (maps to /); a NATIVE
+        // .so build takes the plain unix path — the previous unconditional Z:
+        // prefix produced a bogus "Z:/home/..." path that native gbe_fork couldn't
+        // open, so it silently wrote NO log (which is why native goldberg games
+        // like Brotato were undebuggable — no steam-id/init trace at all).
         if h.has_goldberg() {
             let gse_log = PATH_PARTY.join(format!("gse-{}.log", instance.profname));
             cmd.env("GSE_FORCE_LOG", "1");
-            cmd.env("GSE_LOG_PATH", format!("Z:{}", gse_log.display()));
+            if h.win() {
+                cmd.env("GSE_LOG_PATH", format!("Z:{}", gse_log.display()));
+            } else {
+                cmd.env("GSE_LOG_PATH", &gse_log);
+            }
 
             // Goldberg save/userdata base. Pin GseSavePath to a stable absolute
             // per-profile dir so goldberg's save path (and GetUserDataFolder) is
@@ -197,6 +205,34 @@ pub fn launch_cmds(
                 cmd.env("GseSavePath", format!("Z:{}", save_base.display()));
             } else {
                 cmd.env("GseSavePath", &save_base);
+            }
+
+            // gbe_fork GLOBAL user settings. gbe_fork reads account_name /
+            // account_steamid from a *global* settings dir (`<GseSavePath>/settings/
+            // configs.user.ini`) that takes PRECEDENCE over the per-game
+            // `steam_settings/configs.user.ini` we write per instance. If that global
+            // file is absent, gbe_fork creates its own default ("gse orca" /
+            // 76561198154692317) and reuses it for every game — so the steam id the
+            // game actually reports has nothing to do with generate_steam_id(profname).
+            // For save_steam_id_remap games (Brotato, DRG, …) the save folder is keyed
+            // by the reported steam id, so the remap target (generate_steam_id) and the
+            // folder the game reads diverge → the profile's save is never picked up.
+            // Pin the global settings to the SAME id the per-game config and the save
+            // remap use, so all three agree.
+            let global_settings = save_base.join("settings");
+            if std::fs::create_dir_all(&global_settings).is_ok() {
+                // Must match the per-game GoldbergConfig.steam_id (goldberg.rs):
+                // first instance reports the REAL save's id, others a generated id.
+                let sid = if i == 0 {
+                    crate::save_sync::pure::effective_steam_id(h, &instance.profname)
+                } else {
+                    crate::profiles::generate_steam_id(&instance.profname)
+                };
+                let user_ini = format!(
+                    "[user::general]\naccount_name={}\naccount_steamid={}\nlanguage=english\nip_country=US\n",
+                    instance.profname, sid
+                );
+                let _ = std::fs::write(global_settings.join("configs.user.ini"), user_ini);
             }
 
             // Goldberg program/app path. goldberg's get_full_program_path() falls

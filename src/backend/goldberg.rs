@@ -182,7 +182,16 @@ impl Backend for Goldberg {
 
                 GoldbergConfig {
                     app_id: handler.get_steam_appid().unwrap_or(480),
-                    steam_id: generate_steam_id(&instance.profname),
+                    // First instance owns the canonical save → report the REAL
+                    // Steam id (so a save_steam_id_remap game reads the real save
+                    // in place; goldberg uses the real passwd home, not $HOME).
+                    // Extra instances keep a generated id so their lobby identities
+                    // stay distinct.
+                    steam_id: if i == 0 {
+                        crate::save_sync::pure::effective_steam_id(handler, &instance.profname)
+                    } else {
+                        generate_steam_id(&instance.profname)
+                    },
                     account_name: instance.profname.clone(),
                     listen_port: instance_ports[i],
                     broadcast_ports,

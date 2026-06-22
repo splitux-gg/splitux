@@ -3,14 +3,55 @@
 
 use crate::handler::Handler;
 use crate::instance::Instance;
-use crate::profiles::generate_steam_id;
 use std::error::Error;
 
 use super::operations::{
-    backup_saves, copy_dir_recursive, copy_dir_with_steam_id_remap, detect_original_steam_id,
+    backup_saves, copy_canonical_save_to_profile, copy_dir_recursive,
+    copy_dir_with_steam_id_remap, detect_original_steam_id, primary_save_size,
     profile_has_existing_saves,
 };
-use super::pure::{find_first_named_profile, get_original_save_path, get_profile_save_path};
+use super::pure::{
+    effective_steam_id, find_first_named_profile, get_original_save_path, get_profile_save_path,
+};
+
+/// REGRESSION GUARD (the fix for the 400hr-Brotato save-loss incident).
+///
+/// Returns `Err` — meaning the caller must ABORT the sync-back and leave the
+/// original untouched — when the incoming (session) save under `profile_save_path`
+/// is materially LESS progressed than the `original_path` save. Progress is proxied
+/// by the largest primary `save*.json` (see [`primary_save_size`]). Growth or
+/// equality is fine; a >1% shrink (including an empty session save) is blocked so a
+/// lesser save can never silently clobber a greater one. Override with
+/// `SPLITUX_FORCE_SYNCBACK=1` for a deliberate reset.
+fn guard_against_regression(
+    profile_save_path: &std::path::Path,
+    original_path: &std::path::Path,
+    who: &str,
+) -> Result<(), Box<dyn Error>> {
+    if std::env::var("SPLITUX_FORCE_SYNCBACK")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        println!("[splitux] SPLITUX_FORCE_SYNCBACK=1 — regression guard bypassed");
+        return Ok(());
+    }
+    let incoming = primary_save_size(profile_save_path);
+    let original = primary_save_size(original_path);
+    if original > 0 && incoming < original.saturating_sub(original / 100) {
+        return Err(format!(
+            "Aborting sync-back: the session save looks REGRESSED vs the original \
+             (incoming primary save {incoming} bytes < original {original} bytes). \
+             The original was left UNTOUCHED to prevent data loss. Session progress \
+             is preserved in profile '{who}' ({}) and in a timestamped backup under {}. \
+             If this shrink is intentional (e.g. a deliberate reset), re-run with \
+             SPLITUX_FORCE_SYNCBACK=1.",
+            profile_save_path.display(),
+            crate::paths::PATH_PARTY.join("save_backups").display(),
+        )
+        .into());
+    }
+    Ok(())
+}
 
 /// Copy original saves to a profile
 /// For named profiles: skips if profile already has saves (preserves existing progress)
@@ -54,13 +95,15 @@ pub fn copy_original_saves_to_profile(
     std::fs::create_dir_all(&profile_save_path)?;
 
     if h.save_steam_id_remap {
-        // Use Steam ID remapping - replace original Steam ID with profile's Goldberg Steam ID
-        let profile_steam_id = generate_steam_id(profile_name);
+        // Use Steam ID remapping - replace original Steam ID with the id the game
+        // will actually report for this profile (native goldberg ignores our
+        // configured id and uses gbe's default — see effective_steam_id).
+        let profile_steam_id = effective_steam_id(h, profile_name);
         println!(
             "[splitux] Steam ID remap enabled for profile '{}' (ID: {})",
             profile_name, profile_steam_id
         );
-        copy_dir_with_steam_id_remap(&original_path, &profile_save_path, profile_steam_id)?;
+        copy_canonical_save_to_profile(&original_path, &profile_save_path, profile_steam_id)?;
     } else {
         copy_dir_recursive(&original_path, &profile_save_path)?;
     }
@@ -128,8 +171,8 @@ fn sync_master_from_original(h: &Handler, master: &str) -> Result<(), Box<dyn Er
     std::fs::create_dir_all(&profile_save_path)?;
 
     if h.save_steam_id_remap {
-        let profile_steam_id = generate_steam_id(master);
-        copy_dir_with_steam_id_remap(&original_path, &profile_save_path, profile_steam_id)?;
+        let profile_steam_id = effective_steam_id(h, master);
+        copy_canonical_save_to_profile(&original_path, &profile_save_path, profile_steam_id)?;
     } else {
         copy_dir_recursive(&original_path, &profile_save_path)?;
     }
@@ -171,7 +214,7 @@ fn copy_profile_saves_to_profile(
     std::fs::create_dir_all(&target_path)?;
 
     if h.save_steam_id_remap {
-        let target_steam_id = generate_steam_id(target_profile);
+        let target_steam_id = effective_steam_id(h, target_profile);
         copy_dir_with_steam_id_remap(&source_path, &target_path, target_steam_id)?;
     } else {
         copy_dir_recursive(&source_path, &target_path)?;
@@ -331,6 +374,12 @@ pub fn sync_master_saves_back(
         None
     };
 
+    // REGRESSION GUARD — refuse to clobber a more-progressed original with a
+    // lesser session save. The original stays untouched; the session save remains
+    // in the profile (+ its backup). This is the single check that would have
+    // prevented the 400hr-Brotato loss.
+    guard_against_regression(&profile_save_path, &original_path, master)?;
+
     // Backup master profile saves before sync (preserves session progress)
     // Best-effort: this is session data we're about to copy out, not the
     // irreplaceable original, so a failure here shouldn't abort.
@@ -430,6 +479,10 @@ pub fn sync_saves_back(h: &Handler, instances: &[Instance]) -> Result<(), Box<dy
     } else {
         None
     };
+
+    // REGRESSION GUARD — see sync_master_saves_back. Don't clobber a greater
+    // original with a lesser session save.
+    guard_against_regression(&profile_save_path, &original_path, profile_name)?;
 
     // Backup original saves before overwriting.
     // HARD GATE: same rule as sync_master_saves_back — never destroy the
