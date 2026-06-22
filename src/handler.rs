@@ -113,6 +113,15 @@ pub struct Handler {
     pub args: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub env: String,
+    /// Working directory for the game process (and goldberg's GseAppPath),
+    /// relative to the mounted game root. Optional — when empty, cwd defaults to
+    /// the exec's parent dir (today's behavior). Set only for launcher-shim
+    /// games where the real binary lives in a subdir but must run with cwd at a
+    /// higher level, e.g. native Frozenbyte titles:
+    ///   exec: _enchanted_edition_/bin/trine1_linux_32bit
+    ///   working_dir: _enchanted_edition_
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub working_dir: String,
     #[serde(default, skip_serializing_if = "is_default_sdl2")]
     pub sdl2_override: SDL2Override,
     /// Path to Proton installation. If set, uses direct Proton instead of umu-run.
@@ -269,6 +278,7 @@ impl Default for Handler {
             exec: String::new(),
             args: String::new(),
             env: String::new(),
+            working_dir: String::new(),
             sdl2_override: SDL2Override::No,
             proton_path: String::new(),
 

@@ -79,12 +79,24 @@ pub fn launch_cmds(
         }
 
         let path_exec = gamedir.join(exec);
-        let cwd = path_exec.parent().ok_or_else(|| "couldn't get parent")?;
+        // Working dir for the game process (and goldberg's GseAppPath). Optional
+        // handler `working_dir` (relative to game root) overrides the default for
+        // launcher-shim games whose real binary lives in a subdir but must run
+        // with cwd at a higher level (e.g. native Frozenbyte titles). Default =
+        // the exec's parent dir.
+        let cwd: PathBuf = if !h.working_dir.is_empty() {
+            gamedir.join(&h.working_dir)
+        } else {
+            path_exec
+                .parent()
+                .ok_or_else(|| "couldn't get parent")?
+                .to_path_buf()
+        };
         let path_prof = PATH_PARTY.join("profiles").join(&instance.profname);
 
         // 1. Create gamescope command
         let mut cmd = gamescope::create_command(cfg);
-        cmd.current_dir(cwd);
+        cmd.current_dir(&cwd);
 
         // 2. Set up gamescope environment
         gamescope::setup_env(&mut cmd);
