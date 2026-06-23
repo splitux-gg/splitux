@@ -70,6 +70,14 @@ pub fn launch_game(
     // cgroup AND seat-streamers.
     let scoping = scope::enabled();
     let launch_id = scope::new_launch_id();
+    // Namespace ALL per-launch scratch (overlay mounts, goldberg overlays, work
+    // dirs) under tmp/<launch_id> so concurrent splitux processes don't collide
+    // on tmp/game-0 etc. Must be set before any scratch dir is created below.
+    crate::paths::set_launch_ns(&launch_id);
+    // Reap scratch (tmp/<ns>) left by DEAD splitux processes — skips LIVE
+    // concurrent sessions (their pid is still alive), so this is safe to run
+    // while other splitux processes have games up.
+    crate::util::reap_orphan_launch_scratch();
     let main_scope = scope::current_main_scope();
     if scoping {
         // Reap leftover units from any previous crashed/killed run first.

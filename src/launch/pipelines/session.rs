@@ -18,7 +18,7 @@ use crate::handler::Handler;
 use crate::monitor::Monitor;
 use crate::profiles::remove_guest_profiles;
 use crate::save_sync;
-use crate::util::{cleanup_orphaned_processes, clear_tmp};
+use crate::util::{cleanup_orphaned_processes, fuse_overlayfs_unmount_gamedirs};
 
 use super::launch_game;
 use super::super::setup_profiles;
@@ -77,9 +77,11 @@ pub fn run_session(
         println!("[splitux] Error removing guest profiles: {}", err);
         notify("Failed removing guest profiles", &format!("{err}"));
     }
-    if let Err(err) = clear_tmp() {
-        println!("[splitux] Error removing tmp directory: {}", err);
-        notify("Failed removing tmp directory", &format!("{err}"));
+    // Launch-scoped: drop only THIS launch's scratch (tmp/<ns>), never the whole
+    // tmp/ — a concurrent session from another splitux process keeps its own.
+    if let Err(err) = fuse_overlayfs_unmount_gamedirs() {
+        println!("[splitux] Error removing launch scratch: {}", err);
+        notify("Failed removing launch scratch", &format!("{err}"));
     }
 
     // Clean teardown reached (incl. any save sync-back above): drop the runtime

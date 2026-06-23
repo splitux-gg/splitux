@@ -21,7 +21,7 @@ pub fn fuse_overlayfs_mount_gamedirs(
     instances: &Vec<Instance>,
     backend_overlays: &[Vec<PathBuf>],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let tmp_dir = PATH_PARTY.join("tmp");
+    let tmp_dir = crate::paths::launch_tmp_dir();
     let game_root = h.get_game_rootpath()?;
     let game_root_path = Path::new(&game_root);
     let gamename = h.handler_dir_name().to_string();

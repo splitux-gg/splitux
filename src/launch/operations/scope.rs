@@ -341,6 +341,23 @@ pub fn sweep_orphan_units() {
     ];
     let is_mine = |unit: &str| mine.iter().any(|p| unit.starts_with(p.as_str()));
 
+    // CONCURRENCY: a unit may belong to ANOTHER live splitux process running a
+    // concurrent session — those must NOT be swept. Every splitux unit embeds the
+    // owning pid (splitux-main-<pid>, splitux-restore-<pid>, splitux-<pid>_<n>...);
+    // extract it and skip the unit if that pid is still alive. Only DEAD-pid units
+    // (crashed/killed runs) are genuine orphans.
+    let owner_pid = |unit: &str| -> Option<u32> {
+        let rest = unit.strip_prefix("splitux-")?;
+        let pid_part = rest
+            .strip_prefix("main-")
+            .or_else(|| rest.strip_prefix("restore-"))
+            .map(|s| s.split('.').next().unwrap_or(s))
+            .unwrap_or_else(|| rest.split('_').next().unwrap_or(rest));
+        pid_part.parse::<u32>().ok()
+    };
+    let belongs_to_live_session =
+        |unit: &str| owner_pid(unit).map(crate::util::pid_alive).unwrap_or(false);
+
     let Ok(output) = Command::new("systemctl")
         .args([
             "--user",
@@ -375,6 +392,10 @@ pub fn sweep_orphan_units() {
         }
         // Never tear down units belonging to this running instance.
         if is_mine(unit) {
+            continue;
+        }
+        // ...nor a CONCURRENT live session from another splitux process.
+        if belongs_to_live_session(unit) {
             continue;
         }
         to_stop.push(unit.to_string());

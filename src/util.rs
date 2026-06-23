@@ -238,41 +238,90 @@ pub fn is_mount_point(dir: &PathBuf) -> Result<bool, Box<dyn std::error::Error>>
 }
 
 pub fn fuse_overlayfs_unmount_gamedirs() -> Result<(), Box<dyn std::error::Error>> {
-    let tmp = PATH_PARTY.join("tmp");
-
-    let Ok(entries) = std::fs::read_dir(&tmp) else {
-        return Err("Failed to read directory".into());
-    };
+    // LAUNCH-SCOPED: only this launch's own tmp/<ns>/ subtree, so tearing one
+    // session down never unmounts a CONCURRENT session's game dirs (each splitux
+    // process has its own launch namespace — see paths::launch_tmp_dir).
+    let dir = crate::paths::launch_tmp_dir();
 
     // Best-effort: a single stuck/raced unmount must NOT abort the rest of the
     // teardown (that left other game dirs mounted and surfaced a scary "fuse
     // error" on kill). Unmount every game-N dir we can, collect genuine failures,
     // and only report those.
     let mut failures: Vec<String> = Vec::new();
-    for entry_result in entries {
-        let Ok(entry) = entry_result else { continue };
-        let path = entry.path();
-        if !(path.is_dir() && entry.file_name().to_string_lossy().starts_with("game-")) {
-            continue;
-        }
-        if !is_mount_point(&path).unwrap_or(false) {
-            continue;
-        }
-        let status = Command::new("umount").arg("-l").arg("-v").arg(&path).status();
-        match status {
-            Ok(s) if s.success() => {}
-            // Raced: it got unmounted between the check and now — fine.
-            _ if !is_mount_point(&path).unwrap_or(false) => {}
-            Ok(_) => failures.push(path.to_string_lossy().into_owned()),
-            Err(e) => failures.push(format!("{} ({e})", path.to_string_lossy())),
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry_result in entries {
+            let Ok(entry) = entry_result else { continue };
+            let path = entry.path();
+            if !(path.is_dir() && entry.file_name().to_string_lossy().starts_with("game-")) {
+                continue;
+            }
+            if !is_mount_point(&path).unwrap_or(false) {
+                continue;
+            }
+            let status = Command::new("umount").arg("-l").arg("-v").arg(&path).status();
+            match status {
+                Ok(s) if s.success() => {}
+                // Raced: it got unmounted between the check and now — fine.
+                _ if !is_mount_point(&path).unwrap_or(false) => {}
+                Ok(_) => failures.push(path.to_string_lossy().into_owned()),
+                Err(e) => failures.push(format!("{} ({e})", path.to_string_lossy())),
+            }
         }
     }
 
     if failures.is_empty() {
+        // All unmounted — remove this launch's whole scratch subtree (game-N,
+        // work-N, <backend>-overlay-N, game-patches). No-op if already gone.
+        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     } else {
         Err(format!("failed to unmount: {}", failures.join(", ")).into())
     }
+}
+
+/// Reap per-launch scratch (`tmp/<ns>/`) left behind by DEAD splitux processes,
+/// without touching LIVE concurrent sessions. The namespace is `<pid>_<counter>`,
+/// so a dir whose pid is no longer running is a crashed-launch orphan — unmount
+/// its game-N mounts and remove it. Live pids (other concurrent sessions) and the
+/// non-namespaced shared tmp entries are left alone. Safe to call at startup.
+pub fn reap_orphan_launch_scratch() {
+    let tmp = PATH_PARTY.join("tmp");
+    let Ok(entries) = std::fs::read_dir(&tmp) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // Only namespaced launch dirs: "<pid>_<counter>". Skip shared scratch
+        // (game-patches, photon-shared, <backend>-overlay-N from old layouts).
+        let Some(pid_str) = name.split('_').next() else { continue };
+        let Ok(pid) = pid_str.parse::<u32>() else { continue };
+        if name == pid_str {
+            continue; // no "_counter" suffix — not a launch namespace
+        }
+        if pid_alive(pid) {
+            continue; // a LIVE concurrent session — leave it alone
+        }
+        // Dead-pid orphan: unmount any game-N mounts, then remove the subtree.
+        if let Ok(sub) = std::fs::read_dir(&path) {
+            for e in sub.flatten() {
+                let p = e.path();
+                if p.is_dir()
+                    && e.file_name().to_string_lossy().starts_with("game-")
+                    && is_mount_point(&p).unwrap_or(false)
+                {
+                    let _ = Command::new("umount").arg("-l").arg(&p).status();
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&path);
+    }
+}
+
+/// True if a process with this pid is currently alive (checked via `/proc`).
+pub fn pid_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 pub fn clear_tmp() -> Result<(), Box<dyn Error>> {

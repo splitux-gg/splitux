@@ -1,6 +1,6 @@
 use std::env;
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 pub static PATH_ASSETS: LazyLock<PathBuf> = LazyLock::new(|| {
     // Check system-wide install
@@ -30,6 +30,37 @@ pub static PATH_PARTY: LazyLock<PathBuf> = LazyLock::new(|| {
     }
     PATH_LOCAL_SHARE.join("splitux")
 });
+
+/// Per-process active-launch namespace. Each `splitux launch` runs as its own
+/// process with ONE active launch, so all per-launch scratch (overlay mounts,
+/// goldberg overlays, work dirs) lives under `tmp/<ns>` keyed by this — letting
+/// several splitux processes run CONCURRENT sessions on one host without
+/// colliding on `tmp/game-0` etc. Set once at launch start (launch::execute).
+static LAUNCH_NS: Mutex<Option<String>> = Mutex::new(None);
+
+/// Set the active launch namespace for this process (the launch_id).
+pub fn set_launch_ns(ns: &str) {
+    if let Ok(mut g) = LAUNCH_NS.lock() {
+        *g = Some(ns.to_string());
+    }
+}
+
+/// The active launch namespace, or a pid fallback if unset (defensive — the
+/// launch flow always sets it before any scratch is created).
+pub fn launch_ns() -> String {
+    LAUNCH_NS
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| std::process::id().to_string())
+}
+
+/// Per-launch scratch root: `PATH_PARTY/tmp/<launch_ns>`. Holds every per-instance
+/// launch scratch dir (`game-{i}`, `work-{i}`, `<backend>-overlay-{i}`,
+/// `game-patches`) so concurrent launches never share a path.
+pub fn launch_tmp_dir() -> PathBuf {
+    PATH_PARTY.join("tmp").join(launch_ns())
+}
 
 pub static PATH_STEAM: LazyLock<PathBuf> = LazyLock::new(|| {
     // Check for native Steam installation first

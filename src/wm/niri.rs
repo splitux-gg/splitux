@@ -148,11 +148,29 @@ impl NiriManager {
         Err(format!("Monitor '{}' not found after {} retries", connector_name, max_retries).into())
     }
 
-    /// Get list of gamescope windows
+    /// Get list of gamescope windows belonging to THIS launch.
     fn get_gamescope_windows(&self) -> WmResult<Vec<NiriWindow>> {
         let response = self.niri_msg(&["windows"])?;
         let windows: serde_json::Value = serde_json::from_str(&response)
             .map_err(|e| format!("Failed to parse windows: {}", e))?;
+
+        // CONCURRENCY: only windows owned by THIS launch's systemd scope, so two
+        // splitux sessions never grab each other's gamescope windows (which
+        // stacked all of them into one column + fought over the output). Every
+        // process in a launch (gamescope → bwrap → game) runs inside
+        // `splitux-<launch_ns>-iN.scope`, so the window's pid cgroup carries our
+        // launch namespace. When this launch isn't scoped there's no concurrency
+        // to disambiguate, so fall back to matching all gamescope windows.
+        let scoped = crate::launch::scope::enabled();
+        let ns = crate::paths::launch_ns();
+        let is_mine = |pid: u64| -> bool {
+            if !scoped {
+                return true;
+            }
+            std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+                .map(|c| c.contains(&format!("splitux-{ns}")))
+                .unwrap_or(false)
+        };
 
         let mut result = Vec::new();
         if let Some(arr) = windows.as_array() {
@@ -165,8 +183,10 @@ impl NiriManager {
                 // matching silently finds 0 windows and the launch times out.
                 // Fall back to the window's PID: niri exposes it, and a window
                 // backed by a gamescope binary is ours regardless of app_id.
-                let pid_is_gs = win["pid"].as_u64().is_some_and(pid_is_gamescope);
-                if app_id.to_lowercase().contains("gamescope") || pid_is_gs {
+                let pid = win["pid"].as_u64();
+                let pid_is_gs = pid.is_some_and(pid_is_gamescope);
+                let is_gamescope = app_id.to_lowercase().contains("gamescope") || pid_is_gs;
+                if is_gamescope && pid.is_some_and(is_mine) {
                     if let Some(id) = win["id"].as_u64() {
                         result.push(NiriWindow {
                             id,
