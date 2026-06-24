@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 /// so audio goes nowhere instead of to the default output
 pub const AUDIO_MUTED_SENTINEL: &str = "__muted__";
 
+/// Sentinel value used in audio assignments to request a per-instance CAPTURE
+/// sink. Like the mute sink it's a bare null sink (no loopback to hardware), but
+/// its purpose is the opposite: a splitux-together seat-streamer captures this
+/// sink's `.monitor` so the instance's audio reaches ONLY that seat's browser.
+/// This is what gives each together instance its own audio stream instead of
+/// every seat capturing the one shared default-sink monitor (audio bleed).
+pub const AUDIO_CAPTURE_SENTINEL: &str = "__capture__";
+
 /// Which audio system to use for virtual sink management
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioSystem {
@@ -80,6 +88,11 @@ pub struct AudioContext {
     pub system: AudioSystem,
     /// Target sink for each instance (None = use default)
     pub assignments: Vec<Option<String>>,
+    /// Per-launch namespace (the launch_id, `<pid>_<counter>`). Embedded in every
+    /// virtual sink name so CONCURRENT splitux processes never collide on
+    /// `splitux_instance_0` and the orphan reaper can tell a crashed launch's
+    /// leftover sinks (dead pid) from a live concurrent session's.
+    pub ns: String,
 }
 
 /// Result type for audio operations

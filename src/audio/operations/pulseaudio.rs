@@ -6,7 +6,7 @@ use std::process::Command;
 
 use crate::audio::pure::{
     classify_device, generate_virtual_sink_description, generate_virtual_sink_name,
-    is_splitux_sink, parse_module_id,
+    is_splitux_sink, parse_module_id, parse_sink_owner_pid,
 };
 use crate::audio::types::{AudioResult, AudioSink, VirtualSink};
 
@@ -75,23 +75,61 @@ fn parse_pactl_sinks(output: &str, default_sink: &str) -> Vec<AudioSink> {
 /// Create a mute sink for an instance (null sink with no loopback)
 ///
 /// Audio sent to this sink goes nowhere - used for explicit muting
-pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
-    let sink_name = generate_virtual_sink_name(instance_idx);
-    let description = format!("Splitux Instance {} (Muted)", instance_idx);
+pub fn create_mute_sink(ns: &str, instance_idx: usize) -> AudioResult<VirtualSink> {
+    create_null_sink(
+        ns,
+        instance_idx,
+        &format!("Splitux Instance {} (Muted)", instance_idx),
+        "mute sink",
+    )
+}
 
-    println!(
-        "[splitux] audio - Creating mute sink '{}' (no output)",
-        sink_name
-    );
+/// Create a capture sink for an instance (null sink with no loopback).
+///
+/// Structurally identical to a mute sink, but its monitor is meant to be
+/// captured by a splitux-together seat-streamer (`<sink>.monitor`) so the
+/// instance's audio reaches ONLY that seat — giving each together instance its
+/// own audio stream instead of every seat sharing the default sink's monitor.
+pub fn create_capture_sink(ns: &str, instance_idx: usize) -> AudioResult<VirtualSink> {
+    create_null_sink(
+        ns,
+        instance_idx,
+        &format!("Splitux Instance {} (Remote Capture)", instance_idx + 1),
+        "capture sink",
+    )
+}
 
-    // Create null sink only (no loopback = audio goes nowhere)
+/// Create a bare null sink (no loopback) for an instance. Shared by the mute and
+/// capture paths, which differ only in description/logging.
+fn create_null_sink(
+    ns: &str,
+    instance_idx: usize,
+    description: &str,
+    kind: &str,
+) -> AudioResult<VirtualSink> {
+    let sink_name = generate_virtual_sink_name(ns, instance_idx);
+
+    println!("[splitux] audio - Creating {} '{}' (no output)", kind, sink_name);
+
+    // Create null sink only (no loopback = audio goes nowhere on the host).
+    // rate/channels pinned so a downstream monitor capture sees a stable format.
+    //
+    // node.latency pins a small FIXED quantum on the PipeWire node. Without it the
+    // null sink free-runs on PipeWire's floating quantum and its monitor delivers
+    // audio in coarse, irregular bursts; the seat-streamer's pulsesrc (25ms
+    // latency-time) then can't read fast enough (acap ~30 vs the 50 frames/s the
+    // Opus encoder wants) → the stream stutters/cuts. A ~10ms quantum (512/48000)
+    // gives the monitor a steady, fine-grained real-time cadence the capture keeps
+    // up with. Harmless on plain PulseAudio (unknown sink_properties are ignored).
     let null_sink_output = Command::new("pactl")
         .args([
             "load-module",
             "module-null-sink",
             &format!("sink_name={}", sink_name),
+            "rate=48000",
+            "channels=2",
             &format!(
-                "sink_properties=device.description=\"{}\"",
+                "sink_properties=device.description=\"{}\" node.latency=512/48000",
                 description.replace(' ', "\\ ")
             ),
         ])
@@ -99,18 +137,19 @@ pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
 
     if !null_sink_output.status.success() {
         return Err(format!(
-            "Failed to create mute sink: {}",
+            "Failed to create {}: {}",
+            kind,
             String::from_utf8_lossy(&null_sink_output.stderr)
         )
         .into());
     }
 
     let module_id = parse_module_id(&String::from_utf8_lossy(&null_sink_output.stdout))
-        .ok_or("Failed to parse mute sink module ID")?;
+        .ok_or("Failed to parse null-sink module ID")?;
 
     println!(
-        "[splitux] audio - Created mute sink {} (module {})",
-        sink_name, module_id
+        "[splitux] audio - Created {} {} (module {})",
+        kind, sink_name, module_id
     );
 
     Ok(VirtualSink {
@@ -120,8 +159,12 @@ pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
 }
 
 /// Create a virtual sink for an instance, routed to the target physical sink
-pub fn create_virtual_sink(instance_idx: usize, target_sink: &str) -> AudioResult<VirtualSink> {
-    let sink_name = generate_virtual_sink_name(instance_idx);
+pub fn create_virtual_sink(
+    ns: &str,
+    instance_idx: usize,
+    target_sink: &str,
+) -> AudioResult<VirtualSink> {
+    let sink_name = generate_virtual_sink_name(ns, instance_idx);
     let description = generate_virtual_sink_description(instance_idx);
 
     println!(
@@ -248,10 +291,14 @@ fn unload_module(module_id: &str) -> AudioResult<()> {
     Ok(())
 }
 
-/// Emergency cleanup: unload all splitux-related modules
+/// Reap splitux sink modules left behind by DEAD launches (crash recovery),
+/// without touching LIVE concurrent sessions' sinks.
 ///
-/// Used when we don't have the module IDs (e.g., crash recovery)
-pub fn cleanup_all_splitux_sinks() -> AudioResult<()> {
+/// Each sink name carries its owning launch's pid (`splitux_instance_<pid>_…`),
+/// so a module whose pid is no longer running is a crashed-launch orphan and is
+/// unloaded; sinks owned by a live pid (another concurrent splitux process) are
+/// left alone. Safe to call at session start even while other sessions run.
+pub fn cleanup_orphan_sinks() -> AudioResult<()> {
     let output = Command::new("pactl")
         .args(["list", "modules", "short"])
         .output()?;
@@ -259,15 +306,30 @@ pub fn cleanup_all_splitux_sinks() -> AudioResult<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
-        if line.contains("splitux_instance_") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if let Some(module_id) = parts.first() {
-                println!(
-                    "[splitux] audio - Emergency cleanup: unloading module {}",
-                    module_id
-                );
-                let _ = unload_module(module_id);
-            }
+        // A splitux sink module references its sink by name in its arguments:
+        //   null-sink:  `sink_name=splitux_instance_<pid>_<counter>_<idx>`
+        //   loopback:   `source=splitux_instance_<pid>_<counter>_<idx>.monitor`
+        // Find whichever `key=value` token names a splitux sink (strip a trailing
+        // `.monitor`), then recover the owning launch pid from it.
+        let Some(name) = line.split_whitespace().find_map(|tok| {
+            let val = tok.split_once('=')?.1;
+            let val = val.strip_suffix(".monitor").unwrap_or(val);
+            is_splitux_sink(val).then_some(val)
+        }) else {
+            continue;
+        };
+        let Some(pid) = parse_sink_owner_pid(name) else {
+            continue;
+        };
+        if crate::util::pid_alive(pid) {
+            continue; // a LIVE concurrent session — leave its sink alone
+        }
+        if let Some(module_id) = line.split_whitespace().next() {
+            println!(
+                "[splitux] audio - Reaping orphan sink module {} ({}, dead pid {})",
+                module_id, name, pid
+            );
+            let _ = unload_module(module_id);
         }
     }
 

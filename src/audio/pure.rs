@@ -8,5 +8,5 @@ mod sink_name;
 pub use device_classification::classify_device;
 pub use sink_name::{
     generate_virtual_sink_description, generate_virtual_sink_name, is_splitux_sink,
-    parse_module_id,
+    parse_module_id, parse_sink_owner_pid,
 };

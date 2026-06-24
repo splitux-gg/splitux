@@ -2,9 +2,26 @@
 //!
 //! Pure functions for working with audio sink names.
 
-/// Generate a virtual sink name for an instance
-pub fn generate_virtual_sink_name(instance_idx: usize) -> String {
-    format!("splitux_instance_{}", instance_idx)
+/// Generate a virtual sink name for an instance within a launch namespace.
+///
+/// The `ns` (the launch_id, `<pid>_<counter>`) is embedded so CONCURRENT splitux
+/// processes never collide on `splitux_instance_0`, and so [`parse_sink_owner_pid`]
+/// can recover the owning launch's pid to reap a crashed session's leftovers
+/// without touching a live concurrent session's sinks.
+pub fn generate_virtual_sink_name(ns: &str, instance_idx: usize) -> String {
+    format!("splitux_instance_{}_{}", ns, instance_idx)
+}
+
+/// Recover the owning launch's pid from a splitux sink name. The name carries
+/// `splitux_instance_<pid>_<counter>_<idx>` (ns = `<pid>_<counter>`), so the pid
+/// is the first segment after the prefix. None if `name` isn't a splitux sink or
+/// has no numeric leading segment.
+pub fn parse_sink_owner_pid(name: &str) -> Option<u32> {
+    name.strip_prefix("splitux_instance_")?
+        .split('_')
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// Generate a human-readable description for a virtual sink
@@ -35,8 +52,28 @@ mod tests {
 
     #[test]
     fn test_generate_virtual_sink_name() {
-        assert_eq!(generate_virtual_sink_name(0), "splitux_instance_0");
-        assert_eq!(generate_virtual_sink_name(3), "splitux_instance_3");
+        assert_eq!(
+            generate_virtual_sink_name("12345_0", 0),
+            "splitux_instance_12345_0_0"
+        );
+        assert_eq!(
+            generate_virtual_sink_name("12345_0", 3),
+            "splitux_instance_12345_0_3"
+        );
+    }
+
+    #[test]
+    fn test_parse_sink_owner_pid() {
+        // ns = "<pid>_<counter>" → name carries the pid as the first segment.
+        assert_eq!(
+            parse_sink_owner_pid("splitux_instance_12345_0_3"),
+            Some(12345)
+        );
+        // ns fallback is a bare pid (no counter).
+        assert_eq!(parse_sink_owner_pid("splitux_instance_999_2"), Some(999));
+        // Non-splitux sinks and malformed names yield None.
+        assert_eq!(parse_sink_owner_pid("alsa_output.pci-0000"), None);
+        assert_eq!(parse_sink_owner_pid("splitux_instance_abc_0"), None);
     }
 
     #[test]

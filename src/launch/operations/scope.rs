@@ -21,6 +21,29 @@
 //!
 //! Everything degrades gracefully: if `systemd-run --user` is unavailable we
 //! skip scoping and fall back to direct spawning + a best-effort sweep.
+//!
+//! # Unit hierarchy (the naming contract)
+//!
+//! Every unit splitux creates lives under one stable root slice, and every
+//! per-process/per-launch leaf encodes its OWNER pid in its name. This is what
+//! makes concurrent splitux processes safe to tell apart and reap independently:
+//!
+//! ```text
+//! splitux.slice                              ROOT — shared, stable, never stopped by us
+//! ├─ splitux-main-<pid>.scope                a splitux process's own scope (owner: <pid>)
+//! ├─ splitux-restore-<pid>.service           that process's death watcher (owner: <pid>)
+//! ├─ splitux-bar-*.scope                     relaunched host status bars (not a leftover)
+//! └─ splitux-<pid>_<n>.slice                 one launch by process <pid> (owner: <pid>)
+//!    ├─ splitux-<pid>_<n>-i<k>.scope         instance k's gamescope+game
+//!    └─ splitux-<pid>_<n>-seat<k>.scope      seat k's seat-streamer
+//! ```
+//!
+//! The launch id is `<pid>_<n>` (underscore, NOT hyphen — see [`new_launch_id`]),
+//! so a launch slice nests DIRECTLY under [`ROOT_SLICE`] without systemd
+//! auto-materializing surprise intermediate parents. Consequences the sweep MUST
+//! respect ([`sweep_orphan_units`]): the root is shared infrastructure (stopping
+//! it cascade-kills every concurrent launch), and a leaf is a reap-able orphan
+//! only if [`owner_pid`] is dead.
 
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +52,13 @@ use std::sync::{Mutex, OnceLock};
 /// Env guard that marks an already-self-scoped splitux process, preventing an
 /// infinite re-exec loop.
 const SCOPED_ENV: &str = "SPLITUX_SCOPED";
+
+/// The single stable parent slice every splitux unit nests under. Shared by ALL
+/// concurrent splitux processes and auto-created by systemd from the child
+/// names; it carries no owner pid because it belongs to no one launch. It is
+/// infrastructure — the sweep must never stop it (doing so cascades teardown to
+/// every concurrent launch's child slice).
+pub const ROOT_SLICE: &str = "splitux.slice";
 
 /// The currently-active launch slice, so any teardown path (normal exit, the
 /// eframe `on_exit` hook, the startup sweep) can stop it.
@@ -190,6 +220,21 @@ pub fn slice_name(launch_id: &str) -> String {
     format!("splitux-{launch_id}.slice")
 }
 
+/// The splitux process that owns a unit, recovered from its name — the inverse of
+/// the constructors above (`splitux-main-<pid>`, `splitux-restore-<pid>`, and the
+/// `splitux-<pid>_<n>[...]` launch family). `None` for a unit that belongs to no
+/// single process — notably [`ROOT_SLICE`], the shared parent. Keep this in
+/// lockstep with the naming contract documented at the top of the module.
+pub fn owner_pid(unit: &str) -> Option<u32> {
+    let rest = unit.strip_prefix("splitux-")?;
+    let pid_part = rest
+        .strip_prefix("main-")
+        .or_else(|| rest.strip_prefix("restore-"))
+        .map(|s| s.split('.').next().unwrap_or(s))
+        .unwrap_or_else(|| rest.split('_').next().unwrap_or(rest));
+    pid_part.parse::<u32>().ok()
+}
+
 /// Record the active launch slice (so teardown / on_exit can stop it).
 pub fn set_active_slice(launch_id: &str) {
     if let Ok(mut g) = ACTIVE_SLICE.lock() {
@@ -324,39 +369,18 @@ pub fn stop_active_slice() {
 /// Sweep leftover splitux launch units from previous (crashed/killed) runs.
 ///
 /// Deterministic, unlike marker/ppid guessing: we enumerate splitux's own
-/// transient units and stop any that are NOT our current main scope. Called at
-/// startup and before each launch.
+/// transient units and stop only the ones we can attribute to a DEAD splitux
+/// process. The naming contract (see the module header) makes this unambiguous —
+/// every reap-able leaf carries its owner pid; the shared [`ROOT_SLICE`] does
+/// not. Called at startup and before each launch, INCLUDING while other splitux
+/// processes are running concurrent sessions, so it must never touch:
+///   * [`ROOT_SLICE`] — the shared parent; stopping it cascade-kills every launch.
+///   * `splitux-bar-*` — relaunched host status bars, not launch leftovers.
+///   * any unit whose [`owner_pid`] is still alive — a live concurrent session.
 pub fn sweep_orphan_units() {
     if !systemd_user_available() {
         return;
     }
-
-    // Units belonging to THIS instance (must never be swept): our main scope,
-    // our restore-on-death watcher, and our launch slice(s). All carry our pid.
-    let pid = std::process::id();
-    let mine: [String; 3] = [
-        format!("splitux-main-{pid}."),
-        format!("splitux-restore-{pid}."),
-        format!("splitux-{pid}_"),
-    ];
-    let is_mine = |unit: &str| mine.iter().any(|p| unit.starts_with(p.as_str()));
-
-    // CONCURRENCY: a unit may belong to ANOTHER live splitux process running a
-    // concurrent session — those must NOT be swept. Every splitux unit embeds the
-    // owning pid (splitux-main-<pid>, splitux-restore-<pid>, splitux-<pid>_<n>...);
-    // extract it and skip the unit if that pid is still alive. Only DEAD-pid units
-    // (crashed/killed runs) are genuine orphans.
-    let owner_pid = |unit: &str| -> Option<u32> {
-        let rest = unit.strip_prefix("splitux-")?;
-        let pid_part = rest
-            .strip_prefix("main-")
-            .or_else(|| rest.strip_prefix("restore-"))
-            .map(|s| s.split('.').next().unwrap_or(s))
-            .unwrap_or_else(|| rest.split('_').next().unwrap_or(rest));
-        pid_part.parse::<u32>().ok()
-    };
-    let belongs_to_live_session =
-        |unit: &str| owner_pid(unit).map(crate::util::pid_alive).unwrap_or(false);
 
     let Ok(output) = Command::new("systemctl")
         .args([
@@ -385,17 +409,23 @@ pub fn sweep_orphan_units() {
         if !unit.starts_with("splitux") {
             continue;
         }
+        // The shared parent slice is infrastructure, not a leftover — stopping it
+        // would cascade teardown to every concurrent launch's child slice.
+        if unit == ROOT_SLICE {
+            continue;
+        }
         // Restored status bars run in their own splitux-bar-*.scope units — they
         // are legitimately-running user apps we relaunched, NOT launch leftovers.
         if unit.starts_with("splitux-bar-") {
             continue;
         }
-        // Never tear down units belonging to this running instance.
-        if is_mine(unit) {
+        // Reap a leaf only when its owning splitux process is DEAD. A live pid is
+        // either THIS process or a concurrent session — both must be left alone.
+        // (No parseable pid means it isn't an attributable leftover; skip it.)
+        let Some(pid) = owner_pid(unit) else {
             continue;
-        }
-        // ...nor a CONCURRENT live session from another splitux process.
-        if belongs_to_live_session(unit) {
+        };
+        if crate::util::pid_alive(pid) {
             continue;
         }
         to_stop.push(unit.to_string());
@@ -414,4 +444,39 @@ pub fn sweep_orphan_units() {
     cmd.args(["--user", "stop"]);
     cmd.args(&to_stop);
     let _ = cmd.status();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launch_id_uses_underscore_so_it_nests_under_one_root() {
+        // `<pid>_<n>` keeps the launch slice a DIRECT child of ROOT_SLICE; a hyphen
+        // would make systemd auto-create an intermediate parent per pid.
+        let slice = slice_name("12345_0");
+        assert_eq!(slice, "splitux-12345_0.slice");
+        // The hierarchy separator '-' must only appear in the fixed prefix, not
+        // between pid and counter.
+        assert!(!"12345_0".contains('-'));
+    }
+
+    #[test]
+    fn owner_pid_recovers_owner_from_every_leaf_unit() {
+        assert_eq!(owner_pid("splitux-main-12345.scope"), Some(12345));
+        assert_eq!(owner_pid("splitux-12345_0.slice"), Some(12345));
+        assert_eq!(owner_pid("splitux-12345_0-i0.scope"), Some(12345));
+        assert_eq!(owner_pid("splitux-12345_3-seat2.scope"), Some(12345));
+        // restore watcher is a .service (not swept) but still attributable
+        assert_eq!(owner_pid("splitux-restore-12345.service"), Some(12345));
+    }
+
+    #[test]
+    fn root_slice_has_no_owner_so_it_is_never_reaped() {
+        // The crux of the concurrency bug: the shared parent must NOT parse to a
+        // pid, so the sweep can never mistake it for a dead-pid leftover.
+        assert_eq!(owner_pid(ROOT_SLICE), None);
+        // A non-splitux unit is not ours at all.
+        assert_eq!(owner_pid("user.slice"), None);
+    }
 }

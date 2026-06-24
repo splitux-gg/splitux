@@ -39,13 +39,27 @@ pub fn setup_sdl_env(cmd: &mut Command, gamepad_paths: &[String]) {
 /// Set up audio routing environment variables inside the bwrap container
 ///
 /// Sets PULSE_SINK to route audio to a specific sink (works for both
-/// PulseAudio and PipeWire via pipewire-pulse compatibility layer)
+/// PulseAudio and PipeWire via pipewire-pulse compatibility layer).
+///
+/// PULSE_SINK alone is NOT enough: `module-stream-restore` remembers per-stream
+/// device AND volume keyed by the stream's identity (media.role, else app-name),
+/// and a matching saved entry OVERRIDES PULSE_SINK. On a Sunshine host the saved
+/// "role:game → sink-sunshine-stereo @ 0%" rule hijacks any game that declares
+/// `media.role=game` (e.g. Enter the Gungeon): it lands on the wrong sink AND is
+/// muted to 0%, so its together stream is silent. We sidestep stream-restore by
+/// forcing a per-instance-unique `media.role` (PULSE_PROP_OVERRIDE wins even over
+/// the app's own proplist): a fresh role has no saved entry, so PULSE_SINK and
+/// the default full volume both apply. The role is unique per launch (the sink
+/// name carries `<pid>_<n>`), so no stale entry can ever match it either.
 pub fn setup_audio_env(cmd: &mut Command, sink_name: &str) {
     if sink_name.is_empty() {
         return;
     }
     // PULSE_SINK works for both PulseAudio and PipeWire (via pipewire-pulse)
     cmd.args(["--setenv", "PULSE_SINK", sink_name]);
+    // Force a unique stream-restore identity so no pre-existing device/volume
+    // rule can override the routing above. `media.<key>=<val>` proplist syntax.
+    cmd.args(["--setenv", "PULSE_PROP_OVERRIDE", &format!("media.role={sink_name}")]);
 }
 
 /// Set up BepInEx environment variables for Linux native games

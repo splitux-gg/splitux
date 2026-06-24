@@ -455,11 +455,19 @@ pub fn launch_cmds(
                 println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(","));
             }
 
-            // Set up SDL environment inside container. Keep it for both isolation
-            // modes: it forces SDL onto evdev (HIDAPI off) and pins the device,
-            // which keeps SDL games well-behaved alongside the evdev allowlist.
-            // Skip only when isolation is fully off.
-            if h.effective_input_isolation() != crate::handler::InputIsolation::None {
+            // Set up SDL environment inside container. This must run whenever this
+            // instance has pads to wire — INDEPENDENT of device isolation. gamescope
+            // exports SDL_JOYSTICK_DEVICE=/dev/null (so its own SDL ignores host
+            // pads) and the game inherits it; udev joystick enumeration doesn't work
+            // inside bwrap, so SDL falls back to that hint and sees NO controller
+            // unless we override SDL_JOYSTICK_DEVICE with the real pad. Gating this
+            // on isolation != None meant isolation:none handlers (Overcooked, Trine)
+            // inherited /dev/null → the pad never appeared and "Press A" did nothing,
+            // even though the seat's virtual pad was wired in. So: set it up for any
+            // isolated handler AND for any handler that has gamepads to expose.
+            if h.effective_input_isolation() != crate::handler::InputIsolation::None
+                || !gamepad_paths.is_empty()
+            {
                 bwrap::setup_sdl_env(&mut cmd, &gamepad_paths);
             }
 

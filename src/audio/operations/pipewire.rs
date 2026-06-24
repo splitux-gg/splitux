@@ -6,7 +6,7 @@ use std::process::Command;
 
 use crate::audio::pure::{
     classify_device, generate_virtual_sink_description, generate_virtual_sink_name,
-    is_splitux_sink,
+    is_splitux_sink, parse_sink_owner_pid,
 };
 use crate::audio::types::{AudioResult, AudioSink, VirtualSink};
 
@@ -114,17 +114,50 @@ fn parse_wpctl_sink_line(line: &str) -> Option<AudioSink> {
 /// Create a mute sink for an instance (null sink with no output)
 ///
 /// Audio sent to this sink goes nowhere - used for explicit muting
-pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
-    let sink_name = generate_virtual_sink_name(instance_idx);
-    let description = format!("Splitux Instance {} (Muted)", instance_idx);
+pub fn create_mute_sink(ns: &str, instance_idx: usize) -> AudioResult<VirtualSink> {
+    create_null_sink(
+        ns,
+        instance_idx,
+        &format!("Splitux Instance {} (Muted)", instance_idx),
+        "mute sink",
+    )
+}
+
+/// Create a capture sink for an instance (null sink with no output).
+///
+/// Structurally a mute sink, but its monitor is captured by a splitux-together
+/// seat-streamer so the instance's audio reaches only that seat. See the
+/// PulseAudio variant for the full rationale.
+pub fn create_capture_sink(ns: &str, instance_idx: usize) -> AudioResult<VirtualSink> {
+    create_null_sink(
+        ns,
+        instance_idx,
+        &format!("Splitux Instance {} (Remote Capture)", instance_idx + 1),
+        "capture sink",
+    )
+}
+
+/// Create a bare null sink (no output) via pactl's compat layer. Shared by the
+/// mute and capture paths, which differ only in description/logging.
+fn create_null_sink(
+    ns: &str,
+    instance_idx: usize,
+    description: &str,
+    kind: &str,
+) -> AudioResult<VirtualSink> {
+    let sink_name = generate_virtual_sink_name(ns, instance_idx);
 
     println!(
-        "[splitux] audio - Creating PipeWire mute sink '{}' (no output)",
-        sink_name
+        "[splitux] audio - Creating PipeWire {} '{}' (no output)",
+        kind, sink_name
     );
 
     // Use pactl for compatibility
-    // Specify rate/channels to match other sinks
+    // Specify rate/channels to match other sinks.
+    // node.latency pins a small FIXED quantum so the monitor delivers steady
+    // fine-grained audio the seat-streamer's pulsesrc can keep up with; without it
+    // the free-running null sink starves the capture and the stream cuts. See the
+    // PulseAudio variant for the full rationale.
     let null_sink_output = Command::new("pactl")
         .args([
             "load-module",
@@ -133,7 +166,7 @@ pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
             "rate=48000",
             "channels=2",
             &format!(
-                "sink_properties=device.description=\"{}\"",
+                "sink_properties=device.description=\"{}\" node.latency=512/48000",
                 description.replace(' ', "\\ ")
             ),
         ])
@@ -141,7 +174,8 @@ pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
 
     if !null_sink_output.status.success() {
         return Err(format!(
-            "Failed to create mute sink: {}",
+            "Failed to create {}: {}",
+            kind,
             String::from_utf8_lossy(&null_sink_output.stderr)
         )
         .into());
@@ -150,11 +184,11 @@ pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
     let module_id = crate::audio::pure::parse_module_id(&String::from_utf8_lossy(
         &null_sink_output.stdout,
     ))
-    .ok_or("Failed to parse mute sink module ID")?;
+    .ok_or("Failed to parse null-sink module ID")?;
 
     println!(
-        "[splitux] audio - Created PipeWire mute sink {} (module {})",
-        sink_name, module_id
+        "[splitux] audio - Created PipeWire {} {} (module {})",
+        kind, sink_name, module_id
     );
 
     Ok(VirtualSink {
@@ -167,8 +201,12 @@ pub fn create_mute_sink(instance_idx: usize) -> AudioResult<VirtualSink> {
 ///
 /// Note: PipeWire virtual sink creation is more complex than PulseAudio.
 /// This uses the pipewire-pulse compat layer's module-null-sink internally.
-pub fn create_virtual_sink(instance_idx: usize, target_sink: &str) -> AudioResult<VirtualSink> {
-    let sink_name = generate_virtual_sink_name(instance_idx);
+pub fn create_virtual_sink(
+    ns: &str,
+    instance_idx: usize,
+    target_sink: &str,
+) -> AudioResult<VirtualSink> {
+    let sink_name = generate_virtual_sink_name(ns, instance_idx);
     let description = generate_virtual_sink_description(instance_idx);
 
     println!(
@@ -340,9 +378,11 @@ pub fn cleanup_sinks(sinks: &[VirtualSink]) -> AudioResult<()> {
     }
 }
 
-/// Emergency cleanup: destroy all splitux-related nodes
-pub fn cleanup_all_splitux_sinks() -> AudioResult<()> {
-    // Use pactl for compatibility
+/// Reap splitux sink modules left behind by DEAD launches (crash recovery),
+/// without touching LIVE concurrent sessions' sinks. Mirrors the PulseAudio
+/// variant — sinks/loopbacks are created via pactl's compat layer either way, so
+/// we reap through pactl and skip any sink whose owning launch pid is still alive.
+pub fn cleanup_orphan_sinks() -> AudioResult<()> {
     let output = Command::new("pactl")
         .args(["list", "modules", "short"])
         .output()?;
@@ -350,17 +390,27 @@ pub fn cleanup_all_splitux_sinks() -> AudioResult<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
-        if line.contains("splitux_instance_") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if let Some(module_id) = parts.first() {
-                println!(
-                    "[splitux] audio - Emergency cleanup: unloading module {}",
-                    module_id
-                );
-                let _ = Command::new("pactl")
-                    .args(["unload-module", module_id])
-                    .output();
-            }
+        let Some(name) = line.split_whitespace().find_map(|tok| {
+            let val = tok.split_once('=')?.1;
+            let val = val.strip_suffix(".monitor").unwrap_or(val);
+            is_splitux_sink(val).then_some(val)
+        }) else {
+            continue;
+        };
+        let Some(pid) = parse_sink_owner_pid(name) else {
+            continue;
+        };
+        if crate::util::pid_alive(pid) {
+            continue;
+        }
+        if let Some(module_id) = line.split_whitespace().next() {
+            println!(
+                "[splitux] audio - Reaping orphan sink module {} ({}, dead pid {})",
+                module_id, name, pid
+            );
+            let _ = Command::new("pactl")
+                .args(["unload-module", module_id])
+                .output();
         }
     }
 

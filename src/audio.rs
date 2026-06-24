@@ -23,7 +23,7 @@ use std::process::Command;
 // Re-export types
 pub use types::{
     AudioContext, AudioDeviceType, AudioSink, AudioSystem, AudioSystemPreference,
-    VirtualSink, AUDIO_MUTED_SENTINEL,
+    VirtualSink, AUDIO_CAPTURE_SENTINEL, AUDIO_MUTED_SENTINEL,
 };
 
 // Re-export operations

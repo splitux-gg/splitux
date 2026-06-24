@@ -55,7 +55,18 @@ pub fn launch_game(
     cfg: &SplituxConfig,
     ready: &std::sync::atomic::AtomicBool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Set up audio routing if enabled
+    // Establish the per-launch namespace FIRST. Everything per-launch keys off it
+    // — scratch dirs (tmp/<ns>), scope units, AND the audio capture sink names —
+    // so concurrent splitux processes never collide. Must precede audio routing,
+    // which embeds this ns in each sink name.
+    let scoping = scope::enabled();
+    let launch_id = scope::new_launch_id();
+    // Namespace ALL per-launch scratch (overlay mounts, goldberg overlays, work
+    // dirs) under tmp/<launch_id> so concurrent splitux processes don't collide
+    // on tmp/game-0 etc. Must be set before any scratch dir is created below.
+    crate::paths::set_launch_ns(&launch_id);
+
+    // Set up audio routing (per-session capture sinks for together instances).
     let (audio_system, virtual_sinks, audio_sink_envs) = setup_audio_routing(instances, cfg);
 
     // Set up gptokeyb daemons if enabled (spawns before command building so we can pass virtual device paths)
@@ -68,12 +79,6 @@ pub fn launch_game(
     // child on a hard kill and keeping its virtual input devices alive). Killing
     // splitux by any signal cascades teardown to the whole launch slice — game
     // cgroup AND seat-streamers.
-    let scoping = scope::enabled();
-    let launch_id = scope::new_launch_id();
-    // Namespace ALL per-launch scratch (overlay mounts, goldberg overlays, work
-    // dirs) under tmp/<launch_id> so concurrent splitux processes don't collide
-    // on tmp/game-0 etc. Must be set before any scratch dir is created below.
-    crate::paths::set_launch_ns(&launch_id);
     // Reap scratch (tmp/<ns>) left by DEAD splitux processes — skips LIVE
     // concurrent sessions (their pid is still alive), so this is safe to run
     // while other splitux processes have games up.
@@ -119,6 +124,7 @@ pub fn launch_game(
             &launch_id,
             main_scope.as_deref(),
             scoping,
+            &audio_sink_envs,
         );
 
     let new_cmds = launch_cmds(
@@ -421,8 +427,14 @@ fn setup_audio_routing(
     instances: &[Instance],
     cfg: &SplituxConfig,
 ) -> (AudioSystem, Vec<VirtualSink>, Vec<String>) {
-    if !cfg.audio.enabled {
-        // Audio routing disabled, return empty vectors
+    // Per-session audio isolation: every `together` instance needs its OWN sink so
+    // its seat-streamer can capture only that instance's audio. Without this the
+    // streamers all tap the shared default-sink monitor and every game's sound
+    // bleeds into every stream. So we run audio setup whenever EITHER explicit
+    // routing is enabled OR any remote seat is present, even if cfg.audio.enabled
+    // is off (that flag governs only the user-facing per-device routing feature).
+    let any_together = instances.iter().any(|inst| inst.together);
+    if !cfg.audio.enabled && !any_together {
         return (AudioSystem::None, vec![], vec![String::new(); instances.len()]);
     }
 
@@ -432,14 +444,32 @@ fn setup_audio_routing(
         return (AudioSystem::None, vec![], vec![String::new(); instances.len()]);
     }
 
-    // Build assignments from config
-    let assignments: Vec<Option<String>> = (0..instances.len())
-        .map(|i| cfg.audio.default_assignments.get(&i).cloned())
+    // Build per-instance sink assignments. An explicit config assignment (only
+    // honored when the routing feature is enabled) wins; otherwise a together
+    // instance gets a dedicated CAPTURE sink (its monitor is fed to that seat's
+    // stream); local instances keep the default sink (None).
+    let assignments: Vec<Option<String>> = instances
+        .iter()
+        .enumerate()
+        .map(|(i, inst)| {
+            if cfg.audio.enabled {
+                if let Some(target) = cfg.audio.default_assignments.get(&i) {
+                    return Some(target.clone());
+                }
+            }
+            if inst.together {
+                return Some(crate::audio::AUDIO_CAPTURE_SENTINEL.to_string());
+            }
+            None
+        })
         .collect();
 
     let ctx = AudioContext {
         system: audio_system,
         assignments,
+        // Tie sink names to this launch's namespace (already set in launch_game
+        // before this runs) so concurrent splitux processes never collide.
+        ns: crate::paths::launch_ns(),
     };
 
     match setup_audio_session(&ctx) {

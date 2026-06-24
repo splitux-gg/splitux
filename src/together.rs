@@ -169,6 +169,7 @@ fn spawn_seat_streamer(
     seat_idx: usize,
     main_scope: Option<&str>,
     scoping: bool,
+    audio_monitor: Option<&str>,
 ) -> std::io::Result<Child> {
     let log_path = format!("/tmp/splitux-together-{seat}.log");
     let log = std::fs::File::create(&log_path)?;
@@ -189,11 +190,16 @@ fn spawn_seat_streamer(
         .args(["--bitrate", &cfg.together.bitrate.to_string()])
         .args(["--stun", &cfg.together.stun]);
     cmd.args(["--fps", &cfg.together.resolved_fps().to_string()]);
-    // Audio passthrough: stream the game's sound as an Opus track. First cut taps
-    // the default sink's monitor (captures game audio for the single-seat case;
-    // multi-seat per-instance isolation via dedicated null sinks is a follow-up).
-    // Resolve the default sink name so we can hand pulsesrc "<sink>.monitor".
-    if let Some(mon) = default_sink_monitor() {
+    // Audio passthrough: stream the game's sound as an Opus track. Each together
+    // instance has its OWN capture sink (a per-launch null sink the game is routed
+    // to via PULSE_SINK), so we capture THAT sink's monitor — isolating this
+    // instance's audio to this seat's stream instead of every seat tapping the one
+    // shared default-sink monitor (which mixed all games into all streams). Falls
+    // back to the default sink's monitor if no per-instance sink was created.
+    let audio_device = audio_monitor
+        .map(str::to_string)
+        .or_else(default_sink_monitor);
+    if let Some(mon) = audio_device {
         cmd.args(["--audio-device", &mon]);
     }
     if instance.width > 0 && instance.height > 0 {
@@ -324,6 +330,7 @@ pub fn setup_together_seats(
     launch_id: &str,
     main_scope: Option<&str>,
     scoping: bool,
+    audio_sink_envs: &[String],
 ) -> (Vec<Child>, Vec<Vec<TogetherSeatDevices>>, Vec<InviteLink>) {
     let n = instances.len();
     // Total remote seats across all instances. Normally one per `together`
@@ -369,6 +376,15 @@ pub fn setup_together_seats(
             continue; // local player — untouched
         }
         let node = node_name_for_instance(i);
+        // This instance's audio capture source. setup_audio_routing gives every
+        // together instance its own null sink (PULSE_SINK = that sink), so capture
+        // "<sink>.monitor"; all of this instance's seats share it (one game = one
+        // audio stream). Empty env → no per-instance sink, so spawn_seat_streamer
+        // falls back to the default-sink monitor.
+        let audio_monitor = audio_sink_envs
+            .get(i)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("{s}.monitor"));
         for _ in 0..instance.together_seats {
             let seat = seat_id(seat_index);
             let name = if remote_count == 1 {
@@ -381,6 +397,7 @@ pub fn setup_together_seats(
             match spawn_seat_streamer(
                 cfg, &seat, &name, &token, instance, &node,
                 launch_id, seat_index, main_scope, scoping,
+                audio_monitor.as_deref(),
             ) {
                 Ok(child) => handles.push(child),
                 Err(e) => {

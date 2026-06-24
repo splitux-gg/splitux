@@ -20,12 +20,13 @@ pub fn scan_sinks(system: AudioSystem) -> AudioResult<Vec<AudioSink>> {
 /// Create a virtual sink for an instance, routed to the target physical sink
 pub fn create_virtual_sink(
     system: AudioSystem,
+    ns: &str,
     instance_idx: usize,
     target_sink: &str,
 ) -> AudioResult<VirtualSink> {
     match system {
-        AudioSystem::PulseAudio => pulseaudio::create_virtual_sink(instance_idx, target_sink),
-        AudioSystem::PipeWireNative => pipewire::create_virtual_sink(instance_idx, target_sink),
+        AudioSystem::PulseAudio => pulseaudio::create_virtual_sink(ns, instance_idx, target_sink),
+        AudioSystem::PipeWireNative => pipewire::create_virtual_sink(ns, instance_idx, target_sink),
         AudioSystem::None => Err("No audio system available".into()),
     }
 }
@@ -33,10 +34,28 @@ pub fn create_virtual_sink(
 /// Create a mute sink for an instance (null sink with no output)
 ///
 /// Audio sent to this sink goes nowhere - used for explicit muting
-pub fn create_mute_sink(system: AudioSystem, instance_idx: usize) -> AudioResult<VirtualSink> {
+pub fn create_mute_sink(
+    system: AudioSystem,
+    ns: &str,
+    instance_idx: usize,
+) -> AudioResult<VirtualSink> {
     match system {
-        AudioSystem::PulseAudio => pulseaudio::create_mute_sink(instance_idx),
-        AudioSystem::PipeWireNative => pipewire::create_mute_sink(instance_idx),
+        AudioSystem::PulseAudio => pulseaudio::create_mute_sink(ns, instance_idx),
+        AudioSystem::PipeWireNative => pipewire::create_mute_sink(ns, instance_idx),
+        AudioSystem::None => Err("No audio system available".into()),
+    }
+}
+
+/// Create a capture sink for an instance (null sink whose monitor a
+/// splitux-together seat-streamer captures, isolating that instance's audio).
+pub fn create_capture_sink(
+    system: AudioSystem,
+    ns: &str,
+    instance_idx: usize,
+) -> AudioResult<VirtualSink> {
+    match system {
+        AudioSystem::PulseAudio => pulseaudio::create_capture_sink(ns, instance_idx),
+        AudioSystem::PipeWireNative => pipewire::create_capture_sink(ns, instance_idx),
         AudioSystem::None => Err("No audio system available".into()),
     }
 }
@@ -50,11 +69,12 @@ pub fn cleanup_sinks(system: AudioSystem, sinks: &[VirtualSink]) -> AudioResult<
     }
 }
 
-/// Emergency cleanup: remove all splitux-related audio modules/nodes
-pub fn cleanup_all_splitux_sinks(system: AudioSystem) -> AudioResult<()> {
+/// Reap splitux sinks left behind by DEAD launches (crash recovery), without
+/// touching live concurrent sessions' sinks.
+pub fn cleanup_orphan_sinks(system: AudioSystem) -> AudioResult<()> {
     match system {
-        AudioSystem::PulseAudio => pulseaudio::cleanup_all_splitux_sinks(),
-        AudioSystem::PipeWireNative => pipewire::cleanup_all_splitux_sinks(),
+        AudioSystem::PulseAudio => pulseaudio::cleanup_orphan_sinks(),
+        AudioSystem::PipeWireNative => pipewire::cleanup_orphan_sinks(),
         AudioSystem::None => Ok(()),
     }
 }
