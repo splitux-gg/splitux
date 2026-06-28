@@ -593,6 +593,12 @@ pub fn launch_cmds(
             cmd.arg(processed_arg);
         }
 
+        // Backend-injected launch args (e.g. Keen's --keenonline-server-data-file).
+        // `win` is this game's Proton/wine-ness.
+        for arg in crate::backend::collect_backend_launch_args(h, win) {
+            cmd.arg(arg);
+        }
+
         cmds.push((cmd, bwrap_arg_count));
     }
 

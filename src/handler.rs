@@ -12,8 +12,9 @@ pub use io::{import_handler, scan_handlers};
 
 use crate::backend::{
     EosSettings as BackendEosSettings, FacepunchSettings as BackendFacepunchSettings,
-    GoldbergSettings as BackendGoldbergSettings, MultiplayerBackend,
-    PhotonSettings as BackendPhotonSettings, StandaloneSettings as BackendStandaloneSettings,
+    GoldbergSettings as BackendGoldbergSettings, KeenSettings as BackendKeenSettings,
+    MultiplayerBackend, PhotonSettings as BackendPhotonSettings,
+    StandaloneSettings as BackendStandaloneSettings,
 };
 use crate::gptokeyb::GptokeybSettings;
 use crate::util::SanitizePath;
@@ -193,6 +194,12 @@ pub struct Handler {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standalone: Option<BackendStandaloneSettings>,
 
+    /// Keen Games online-backend emulator settings (enables Keen auth if Some).
+    /// For games gated on Keen's auth server (e.g. Enshrouded). Runs the bundled
+    /// keen-emu sidecar + injects --keenonline-server-data-file. Pair with goldberg.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keen: Option<BackendKeenSettings>,
+
     /// Required mods/files that must be installed by the user
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_mods: Vec<RequiredMod>,
@@ -300,6 +307,7 @@ impl Default for Handler {
             facepunch: None,
             eos: None,
             standalone: None,
+            keen: None,
 
             required_mods: Vec::new(),
 
@@ -535,6 +543,16 @@ impl Handler {
     /// Get Standalone settings reference (if enabled)
     pub fn standalone_ref(&self) -> Option<&BackendStandaloneSettings> {
         self.standalone.as_ref()
+    }
+
+    /// Get Keen settings reference (if enabled)
+    pub fn keen_ref(&self) -> Option<&BackendKeenSettings> {
+        self.keen.as_ref()
+    }
+
+    /// Whether the Keen auth-emulator backend is enabled
+    pub fn has_keen(&self) -> bool {
+        self.keen.is_some()
     }
 
     /// Enable Goldberg backend with default settings

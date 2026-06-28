@@ -56,12 +56,24 @@ pub fn run_session(
         }
     }
 
+    // Start shared backend sidecar services (e.g. Keen auth server) before the
+    // games launch; killed at teardown below. No-op for backends that need no
+    // sidecar (Goldberg/EOS/etc.).
+    let mut backend_services = crate::backend::start_backend_services(handler);
+
     // Note: fuse_overlayfs_mount_gamedirs runs inside launch_cmds with proper
     // Goldberg overlay support.
     if let Err(err) = launch_game(handler, dev_infos, instances, monitors, cfg, ready) {
         println!("[splitux] Error launching instances: {}", err);
         notify("Launch Error", &format!("{err}"));
     }
+
+    // Games have exited (launch_game blocks until teardown): stop sidecars.
+    for mut child in backend_services.drain(..) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
     // Ensure any waiter is released even if launch errored before signaling.
     ready.store(true, Ordering::Release);
 

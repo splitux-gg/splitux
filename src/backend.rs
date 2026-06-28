@@ -52,12 +52,27 @@ pub trait Backend {
         is_windows: bool,
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>>;
+
+    /// Extra CLI args this backend injects into the game launch (e.g. Keen's
+    /// `--keenonline-server-data-file <file>`). Default: none. `is_windows` is
+    /// the game's Proton/wine-ness so backends can emit Windows-style paths.
+    fn extra_launch_args(&self, _handler: &Handler, _is_windows: bool) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Start any shared sidecar services this backend needs (e.g. Keen's auth
+    /// server). Returns child processes the session owns and kills at teardown.
+    /// Default: none (in-process DLL backends like Goldberg/EOS need nothing).
+    fn start_services(&self, _handler: &Handler) -> std::io::Result<Vec<std::process::Child>> {
+        Ok(Vec::new())
+    }
 }
 
 // Backend module implementations
 pub mod eos;
 pub mod facepunch;
 pub mod goldberg;
+pub mod keen;
 pub mod operations;
 pub mod photon;
 pub mod standalone;
@@ -66,6 +81,7 @@ pub mod standalone;
 pub use eos::EosSettings;
 pub use facepunch::FacepunchSettings;
 pub use goldberg::GoldbergSettings;
+pub use keen::KeenSettings;
 pub use photon::PhotonSettings;
 pub use standalone::StandaloneSettings;
 
@@ -73,6 +89,7 @@ pub use standalone::StandaloneSettings;
 use self::eos as eos_mod;
 use self::facepunch as facepunch_mod;
 use self::goldberg as goldberg_mod;
+use self::keen as keen_mod;
 use self::photon as photon_mod;
 use self::standalone as standalone_mod;
 
@@ -97,11 +114,47 @@ fn collect_enabled_backends(handler: &Handler) -> Vec<Box<dyn Backend>> {
     if let Some(settings) = handler.standalone_ref() {
         backends.push(Box::new(standalone_mod::Standalone::new(settings.clone())));
     }
+    if let Some(settings) = handler.keen_ref() {
+        backends.push(Box::new(keen_mod::Keen::new(settings.clone())));
+    }
 
     // Sort by priority (highest first)
     backends.sort_by(|a, b| b.priority().cmp(&a.priority()));
 
     backends
+}
+
+/// Collect all backend-injected launch args for a handler, in backend priority
+/// order. Called per-instance when building the launch command.
+pub fn collect_backend_launch_args(handler: &Handler, is_windows: bool) -> Vec<String> {
+    let mut args = Vec::new();
+    for backend in collect_enabled_backends(handler) {
+        args.extend(backend.extra_launch_args(handler, is_windows));
+    }
+    args
+}
+
+/// Start shared sidecar services for the launch (e.g. the Keen auth server).
+/// Deduplicated by backend name so a single shared sidecar starts once even with
+/// multiple instances. Returns the spawned child processes for the session to
+/// kill at teardown.
+pub fn start_backend_services(handler: &Handler) -> Vec<std::process::Child> {
+    let mut children = Vec::new();
+    let mut started: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for backend in collect_enabled_backends(handler) {
+        if !started.insert(backend.name().to_string()) {
+            continue;
+        }
+        match backend.start_services(handler) {
+            Ok(cs) => children.extend(cs),
+            Err(e) => println!(
+                "[splitux] backend '{}' start_services failed: {}",
+                backend.name(),
+                e
+            ),
+        }
+    }
+    children
 }
 
 /// Create overlay directories for all instances based on the handler's backend

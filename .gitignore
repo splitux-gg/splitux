@@ -8,3 +8,4 @@ handler.json
 # Downloaded dependencies (fetched by splitux.sh build)
 assets/goldberg/
 assets/bepinex/
+assets/keen/
