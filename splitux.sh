@@ -411,6 +411,34 @@ download_goldberg() {
     copy_steam_client_libs
 }
 
+download_keen() {
+    # keen-emu: Keen Games online-backend auth emulator (host-side Linux binary),
+    # used by the `keen` backend for Keen-gated titles (e.g. Enshrouded).
+    local keen_out="$SCRIPT_DIR/assets/keen"
+    local keen_repo="splitux-gg/keen-emu-splitux"
+    local keen_release
+
+    if [[ -f "$keen_out/keen-emu" ]]; then
+        info "keen-emu already available"
+        return 0
+    fi
+
+    keen_release=$(curl -fsSL "https://api.github.com/repos/$keen_repo/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+    if [[ -z "$keen_release" ]]; then
+        warn "Failed to fetch latest keen-emu-splitux release, using fallback v0.1.0"
+        keen_release="v0.1.0"
+    fi
+
+    step "Downloading keen-emu ($keen_release)..."
+    mkdir -p "$keen_out"
+    if ! curl -fsSL "https://github.com/$keen_repo/releases/download/$keen_release/keen-emu-linux-x64" -o "$keen_out/keen-emu"; then
+        warn "Failed to download keen-emu"
+        return 1
+    fi
+    chmod +x "$keen_out/keen-emu"
+    info "keen-emu downloaded"
+}
+
 download_gamescope() {
     local gsc_out="$SCRIPT_DIR/assets/gamescope-splitux"
     local gsc_repo="splitux-gg/gamescope-splitux"
@@ -682,6 +710,8 @@ do_build() {
     local gptk_pid=$!
     download_facepunch &
     local fp_pid=$!
+    download_keen &
+    local keen_pid=$!
 
     # Build splitux while dependencies download
     build_splitux
@@ -692,6 +722,7 @@ do_build() {
     wait $gsc_pid 2>/dev/null || warn "gamescope-splitux download may have failed"
     wait $gptk_pid 2>/dev/null || warn "gptokeyb-splitux download may have failed"
     wait $fp_pid 2>/dev/null || warn "SplituxFacepunch download may have failed"
+    wait $keen_pid 2>/dev/null || warn "keen-emu download may have failed"
 
     # Setup build directory
     step "Setting up build directory..."
