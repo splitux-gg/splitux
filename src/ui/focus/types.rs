@@ -20,6 +20,7 @@ pub enum InstanceFocus {
     InstanceCard(usize, InstanceCardFocus), // Focus within instance card i
     LaunchOptions,                        // Launch options bar at bottom
     StartButton,                          // Start Game button
+    GamesSidebar,                         // The always-visible left games list (change game in-place)
 }
 
 /// Focus elements within an instance card
@@ -29,11 +30,9 @@ pub enum InstanceCardFocus {
     Profile,         // Profile dropdown
     SetMaster,       // Set Master button
     Monitor,         // Monitor dropdown (if gamescope SDL enabled)
-    InviteDevice,    // Invite Device button
     Device(usize),   // Specific device in the device list
     AudioOverride,   // Audio session override dropdown
     AudioPreference, // Audio preference dropdown (named profiles only)
-    GptokeybProfile, // gptokeyb profile dropdown (KB/Mouse mapping)
 }
 
 /// Focus regions for Registry page
@@ -170,6 +169,4 @@ pub enum ActiveDropdown {
     InstanceAudioOverride(usize),
     /// Instances page: audio preference dropdown for instance
     InstanceAudioPreference(usize),
-    /// Instances page: gptokeyb profile dropdown for instance
-    InstanceGptokeyb(usize),
 }

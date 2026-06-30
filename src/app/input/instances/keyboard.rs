@@ -20,18 +20,9 @@ impl Splitux {
     pub(crate) fn process_instance_activate_key(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                let player_count = self.instances.len();
-                let has_carousel = player_count >= 2;
-                let max_options = if has_carousel { 2 } else { 1 };
-                match self.launch_option_index {
-                    0 if has_carousel => {
-                        // Enter/A on carousel cycles to next preset
-                        self.options.layout_presets.cycle_next(player_count);
-                    }
-                    idx if idx == max_options - 1 => {
-                        self.options.input_holding = !self.options.input_holding;
-                    }
-                    _ => {}
+                // The carousel is the only launch option; activate cycles it.
+                if self.show_layout_carousel() {
+                    self.options.layout_presets.cycle_next(self.instances.len());
                 }
             }
             InstanceFocus::StartButton => {
@@ -43,6 +34,8 @@ impl Splitux {
                 self.activate_focused = true;
             }
             InstanceFocus::Devices => {}
+            // Enter confirms the picked game and returns to the setup content.
+            InstanceFocus::GamesSidebar => self.instance_focus = InstanceFocus::Devices,
         }
     }
 
@@ -63,6 +56,7 @@ impl Splitux {
                 self.instance_focus = InstanceFocus::Devices;
             }
             InstanceFocus::Devices => {}
+            InstanceFocus::GamesSidebar => self.instance_focus = InstanceFocus::Devices,
         }
     }
 }

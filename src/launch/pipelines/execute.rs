@@ -46,15 +46,59 @@ use super::build_cmds::launch_cmds;
 use super::super::operations::scope;
 use super::super::pure::command::{format_launch_cmd, rebuild_command_with_blocking};
 
+/// RAII safety net for the launch's host-stability-critical resources. The normal
+/// teardown only runs if the supervise loop is reached; any EARLY error (`?` from
+/// launch_cmds / wm.setup / netns / spawn / window-positioning) would otherwise
+/// return and ORPHAN them — leaving seat-streamers (and their raw-gadget xpad360
+/// helpers) alive holding dummy_hcd UDCs, fuse-overlayfs game mounts mounted, and
+/// the launch slice up — which bloats the env and degrades/wedges the next launch.
+/// On any early return this Drop stops the launch slice (cascades SIGTERM to the
+/// scoped seat-streamers → they release their UDCs gracefully), unmounts the
+/// overlays, and tears down netns. Disarmed right before the normal teardown so it
+/// never double-runs on the success path. (stop_slice/unmount are idempotent.)
+struct LaunchGuard {
+    scoping: bool,
+    launch_id: String,
+    bridged: bool,
+    n_instances: usize,
+    armed: bool,
+}
+
+impl Drop for LaunchGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        println!(
+            "[splitux] launch aborted before supervise — safety teardown (slice/overlays/netns)"
+        );
+        if self.scoping {
+            scope::stop_slice(&self.launch_id);
+            scope::clear_active_slice();
+        }
+        if self.bridged {
+            crate::netns::teardown(self.n_instances);
+        }
+        if let Err(e) = crate::util::fuse_overlayfs_unmount_gamedirs() {
+            println!("[splitux] Warning: fuse-overlayfs unmount failed during safety teardown: {e}");
+        }
+    }
+}
+
 /// Launch the game with all instances
+#[allow(clippy::too_many_arguments)]
 pub fn launch_game(
-    h: &Handler,
+    handlers: &[Handler],
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
     monitors: &[Monitor],
     cfg: &SplituxConfig,
     ready: &std::sync::atomic::AtomicBool,
+    displays_assigned: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // All handler reads are now per-unit: session-wide steps that genuinely need
+    // a representative handler index `handlers[…]` explicitly; the spawn loop and
+    // batch ops use `handlers[instance.game]`. No launch-wide `h` shim remains.
     // Establish the per-launch namespace FIRST. Everything per-launch keys off it
     // — scratch dirs (tmp/<ns>), scope units, AND the audio capture sink names —
     // so concurrent splitux processes never collide. Must precede audio routing,
@@ -71,7 +115,7 @@ pub fn launch_game(
 
     // Set up gptokeyb daemons if enabled (spawns before command building so we can pass virtual device paths)
     let (mut gptokeyb_handles, gptokeyb_virtual_devices) =
-        setup_gptokeyb_daemons(h, input_devices, instances);
+        setup_gptokeyb_daemons(handlers, input_devices, instances);
 
     // Process containment must be established BEFORE spawning together
     // seat-streamers, so each streamer launches inside the per-launch slice and
@@ -100,15 +144,30 @@ pub fn launch_game(
             main_scope
         );
         // If the TUI launched us with a session id, record a runtime marker so it
-        // can show this session ● active and target End/Kill at our exact units
-        // (the slice and main scope, which the TUI can't derive — see session_store).
-        if let (Ok(sid), Some(ms)) = (
-            std::env::var(crate::session_store::SESSION_ID_ENV),
-            main_scope.as_ref(),
-        ) {
+        // can show this session ● active and target End/Kill at our exact units.
+        // ALWAYS write it when a session id is present — the launch SLICE is the
+        // reliable live-handle the TUI keys off, and it exists regardless of the
+        // main scope. (A detached TUI-spawned launch often has NO splitux-main
+        // scope — main_scope is then empty — which used to skip the marker
+        // entirely, leaving the TUI's per-session End/Kill thinking nothing was
+        // running so only Kill-All worked.)
+        if let Ok(sid) = std::env::var(crate::session_store::SESSION_ID_ENV) {
+            let ms = main_scope.as_deref().unwrap_or("");
             crate::session_store::write_marker(&sid, &scope::slice_name(&launch_id), ms);
         }
     }
+
+    // Arm the early-abort safety net NOW — before seat-streamers spawn — so any
+    // `?` between here and the supervise loop still tears the slice/overlays/netns
+    // down instead of orphaning seats that hold dummy_hcd UDCs. Disarmed right
+    // before the normal teardown below.
+    let mut launch_guard = LaunchGuard {
+        scoping,
+        launch_id: launch_id.clone(),
+        bridged: false,
+        n_instances: instances.len(),
+        armed: true,
+    };
 
     // Set up splitux-together remote seats (no-op unless a player is marked
     // remote). Spawns one seat-streamer per remote player BEFORE command
@@ -116,11 +175,12 @@ pub fn launch_game(
     // exactly like gptokeyb above. Each streamer is scoped into the launch slice
     // so it lives and dies with the launch. Returns the per-instance virtual
     // device paths to wire into the launch command + the invite URLs to pop up.
+    let game_labels: Vec<String> = handlers.iter().map(|gh| gh.name.clone()).collect();
     let (mut together_handles, together_devices, together_invites) =
         crate::together::setup_together_seats(
             instances,
             cfg,
-            &h.name,
+            &game_labels,
             &launch_id,
             main_scope.as_deref(),
             scoping,
@@ -128,7 +188,7 @@ pub fn launch_game(
         );
 
     let new_cmds = launch_cmds(
-        h,
+        handlers,
         input_devices,
         instances,
         monitors,
@@ -181,11 +241,22 @@ pub fn launch_game(
     }
     println!("[splitux] Layout: instance_to_region = {:?}", instance_to_region);
 
+    // Gamescope-bypass: mirror the per-instance decision in build_cmds so the WM
+    // knows the game window is a plain host surface (not a gamescope window).
+    // Engages only for a lone, non-together, bwrap'd local seat with
+    // `disable_gamescope` set; multi-seat / together always keep gamescope.
+    let no_gamescope = instances.len() == 1
+        && !instances.iter().any(|inst| inst.together)
+        && !handlers[instances[0].game].disable_bwrap
+        && handlers[instances[0].game].effective_disable_gamescope(cfg);
+
     let ctx = LayoutContext {
         instances: instances.to_vec(),
         monitors: monitors.to_vec(),
         preset,
         instance_to_region,
+        displays_assigned,
+        no_gamescope,
     };
 
     // (Process containment / launch slice was established above, before the
@@ -211,31 +282,61 @@ pub fn launch_game(
     // namespaces are created here, before any instance spawns, and torn down
     // after the session ends (both the clean-exit and the Ctrl+C paths fall
     // through to the teardown below).
-    let bridged = h.goldberg_ref().map(|g| g.bridged_lan).unwrap_or(false);
-    if bridged {
-        if h.has_eos() {
-            println!(
-                "[splitux] netns - WARNING: goldberg.bridged_lan is set together with an EOS \
-                 backend. The EOS emu's localhost mode expects a shared 127.0.0.1 and is \
-                 incompatible with split network namespaces — discovery/join may break."
-            );
+    //
+    // This is PER UNIT (per game): only instances whose game opts into
+    // `bridged_lan` get a namespace, so a mixed launch can run one bridged game
+    // alongside an un-bridged (or EOS-localhost) one.
+    let bridged_per_inst: Vec<bool> = instances
+        .iter()
+        .map(|inst| {
+            handlers[inst.game]
+                .goldberg_ref()
+                .map(|g| g.bridged_lan)
+                .unwrap_or(false)
+        })
+        .collect();
+    let any_bridged = bridged_per_inst.iter().any(|&b| b);
+    if any_bridged {
+        // Warn ONCE per bridged game that also runs EOS (localhost-incompatible).
+        let mut warned: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for inst in instances.iter() {
+            if !warned.insert(inst.game) {
+                continue;
+            }
+            let gh = &handlers[inst.game];
+            if gh.goldberg_ref().map(|g| g.bridged_lan).unwrap_or(false) && gh.has_eos() {
+                println!(
+                    "[splitux] netns - WARNING: goldberg.bridged_lan is set together with an EOS \
+                     backend (game '{}'). The EOS emu's localhost mode expects a shared 127.0.0.1 \
+                     and is incompatible with split network namespaces — discovery/join may break.",
+                    gh.display()
+                );
+            }
         }
         // Hard-fail (don't silently launch un-isolated) if the host can't do it.
         crate::netns::preflight()?;
         crate::netns::setup_bridge()?;
-        for i in 0..instances.len() {
-            crate::netns::add_instance(i)?;
+        for (i, &b) in bridged_per_inst.iter().enumerate() {
+            if b {
+                crate::netns::add_instance(i)?;
+            }
         }
     }
+    // netns is now (fully) set up; let the guard tear it down on an early abort.
+    launch_guard.bridged = any_bridged;
 
     let mut handles = Vec::new();
 
-    // For native Linux games with Facepunch/BepInEx, redirect stdout to prevent
-    // CStreamWriter crash. BepInEx's LinuxConsoleDriver checks isatty(1) and crashes
-    // if stdout is a TTY. Redirecting to null makes isatty(1) return false.
-    let redirect_stdout = !h.win() && h.has_facepunch();
-
     for (i, (cmd, bwrap_arg_count)) in new_cmds.into_iter().enumerate() {
+        // This instance's unit handler — isolation / bridged / stdout are all
+        // per-game (single-game: handlers[0]).
+        let hh = &handlers[instances[i].game];
+
+        // For native Linux games with Facepunch/BepInEx, redirect stdout to
+        // prevent a CStreamWriter crash: BepInEx's LinuxConsoleDriver checks
+        // isatty(1) and crashes if stdout is a TTY; redirecting to null makes
+        // isatty(1) return false.
+        let redirect_stdout = !hh.win() && hh.has_facepunch();
         // Input initialization delay before spawn (except first instance)
         if i > 0 && input_init_delay > 0.0 {
             println!(
@@ -248,10 +349,10 @@ pub fn launch_game(
         // Build fresh device isolation args right before spawn (spawn-time permission check).
         // These must be inserted as bwrap args, before the child command (proton/game).
         use crate::handler::InputIsolation;
-        let blocking_args = if h.disable_bwrap {
+        let blocking_args = if hh.disable_bwrap {
             Vec::new()
         } else {
-            match h.effective_input_isolation() {
+            match hh.effective_input_isolation() {
                 InputIsolation::None => Vec::new(),
                 // Legacy SDL-only path: /dev/null-bind unassigned devices. Breaks
                 // raw-evdev engines (Godot) — kept only for explicit opt-in.
@@ -302,7 +403,7 @@ pub fn launch_game(
         // before any prefix exists, so the offset stays correct and device
         // isolation is unaffected. (Same reasoning the scope wrap below relies
         // on — both are outer wrappers applied post-blocking.)
-        if bridged {
+        if bridged_per_inst[i] {
             cmd = crate::netns::wrap_command_in_netns(cmd, i);
         }
 
@@ -318,7 +419,7 @@ pub fn launch_game(
         // Wrap in a systemd scope so the whole subtree is contained and dies
         // with splitux. systemd-run waits on the game, so wait() below is intact.
         if scoping {
-            cmd = scope::wrap_command(cmd, &launch_id, i, main_scope.as_deref());
+            cmd = scope::wrap_command(cmd, &launch_id, instances[i].game, i, main_scope.as_deref());
         }
 
         let handle = cmd.spawn()?;
@@ -377,6 +478,11 @@ pub fn launch_game(
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
+    // Reached the supervise loop and fell through to the normal teardown — disarm
+    // the early-abort guard so it doesn't double-run the slice/overlay/netns
+    // teardown we're about to do in full (incl. wm/gptokeyb/seats/audio).
+    launch_guard.armed = false;
+
     // Stop the launch slice (kills any lingering instance scope + its cgroup),
     // then drop the fuse-overlayfs mounts. Idempotent — the games normally
     // exited already, but this reaps stragglers and clears the active marker.
@@ -390,7 +496,7 @@ pub fn launch_game(
     // supervise loop breaks, and execution falls through here. (A SECOND Ctrl+C
     // hard-exits via libc::_exit and skips this — but teardown is idempotent and
     // add_instance() re-cleans stale namespaces on the next bridged launch.)
-    if bridged {
+    if any_bridged {
         crate::netns::teardown(instances.len());
     }
 
@@ -493,42 +599,73 @@ fn setup_audio_routing(
 /// - child_handles: Some for instances with gptokeyb, None otherwise
 /// - virtual_device_paths: path to gptokeyb's virtual keyboard/mouse device for each instance
 fn setup_gptokeyb_daemons(
-    h: &Handler,
+    handlers: &[Handler],
     input_devices: &[DeviceInfo],
     instances: &[Instance],
 ) -> (Vec<Option<Child>>, Vec<Option<std::path::PathBuf>>) {
     let num_instances = instances.len();
+    let mut handles: Vec<Option<Child>> = (0..num_instances).map(|_| None).collect();
+    let mut devices: Vec<Option<std::path::PathBuf>> = (0..num_instances).map(|_| None).collect();
 
-    if !h.has_gptokeyb() {
-        return (
-            (0..num_instances).map(|_| None).collect(),
-            (0..num_instances).map(|_| None).collect(),
-        );
+    // Any game want gptokeyb at all?
+    let any_gptokeyb = instances
+        .iter()
+        .any(|inst| handlers[inst.game].has_gptokeyb());
+    if !any_gptokeyb {
+        return (handles, devices);
     }
 
     if !gptokeyb::is_available() {
         println!("[splitux] gptokeyb - Binary not found, skipping controller→keyboard translation");
-        return (
-            (0..num_instances).map(|_| None).collect(),
-            (0..num_instances).map(|_| None).collect(),
-        );
+        return (handles, devices);
     }
 
-    println!(
-        "[splitux] gptokeyb - Setting up controller→keyboard translation (profile: {})",
-        h.gptokeyb.profile
-    );
+    // Per game (unit): each game has its own gptokeyb profile + handler dir, and
+    // only its own instances get a daemon. Group by game, spawn with the unit's
+    // settings, scatter back to GLOBAL instance slots (which also name the
+    // daemons' virtual devices, keeping them unique across games).
+    let mut games_seen: Vec<usize> = Vec::new();
+    let mut idxs_by_game: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (gi, inst) in instances.iter().enumerate() {
+        idxs_by_game
+            .entry(inst.game)
+            .or_insert_with(|| {
+                games_seen.push(inst.game);
+                Vec::new()
+            })
+            .push(gi);
+    }
 
-    // Collect device indices per instance
-    let instance_device_indices: Vec<Vec<usize>> = instances
-        .iter()
-        .map(|inst| inst.devices.clone())
-        .collect();
+    for game in games_seen {
+        let h = &handlers[game];
+        if !h.has_gptokeyb() {
+            continue;
+        }
+        println!(
+            "[splitux] gptokeyb - Game {}: controller→keyboard translation (profile: {})",
+            game, h.gptokeyb.profile
+        );
+        let global_idxs = &idxs_by_game[&game];
+        let instance_device_indices: Vec<Vec<usize>> = global_idxs
+            .iter()
+            .map(|&gi| instances[gi].devices.clone())
+            .collect();
 
-    gptokeyb::spawn_all_daemons(
-        &h.gptokeyb,
-        &h.path_handler,
-        input_devices,
-        &instance_device_indices,
-    )
+        let (g_handles, g_devices) = gptokeyb::spawn_all_daemons(
+            &h.gptokeyb,
+            &h.path_handler,
+            input_devices,
+            &instance_device_indices,
+            global_idxs,
+        );
+
+        for (local_k, (handle, dev)) in g_handles.into_iter().zip(g_devices).enumerate() {
+            let gi = global_idxs[local_k];
+            handles[gi] = handle;
+            devices[gi] = dev;
+        }
+    }
+
+    (handles, devices)
 }

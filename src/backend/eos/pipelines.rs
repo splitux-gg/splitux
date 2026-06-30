@@ -14,6 +14,7 @@ use crate::instance::Instance;
 /// with the Nemirtingas emulator and appropriate configuration.
 pub fn create_all_overlays(
     instances: &[Instance],
+    global_indices: &[usize],
     is_windows: bool,
     game_root: &Path,
     // Accepted from the handler's `eos.appid` for documentation/forward-compat,
@@ -30,10 +31,12 @@ pub fn create_all_overlays(
         return Ok(vec![]);
     }
 
-    // Generate unique ports for each instance
+    // Generate unique ports per instance, keyed by GLOBAL index so two concurrent
+    // games never reuse a port.
     const BASE_PORT: u16 = 55789;
-    let instance_ports: Vec<u16> = (0..instances.len())
-        .map(|i| BASE_PORT + i as u16)
+    let instance_ports: Vec<u16> = global_indices
+        .iter()
+        .map(|&gi| BASE_PORT + gi as u16)
         .collect();
 
     let mut overlay_dirs = Vec::new();
@@ -48,7 +51,7 @@ pub fn create_all_overlays(
         };
 
         let overlay_dir = create_instance_overlay(
-            idx,
+            global_indices[idx],
             &dlls,
             &config,
             is_windows,

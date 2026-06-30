@@ -64,6 +64,7 @@ impl Backend for Eos {
         &self,
         handler: &Handler,
         instances: &[Instance],
+        global_indices: &[usize],
         is_windows: bool,
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -79,6 +80,7 @@ impl Backend for Eos {
 
         pipeline_create_all_overlays(
             instances,
+            global_indices,
             is_windows,
             game_root,
             &appid,

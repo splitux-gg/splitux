@@ -40,7 +40,11 @@ impl Splitux {
             ui.add_space(4.0);
 
             // Check if bottom buttons are focused
-            let is_game_list_focused = self.focus_pane == FocusPane::GameList;
+            // Focused on the Games page via the focus pane, OR stepped into the sidebar
+        // from the Instances page (controller "change game in setup").
+        let is_game_list_focused = self.focus_pane == FocusPane::GameList
+            || (self.cur_page == crate::app::app::MenuPage::Instances
+                && self.instance_focus == crate::ui::focus::types::InstanceFocus::GamesSidebar);
             let add_focused = self.game_panel_bottom_focused && self.game_panel_bottom_index == 0 && is_game_list_focused;
             let import_focused = self.game_panel_bottom_focused && self.game_panel_bottom_index == 1 && is_game_list_focused;
 
@@ -107,7 +111,11 @@ impl Splitux {
             return;
         }
 
-        let is_game_list_focused = self.focus_pane == FocusPane::GameList;
+        // Focused on the Games page via the focus pane, OR stepped into the sidebar
+        // from the Instances page (controller "change game in setup").
+        let is_game_list_focused = self.focus_pane == FocusPane::GameList
+            || (self.cur_page == crate::app::app::MenuPage::Instances
+                && self.instance_focus == crate::ui::focus::types::InstanceFocus::GamesSidebar);
 
         for i in 0..self.handlers.len() {
             // Skip if index is out of bounds to catch for removing/rescanning handlers
@@ -136,36 +144,60 @@ impl Splitux {
                     .inner_margin(egui::Margin::symmetric(6, 4))
             };
 
-            frame.show(ui, |ui| {
-                let response = ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Image::new(self.handlers[i].icon())
-                            .max_width(18.0)
-                            .corner_radius(3),
-                    );
-                    ui.add_space(4.0);
+            // The click target is the WHOLE highlighted row, not just the text:
+            // force the frame to span the panel width, leave the inner widgets
+            // non-interactive, and sense clicks on the frame's full rect. That way
+            // there's no dead gap between entries — a click anywhere on a row's
+            // highlight selects it.
+            let response = frame
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::Image::new(self.handlers[i].icon())
+                                .max_width(18.0)
+                                .corner_radius(3),
+                        );
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(self.handlers[i].display_clamp())
+                                .selectable(false),
+                        );
+                    });
+                })
+                .response
+                .interact(egui::Sense::click());
 
-                    let label = ui.add(
-                        egui::Label::new(self.handlers[i].display_clamp())
-                            .selectable(false)
-                            .sense(egui::Sense::click()),
-                    );
-                    label
-                }).inner;
-
-                if response.clicked() {
-                    self.selected_handler = i;
-                }
-                if response.has_focus() || is_selected {
-                    response.scroll_to_me(None);
-                }
-                Popup::context_menu(&response).show(|ui| self.handler_ctx_menu(ui, i));
-            });
-            ui.add_space(2.0);
+            if response.clicked() {
+                self.selected_handler = i;
+            }
+            // Scroll to the selection ONLY when it changes (keyboard/gamepad
+            // nav), not every frame — otherwise the constant re-centering
+            // fights the mouse wheel and the list snaps back to the selection.
+            if (response.has_focus() || is_selected) && self.games_scrolled_idx != Some(i) {
+                response.scroll_to_me(None);
+                self.games_scrolled_idx = Some(i);
+            }
+            Popup::context_menu(&response).show(|ui| self.handler_ctx_menu(ui, i));
+            // No inter-row spacer: contiguous rows mean you can't click "between"
+            // two games and hit neither.
         }
     }
 
     pub fn handler_ctx_menu(&mut self, ui: &mut Ui, i: usize) {
+        // Right-click → jump straight into instance setup for THIS game with the
+        // kb/mouse already added as player 1 (the mouse made the click, so inject
+        // it; join_kbm_partners pulls in the keyboard).
+        if ui.button(format!("{} Set Up Players", icons::PLAY)).clicked() {
+            self.selected_handler = i;
+            let mouse_path = self
+                .input_devices
+                .iter()
+                .find(|d| d.device_type() == crate::input::DeviceType::Mouse)
+                .map(|d| d.path().to_string());
+            self.start_game_setup_injecting(mouse_path);
+        }
+
         if ui.button("Edit").clicked() {
             self.handler_edit = Some(self.handlers[i].clone());
             self.show_edit_modal = true;

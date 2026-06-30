@@ -3,7 +3,7 @@ pub mod types;
 
 // Re-export types
 pub use types::{
-    PadFilterType, SplituxConfig, WindowManagerType,
+    IgnoredDevice, PadFilterType, SplituxConfig, WindowManagerType,
 };
 
 // Re-export operations

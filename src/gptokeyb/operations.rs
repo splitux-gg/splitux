@@ -15,31 +15,34 @@ pub fn is_available() -> bool {
 
 /// Get the config file path for a profile
 ///
-/// Returns:
-/// - For built-in profiles: assets/gptokeyb/{profile}.gptk
-/// - For "custom": handler_dir/gptokeyb.gptk
+/// Returns, in resolution order:
+/// - `"custom"`: the game's own `handler_dir/gptokeyb.gptk`
+/// - a built-in name: `assets/gptokeyb/{profile}.gptk`
+/// - a user-authored profile (KB/Mouse Mapper): `<profiles_dir>/{profile}.gptk`
+///
+/// The user-profile fallback is what lets a game reference a mapping you built
+/// yourself: author it in the KB/Mouse Mapper, then set the handler's
+/// `gptokeyb.profile` to that profile's name.
 pub fn get_config_path(settings: &GptokeybSettings, handler_dir: &Path) -> Option<PathBuf> {
     if settings.profile.is_empty() {
         return None;
     }
 
+    // 1. Per-game custom file in the handler directory.
     if settings.profile == super::types::PROFILE_CUSTOM {
-        // Custom profile in handler directory
         let custom_path = handler_dir.join("gptokeyb.gptk");
-        if custom_path.exists() {
-            Some(custom_path)
-        } else {
-            None
-        }
-    } else {
-        // Built-in profile in res directory
-        let builtin_path = PATH_ASSETS.join("gptokeyb").join(format!("{}.gptk", settings.profile));
-        if builtin_path.exists() {
-            Some(builtin_path)
-        } else {
-            None
-        }
+        return custom_path.exists().then_some(custom_path);
     }
+
+    // 2. Built-in profile shipped with splitux.
+    let builtin_path = PATH_ASSETS.join("gptokeyb").join(format!("{}.gptk", settings.profile));
+    if builtin_path.exists() {
+        return Some(builtin_path);
+    }
+
+    // 3. User-authored profile (KB/Mouse Mapper), referenced by name.
+    let user_path = super::storage::profiles_dir().join(format!("{}.gptk", settings.profile));
+    user_path.exists().then_some(user_path)
 }
 
 /// Wait for gptokeyb virtual device to appear for a specific instance
@@ -153,6 +156,10 @@ pub fn spawn_all_daemons(
     handler_dir: &Path,
     input_devices: &[DeviceInfo],
     instance_device_indices: &[Vec<usize>],
+    // GLOBAL instance index per entry — used as the daemon's unique virtual
+    // device name (`-n`), so two concurrent games never collide on a uinput
+    // node. Single-game: `[0,1,…]`, identical to the old local index.
+    global_indices: &[usize],
 ) -> (Vec<Option<Child>>, Vec<Option<PathBuf>>) {
     let num_instances = instance_device_indices.len();
 
@@ -167,6 +174,7 @@ pub fn spawn_all_daemons(
         .iter()
         .enumerate()
         .map(|(i, device_indices)| {
+            let gi = global_indices[i];
             // Get the first gamepad device for this instance
             let gamepad = device_indices
                 .iter()
@@ -174,12 +182,12 @@ pub fn spawn_all_daemons(
                 .find(|d| d.device_type == crate::input::DeviceType::Gamepad);
 
             match gamepad {
-                Some(device) => match spawn_daemon(settings, handler_dir, device, i) {
+                Some(device) => match spawn_daemon(settings, handler_dir, device, gi) {
                     Ok((child, vdev)) => (Some(child), vdev),
                     Err(e) => {
                         println!(
                             "[splitux] gptokeyb - Instance {}: Failed to spawn: {}",
-                            i, e
+                            gi, e
                         );
                         (None, None)
                     }
@@ -187,7 +195,7 @@ pub fn spawn_all_daemons(
                 None => {
                     println!(
                         "[splitux] gptokeyb - Instance {}: No gamepad assigned, skipping",
-                        i
+                        gi
                     );
                     (None, None)
                 }

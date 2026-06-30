@@ -46,6 +46,10 @@ pub struct Splitux {
 
     pub handlers: Vec<Handler>,
     pub selected_handler: usize,
+    /// Handler indices included in the NEXT launch, in launch order. `Instance.game`
+    /// indexes into this list. A single-game setup is `[selected_handler]`; a
+    /// multi-game session appends more games. Empty until `start_game_setup`.
+    pub selected_games: Vec<usize>,
     pub handler_edit: Option<Handler>,
     pub handler_lite: Option<Handler>,
     pub show_edit_modal: bool,
@@ -80,6 +84,13 @@ pub struct Splitux {
     pub registry_error: Option<String>,
     pub registry_search: String,
     pub registry_selected: Option<usize>,
+    /// Last registry index we auto-scrolled to. Used to scroll ONLY when the
+    /// selection changes (keyboard/gamepad nav), so the mouse wheel can free-scroll
+    /// instead of being yanked back to the selected row every frame.
+    pub registry_scrolled_idx: Option<usize>,
+    /// Same idea for the Games-list left panel (`selected_handler`): scroll to the
+    /// selection only when it changes, so the wheel isn't fought every frame.
+    pub games_scrolled_idx: Option<usize>,
     pub registry_installing: Option<String>,
     pub registry_focus: RegistryFocus,
 
@@ -109,9 +120,6 @@ pub struct Splitux {
     /// These do NOT persist to profile preferences, only apply to current launch
     pub audio_session_overrides: HashMap<usize, Option<String>>,
 
-    /// Session-only gptokeyb profile overrides (instance index -> profile name)
-    /// None means use handler's default, Some("") means disabled
-    pub gptokeyb_instance_overrides: HashMap<usize, String>,
 
     // Profile management state (Settings page)
     /// Index of profile being edited/renamed (None = not editing)
@@ -138,8 +146,6 @@ pub struct Splitux {
     // Panel collapse/resize state
     pub games_panel_collapsed: bool,
     pub games_panel_width: f32,
-    pub devices_panel_collapsed: bool,
-    pub devices_panel_width: f32,
 
     // Monitor polling state
     pub last_monitor_poll: std::time::Instant,
@@ -160,15 +166,13 @@ pub struct Splitux {
 impl Splitux {
     pub fn new(monitors: Vec<Monitor>, handler_lite: Option<Handler>) -> Self {
         let options = load_cfg();
-        let input_devices = scan_input_devices(&options.pad_filter_type);
+        let input_devices = scan_input_devices(&options.pad_filter_type, &options.input_blacklist);
         let device_display_names =
             crate::input::generate_display_names(&input_devices, &options.device_aliases);
 
         // Extract panel layout state before options is moved
         let games_panel_collapsed = options.layout.games_panel.collapsed;
         let games_panel_width = options.layout.games_panel.custom_width.unwrap_or(160.0);
-        let devices_panel_collapsed = true; // Always start collapsed
-        let devices_panel_width = options.layout.devices_panel.custom_width.unwrap_or(200.0);
         let handlers = match handler_lite {
             Some(_) => Vec::new(),
             None => scan_handlers(),
@@ -229,6 +233,7 @@ impl Splitux {
             game_profiles: HashMap::new(),
             handlers,
             selected_handler: 0,
+            selected_games: Vec::new(),
             handler_edit: None,
             handler_lite,
             show_edit_modal: false,
@@ -253,6 +258,8 @@ impl Splitux {
             registry_error: None,
             registry_search: String::new(),
             registry_selected: None,
+            registry_scrolled_idx: None,
+            games_scrolled_idx: None,
             registry_installing: None,
             registry_focus: RegistryFocus::default(),
 
@@ -274,7 +281,6 @@ impl Splitux {
             audio_warnings: Vec::new(),
             profile_audio_prefs: HashMap::new(),
             audio_session_overrides: HashMap::new(),
-            gptokeyb_instance_overrides: HashMap::new(),
 
             // Profile management state
             profile_edit_index: None,
@@ -292,8 +298,6 @@ impl Splitux {
             // Panel collapse/resize state (loaded from config above)
             games_panel_collapsed,
             games_panel_width,
-            devices_panel_collapsed,
-            devices_panel_width,
 
             // Monitor polling state
             last_monitor_poll: std::time::Instant::now(),

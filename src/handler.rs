@@ -12,8 +12,9 @@ pub use io::{import_handler, scan_handlers};
 
 use crate::backend::{
     EosSettings as BackendEosSettings, FacepunchSettings as BackendFacepunchSettings,
-    GoldbergSettings as BackendGoldbergSettings, MultiplayerBackend,
-    PhotonSettings as BackendPhotonSettings, StandaloneSettings as BackendStandaloneSettings,
+    GoldbergSettings as BackendGoldbergSettings, KeenSettings as BackendKeenSettings,
+    MultiplayerBackend, PhotonSettings as BackendPhotonSettings,
+    StandaloneSettings as BackendStandaloneSettings,
 };
 use crate::gptokeyb::GptokeybSettings;
 use crate::util::SanitizePath;
@@ -193,6 +194,12 @@ pub struct Handler {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standalone: Option<BackendStandaloneSettings>,
 
+    /// Keen Games online-backend emulator settings (enables Keen auth if Some).
+    /// For games gated on Keen's auth server (e.g. Enshrouded). Runs the bundled
+    /// keen-emu sidecar + injects --keenonline-server-data-file. Pair with goldberg.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keen: Option<BackendKeenSettings>,
+
     /// Required mods/files that must be installed by the user
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_mods: Vec<RequiredMod>,
@@ -252,6 +259,28 @@ pub struct Handler {
     /// is ignored (both ends are derived from the appid).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub save_steam_cloud: bool,
+    /// Tell gamescope to FULLSCREEN the game (`-f`). Without this gamescope hosts
+    /// the game as a floating window sized to whatever the game requests on first
+    /// run (commonly 1280x720), so it neither fills the 1080p output nor confines
+    /// the cursor — the pointer escapes at the window edges onto the host/other
+    /// monitors. Fullscreen makes gamescope own the whole output: the game fills
+    /// it AND the cursor can't leave (the correct confinement primitive — own the
+    /// output, never an exclusive device grab). Right for single / online-co-op
+    /// (`separate`) games; leave OFF for local split-screen, where each instance
+    /// is a sub-region of one output and must NOT fullscreen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fullscreen: bool,
+    /// Per-game override for the gamescope-bypass (`cfg.disable_gamescope`). When
+    /// `Some`, this game forces bypass on/off regardless of the global setting;
+    /// when `None` (default) it inherits `cfg.disable_gamescope`. Bypass un-nests
+    /// gamescope for a single LOCAL seat — the game runs directly under the host
+    /// compositor (and, for Proton/wine games, as a native Wayland client via
+    /// `winewayland.drv`), which removes the double-compositor scan-line artifact
+    /// on high-refresh panels and lets the host compositor own pointer-lock. Only
+    /// takes effect for a lone, non-together, bwrap'd local instance; split-screen
+    /// and together always keep gamescope. See `effective_disable_gamescope`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_gamescope: Option<bool>,
 }
 
 fn is_default_spec_ver(v: &u16) -> bool {
@@ -300,6 +329,7 @@ impl Default for Handler {
             facepunch: None,
             eos: None,
             standalone: None,
+            keen: None,
 
             required_mods: Vec::new(),
 
@@ -314,6 +344,8 @@ impl Default for Handler {
             save_sync_back: false,
             save_steam_id_remap: false,
             save_steam_cloud: false,
+            fullscreen: false,
+            disable_gamescope: None,
         }
     }
 }
@@ -487,6 +519,15 @@ impl Handler {
         }
     }
 
+    /// Whether this game should bypass the nested gamescope compositor: the
+    /// per-handler `disable_gamescope` override if set, else the global
+    /// `cfg.disable_gamescope`. This is only the INTENT — the launch still gates
+    /// it on being a single, non-together, bwrap'd local instance (see
+    /// build_cmds / execute), so split-screen and together never un-nest.
+    pub fn effective_disable_gamescope(&self, cfg: &crate::app::SplituxConfig) -> bool {
+        self.disable_gamescope.unwrap_or(cfg.disable_gamescope)
+    }
+
     /// Get display string for enabled backends (e.g., "Goldberg", "Photon, Facepunch")
     pub fn backend_display(&self) -> String {
         let mut backends = Vec::new();
@@ -535,6 +576,11 @@ impl Handler {
     /// Get Standalone settings reference (if enabled)
     pub fn standalone_ref(&self) -> Option<&BackendStandaloneSettings> {
         self.standalone.as_ref()
+    }
+
+    /// Get Keen settings reference (if enabled)
+    pub fn keen_ref(&self) -> Option<&BackendKeenSettings> {
+        self.keen.as_ref()
     }
 
     /// Enable Goldberg backend with default settings

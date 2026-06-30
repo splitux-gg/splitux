@@ -18,13 +18,10 @@ use std::sync::atomic::AtomicBool;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::config::load_cfg;
-use crate::handler::scan_handlers;
+use crate::handler::{scan_handlers, Handler};
 use crate::input::{scan_input_devices, DeviceInfo, DeviceType};
-use crate::instance::{
-    set_instance_names, set_instance_resolutions, set_instance_resolutions_multimonitor, Instance,
-    TogetherInput,
-};
-use crate::launch::run_session;
+use crate::instance::{Instance, TogetherInput};
+use crate::launch::run_launch;
 use crate::monitor::get_monitors_sdl;
 use crate::profiles::scan_profiles;
 use crate::session_store::{self, SaveAnchor, SavedPlayer, StoredInput};
@@ -43,6 +40,12 @@ EXAMPLES:
         --player profile=Alice,input=local:kbm \\
         --player profile=Bob,input=local:gamepad \\
         --layout fullscreen --display DP-1 --display HDMI-A-1
+
+    # Multi-game: two DIFFERENT games at once, one per monitor
+    splitux launch --game Satisfactory --game Palworld \\
+        --player game=Satisfactory,profile=Gabe,input=local:gamepad \\
+        --player game=Palworld,profile=Alice,input=together:gamepad \\
+        --display Satisfactory=DP-2 --display Palworld=HDMI-A-1
 
     # Inspect the machine before launching
     splitux list monitors   # connectors + resolutions
@@ -78,11 +81,17 @@ enum Command {
     #[command(after_help = LAUNCH_AFTER_HELP)]
     Launch {
         /// Game name (case-insensitive), e.g. "Satisfactory". See `list games`.
-        #[arg(long)]
-        game: String,
+        /// Repeatable: pass `--game` twice or more to run several DIFFERENT games
+        /// concurrently (multi-game mode). In multi-game mode every `--player`
+        /// must carry a `game=<name>` tag, and `--display`/`--layout` are
+        /// game-tagged (`<game>=<value>`).
+        #[arg(long = "game", required = true)]
+        game: Vec<String>,
         /// One player per flag, repeatable. Comma-separated `key=val`:
         ///   profile=<name>   profile to run as (default: Guest; see `list profiles`)
         ///   input=<spec>     local:kbm | local:gamepad | together:kbm | together:gamepad
+        ///   game=<name>      which --game this player belongs to (multi-game only;
+        ///                    omit when there's a single game)
         /// e.g. --player profile=Gabe,input=local:kbm
         #[arg(long = "player", value_name = "SPEC", required = true)]
         players: Vec<String>,
@@ -92,13 +101,18 @@ enum Command {
         ///   grid        2x2 (4 players)
         ///   fullscreen  each instance at full monitor resolution
         /// Which presets are valid depends on player count — see `list layouts`.
-        #[arg(long, value_enum)]
-        layout: Option<Layout>,
+        /// Single-game: bare `--layout vertical`. Multi-game: tag per game,
+        /// `--layout <game>=vertical` (untagged games default to fullscreen on
+        /// their monitor).
+        #[arg(long = "layout", value_name = "SPEC")]
+        layout: Vec<String>,
         /// Display(s) to render on, by connector name (see `list monitors`).
-        /// Repeatable. A single value splits all instances on that one monitor;
-        /// multiple values place instances across those monitors (1:1 when the
-        /// counts match, otherwise round-robin).
-        /// e.g. --display DP-3   or   --display DP-1 --display HDMI-A-1
+        /// Repeatable. Single-game: bare connector(s) — one value splits all
+        /// instances on that monitor, multiple place them across monitors (1:1
+        /// when counts match, else round-robin). Multi-game: game-tagged
+        /// `<game>=<connector>` pins each game to a monitor (untagged games
+        /// fall onto successive monitors).
+        /// e.g. --display DP-3   or   --display Satisfactory=DP-1 --display Palworld=HDMI-A-1
         #[arg(long = "display", value_name = "CONNECTOR")]
         displays: Vec<String>,
 
@@ -173,7 +187,7 @@ enum ListWhat {
     Layouts,
 }
 
-#[derive(ValueEnum, Clone, Copy)]
+#[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
 enum Layout {
     /// Side-by-side columns.
     Vertical,
@@ -231,7 +245,7 @@ pub fn run_if_cli() -> Option<i32> {
         } => launch(
             &game,
             &players,
-            layout,
+            &layout,
             &displays,
             master,
             save_anchor,
@@ -268,7 +282,7 @@ fn list(what: ListWhat) {
         }
         ListWhat::Inputs => {
             let cfg = load_cfg();
-            for (i, d) in scan_input_devices(&cfg.pad_filter_type).iter().enumerate() {
+            for (i, d) in scan_input_devices(&cfg.pad_filter_type, &cfg.input_blacklist).iter().enumerate() {
                 let kind = match d.device_type() {
                     DeviceType::Gamepad => "gamepad",
                     DeviceType::Keyboard => "keyboard",
@@ -308,9 +322,9 @@ fn list(what: ListWhat) {
 /// runs the shared `run_session`. Returns a process exit code.
 #[allow(clippy::too_many_arguments)]
 fn launch(
-    game: &str,
+    games: &[String],
     players: &[String],
-    layout: Option<Layout>,
+    layouts: &[String],
     displays: &[String],
     master_override: Option<String>,
     save_anchor: Option<String>,
@@ -319,55 +333,123 @@ fn launch(
 ) -> i32 {
     let mut cfg = load_cfg();
 
-    let Some(mut handler) = scan_handlers()
-        .into_iter()
-        .find(|h| h.display().eq_ignore_ascii_case(game))
-    else {
-        eprintln!("[splitux] game '{game}' not found — run `splitux list games`.");
-        return 2;
+    // Resolve one handler per --game (handler index == Instance.game). Order is
+    // preserved so `game 0` is the first --game.
+    let scanned = scan_handlers();
+    let mut handlers: Vec<Handler> = Vec::with_capacity(games.len());
+    for g in games {
+        match scanned.iter().find(|h| h.display().eq_ignore_ascii_case(g)) {
+            Some(h) => handlers.push(h.clone()),
+            None => {
+                eprintln!("[splitux] game '{g}' not found — run `splitux list games`.");
+                return 2;
+            }
+        }
+    }
+    let multigame = handlers.len() > 1;
+
+    // Per-launch save-anchor overrides flip the handler's save-sync fields for
+    // this run only. Single-game: which game owns the canonical save is clear, so
+    // apply to it. Multi-game: ambiguous → ignore with a note. (Done BEFORE the
+    // `game_index` closure below borrows `handlers` immutably.)
+    if !multigame {
+        if let Some(path) = save_anchor {
+            handlers[0].original_save_path = path;
+        }
+        if save_sync_back {
+            handlers[0].save_sync_back = true;
+        }
+        if save_steam_id_remap {
+            handlers[0].save_steam_id_remap = true;
+        }
+    } else if save_anchor.is_some() || save_sync_back || save_steam_id_remap {
+        eprintln!(
+            "[splitux] note: --save-anchor/--save-sync-back/--save-steam-id-remap are single-game only; ignored in multi-game."
+        );
+    }
+
+    // Resolve a game name to its index (case-insensitive, by display name).
+    let game_index = |name: &str| -> Option<usize> {
+        handlers
+            .iter()
+            .position(|h| h.display().eq_ignore_ascii_case(name))
     };
 
-    // Per-launch save-anchor overrides (set by the TUI when a Session anchors a
-    // real save). These flip the handler's save-sync fields for this run only.
-    if let Some(path) = save_anchor {
-        handler.original_save_path = path;
-    }
-    if save_sync_back {
-        handler.save_sync_back = true;
-    }
-    if save_steam_id_remap {
-        handler.save_steam_id_remap = true;
-    }
-
     let profiles = scan_profiles(true);
-    let input_devices = scan_input_devices(&cfg.pad_filter_type);
+    let input_devices = scan_input_devices(&cfg.pad_filter_type, &cfg.input_blacklist);
     let monitors = get_monitors_sdl();
     if monitors.is_empty() {
         eprintln!("[splitux] no monitors detected — a display/output must be active to render the game.");
         return 2;
     }
 
+    // Parse players → instances, resolving each `game=<name>` tag to a game index.
     let mut instances: Vec<Instance> = Vec::new();
     for spec in players {
-        match parse_player(spec, &profiles) {
-            Ok(inst) => instances.push(inst),
+        let (mut inst, game_tag) = match parse_player(spec, &profiles) {
+            Ok(v) => v,
             Err(e) => {
                 eprintln!("[splitux] --player '{spec}': {e}");
                 return 2;
             }
-        }
+        };
+        inst.game = match game_tag {
+            Some(name) => match game_index(&name) {
+                Some(i) => i,
+                None => {
+                    eprintln!("[splitux] --player '{spec}': game='{name}' is not one of the --game(s).");
+                    return 2;
+                }
+            },
+            None => {
+                if multigame {
+                    eprintln!(
+                        "[splitux] --player '{spec}': a multi-game launch requires a game=<name> tag on every player."
+                    );
+                    return 2;
+                }
+                0
+            }
+        };
+        instances.push(inst);
     }
 
-    // Local-split (couch co-op) games fold their remote players into ONE game
-    // instance owning N seats — do this before sizing so it lays out as a single
-    // fullscreen window, not an N-way split. Online/LAN handlers are unchanged.
-    let mut instances = crate::together::collapse_for_local_split(instances, &handler);
+    // Local-split (couch co-op) folds a game's players into ONE instance owning N
+    // seats — done PER GAME so each unit collapses independently, before sizing.
+    let mut instances = crate::together::collapse_instances_per_game(instances, &handlers);
 
-    // --display: pin instances onto chosen monitor(s) by connector name. A single
-    // display splits all instances on that screen; multiple displays distribute
-    // them (1:1 when counts match, else round-robin).
+    // --display: assign monitors. Single-game keeps the bare-connector behavior
+    // (one value splits all on that monitor, several distribute round-robin).
+    // Multi-game uses game-tagged `<game>=<connector>`, defaulting each game to a
+    // successive monitor.
     let mut use_multimonitor = cfg.gamescope_sdl_backend;
-    if !displays.is_empty() {
+    if multigame {
+        let mut game_monitor: Vec<usize> = (0..handlers.len()).map(|g| g % monitors.len()).collect();
+        for d in displays {
+            let Some((gname, conn)) = d.split_once('=') else {
+                eprintln!(
+                    "[splitux] --display '{d}': multi-game needs <game>=<connector> (e.g. Palworld=HDMI-A-1)."
+                );
+                return 2;
+            };
+            let Some(gi) = game_index(gname.trim()) else {
+                eprintln!("[splitux] --display '{d}': game '{gname}' is not one of the --game(s).");
+                return 2;
+            };
+            let Some(mi) = monitors.iter().position(|m| {
+                m.connector_name().eq_ignore_ascii_case(conn.trim())
+                    || m.name().eq_ignore_ascii_case(conn.trim())
+            }) else {
+                eprintln!("[splitux] display '{conn}' not found — run `splitux list monitors`.");
+                return 2;
+            };
+            game_monitor[gi] = mi;
+        }
+        for inst in instances.iter_mut() {
+            inst.monitor = game_monitor[inst.game];
+        }
+        use_multimonitor = true;
+    } else if !displays.is_empty() {
         let mut idxs = Vec::with_capacity(displays.len());
         for d in displays {
             match monitors.iter().position(|m| {
@@ -386,8 +468,43 @@ fn launch(
         use_multimonitor = true;
     }
 
-    // --layout: override the layout preset for this player count.
-    if let Some(layout) = layout {
+    // --layout. Single-game: a single bare preset for the player count (existing
+    // behavior). Multi-game: game-tagged `<game>=<preset>`. Per-monitor split
+    // tiling for multi-game lands in a later step; for now each game renders
+    // fullscreen on its own monitor (which `set_instance_resolutions_multimonitor`
+    // already does for a single instance per monitor), so a non-fullscreen
+    // multi-game layout request is accepted but warned as not-yet-applied.
+    if multigame {
+        for l in layouts {
+            let Some((gname, lval)) = l.split_once('=') else {
+                eprintln!(
+                    "[splitux] --layout '{l}': multi-game needs <game>=<layout> (e.g. Satisfactory=vertical)."
+                );
+                return 2;
+            };
+            if game_index(gname.trim()).is_none() {
+                eprintln!("[splitux] --layout '{l}': game '{gname}' is not one of the --game(s).");
+                return 2;
+            }
+            let Ok(parsed) = <Layout as ValueEnum>::from_str(lval.trim(), true) else {
+                eprintln!(
+                    "[splitux] --layout '{l}': '{lval}' is not a valid layout (vertical|horizontal|grid|fullscreen)."
+                );
+                return 2;
+            };
+            if parsed != Layout::Fullscreen {
+                eprintln!(
+                    "[splitux] note: multi-game split layouts aren't wired yet; game '{gname}' will render fullscreen on its monitor."
+                );
+            }
+        }
+    } else if let Some(lspec) = layouts.first() {
+        let Ok(layout) = <Layout as ValueEnum>::from_str(lspec.trim(), true) else {
+            eprintln!(
+                "[splitux] --layout '{lspec}': not a valid layout (vertical|horizontal|grid|fullscreen)."
+            );
+            return 2;
+        };
         let count = instances.len();
         let preset_id = layout.preset_id(count);
         if get_presets_for_count(count)
@@ -403,41 +520,39 @@ fn launch(
         }
     }
 
-    // Same pre-launch sizing/naming the GUI does.
-    if use_multimonitor {
-        set_instance_resolutions_multimonitor(&mut instances, &monitors, &cfg);
-    } else {
-        set_instance_resolutions(&mut instances, &monitors[0], &cfg);
-    }
-    set_instance_names(&mut instances, &profiles);
-
     let dev_infos: Vec<DeviceInfo> = input_devices.iter().map(|d| d.info()).collect();
     // --master overrides settings.json's master_profile for this launch.
     let master = master_override.or_else(|| cfg.master_profile.clone());
     let ready = AtomicBool::new(false);
 
     let remote: usize = instances.iter().map(|i| i.together_seats as usize).sum();
+    let game_names: Vec<&str> = handlers.iter().map(|h| h.display()).collect();
     println!(
-        "[splitux] launching '{}' headlessly — {} player(s), {} remote seat(s). \
+        "[splitux] launching {} headlessly — {} player(s), {} remote seat(s). \
          Together invite URLs print below once the game is up.",
-        handler.display(),
+        game_names.join(" + "),
         instances.len(),
         remote
     );
 
-    // run_session blocks until the game exits, then tears everything down.
-    run_session(
-        &handler,
-        &instances,
-        &monitors,
+    // Shared launch-core: per-game collapse (idempotent here — already collapsed
+    // for the --display/--layout math above), per-monitor sizing, naming, then the
+    // shared session. The GUI calls this SAME facade, so the surfaces can't diverge.
+    run_launch(
+        &handlers,
+        instances,
+        monitors,
+        &profiles,
         &dev_infos,
         &cfg,
+        use_multimonitor,
         master.as_deref(),
         &ready,
         &|title, body| eprintln!("[splitux] {title}: {body}"),
     );
     0
 }
+
 
 /// Save a session as a pinned, reusable template without launching it. Resolves
 /// the game + per-player specs the same way `launch` does (same handler scan +
@@ -467,8 +582,9 @@ fn save_session(
     // session schema stores.
     let mut saved_players: Vec<SavedPlayer> = Vec::new();
     for spec in players {
+        // Templates are single-game; ignore any `game=` tag.
         let inst = match parse_player(spec, &profiles) {
-            Ok(inst) => inst,
+            Ok((inst, _game_tag)) => inst,
             Err(e) => {
                 eprintln!("[splitux] --player '{spec}': {e}");
                 return 2;
@@ -524,13 +640,17 @@ fn save_session(
 /// Parse one `--player key=val,key=val` spec into an Instance. P2 supports
 /// `profile=<name>` and `input=together:gamepad|together:kbm`; local-device
 /// inputs (pad/kbm) land in P3.
-fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
+fn parse_player(spec: &str, profiles: &[String]) -> Result<(Instance, Option<String>), String> {
     let mut profselection = 0; // Guest
     let mut together = false;
     let mut together_input = TogetherInput::Gamepad;
     // Physical input devices pinned to this local player (indices into
     // `splitux list inputs`). Empty unless a `local:<io>:<idx>` spec is given.
     let mut devices: Vec<usize> = vec![];
+    // Optional `game=<name>` tag — which --game this player belongs to. Resolved
+    // to an `Instance.game` index by the caller (it owns the game list). `None`
+    // when omitted (single-game).
+    let mut game_tag: Option<String> = None;
 
     for tok in spec.split(',') {
         let tok = tok.trim();
@@ -541,6 +661,9 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
             .split_once('=')
             .ok_or_else(|| format!("'{tok}' is not key=val"))?;
         match key.trim() {
+            "game" => {
+                game_tag = Some(val.trim().to_string());
+            }
             "profile" => {
                 profselection = profiles
                     .iter()
@@ -606,19 +729,24 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<Instance, String> {
         }
     }
 
-    Ok(Instance {
-        devices,
-        profname: String::new(),
-        profselection,
-        monitor: 0,
-        width: 0,
-        height: 0,
-        together,
-        together_input,
-        together_seats: if together { 1 } else { 0 },
-        // A standalone local player is its own instance with no held seats, so
-        // gamescope never blocks parent input — only a collapsed local-split
-        // instance needs this set, which collapse_for_local_split handles.
-        local_input: false,
-    })
+    Ok((
+        Instance {
+            devices,
+            // Resolved by the caller from `game_tag` against the --game list.
+            game: 0,
+            profname: String::new(),
+            profselection,
+            monitor: 0,
+            width: 0,
+            height: 0,
+            together,
+            together_input,
+            together_seats: if together { 1 } else { 0 },
+            // A standalone local player is its own instance with no held seats, so
+            // gamescope never blocks parent input — only a collapsed local-split
+            // instance needs this set, which collapse_for_local_split handles.
+            local_input: false,
+        },
+        game_tag,
+    ))
 }

@@ -62,8 +62,8 @@ impl Splitux {
             }
 
             if r1.clicked() || r2.clicked() || r3.clicked() {
-                self.input_devices = scan_input_devices(&self.options.pad_filter_type);
-                self.refresh_device_display_names();
+                let devices = scan_input_devices(&self.options.pad_filter_type, &self.options.input_blacklist);
+                self.set_input_devices(devices);
             }
         });
         self.scroll_to_settings_option_if_needed(1, &r.response);
@@ -221,5 +221,31 @@ impl Splitux {
             }
         });
         self.scroll_to_settings_option_if_needed(12, &r.response);
+
+        // Option 13: Auto-hide cursor
+        let r = self.settings_option_frame(13).show(ui, |ui| {
+            let check = ui.checkbox(&mut self.options.gamescope_autohide_cursor, "Auto-hide cursor when idle");
+            if check.hovered() || self.is_settings_option_focused(13) {
+                self.infotext = "DEFAULT: Off\n\nHides the mouse cursor after ~1s of no motion. Leave off for mouse games or multi-instance — a window that never sees mouse motion would hide its cursor permanently.".to_string();
+            }
+            if self.is_settings_option_focused(13) && self.activate_focused {
+                self.options.gamescope_autohide_cursor = !self.options.gamescope_autohide_cursor;
+            }
+        });
+        self.scroll_to_settings_option_if_needed(13, &r.response);
+
+        // Disable gamescope (un-nest for a single local seat). Uses a sentinel
+        // focus index (50) outside the allocated 0-19 nav range: the nav space is
+        // fully assigned, so this stays mouse-toggle only rather than colliding.
+        let r = self.settings_option_frame(50).show(ui, |ui| {
+            let check = ui.checkbox(
+                &mut self.options.disable_gamescope,
+                "Bypass gamescope for a single local seat (direct compositor)",
+            );
+            if check.hovered() {
+                self.infotext = "DEFAULT: Off\n\nRuns a SINGLE local game directly under the host compositor instead of nested gamescope. Fixes the double-compositor scan-line artifact on high-refresh panels and lets the compositor own the cursor grab; Proton games run as native Wayland clients (winewayland). Only applies to a lone, non-Together, bwrap'd seat — split-screen and Together always keep gamescope. Per-game override: handler `disable_gamescope`.".to_string();
+            }
+        });
+        self.scroll_to_settings_option_if_needed(50, &r.response);
     }
 }

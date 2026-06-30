@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use crate::paths::{PATH_PARTY, PATH_ASSETS};
+use crate::paths::PATH_PARTY;
 
 use super::parser::{parse_gptk, serialize_gptk};
 use super::profile::GptokeybProfile;
@@ -23,28 +23,6 @@ pub fn ensure_profiles_dir() -> std::io::Result<()> {
 /// List all user-created profile names (without .gptk extension)
 pub fn list_user_profiles() -> Vec<String> {
     let dir = profiles_dir();
-    if !dir.exists() {
-        return Vec::new();
-    }
-
-    let mut profiles = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "gptk") {
-                if let Some(stem) = path.file_stem() {
-                    profiles.push(stem.to_string_lossy().into_owned());
-                }
-            }
-        }
-    }
-    profiles.sort();
-    profiles
-}
-
-/// List built-in profile names from assets/gptokeyb/
-pub fn list_builtin_profiles() -> Vec<String> {
-    let dir = PATH_ASSETS.join("gptokeyb");
     if !dir.exists() {
         return Vec::new();
     }

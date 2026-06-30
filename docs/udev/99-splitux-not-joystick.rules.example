@@ -1,0 +1,27 @@
+# splitux — strip the bogus ID_INPUT_JOYSTICK tag from non-gamepad input devices.
+#
+# Some keyboards/mice expose extra HID endpoints (System Control, Consumer Control,
+# vendor control interfaces) that udev's input_id mis-tags as joysticks. Games with
+# an old statically-linked SDL then crash in GetJoystickNames (std::string(NULL) ->
+# strlen(NULL) -> SIGABRT) when that phantom joystick coexists with a real pad.
+#
+# HOW TO USE
+#   1. Find your offending device's exact name:
+#        for e in /dev/input/event*; do
+#          udevadm info -q property -n "$e" | grep -q ID_INPUT_JOYSTICK=1 \
+#            && echo "$e $(cat /sys/class/input/$(basename $e)/device/name)"
+#        done
+#      Anything in that list that is NOT a real game controller is a candidate.
+#   2. Copy this file to /etc/udev/rules.d/99-splitux-not-joystick.rules
+#   3. Replace the ATTRS{name}== value(s) below with your device name(s). Add one
+#      line per device. Match the exact string from step 1.
+#   4. sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=input
+#
+# This removes ONLY the joystick label; the device keeps functioning normally.
+
+# --- examples (edit / duplicate these) -------------------------------------
+# ZSA Moonlander keyboard's System Control endpoint (real, confirmed case):
+SUBSYSTEM=="input", ENV{ID_INPUT_JOYSTICK}=="1", ATTRS{name}=="ZSA Technology Labs Moonlander Mark I System Control", ENV{ID_INPUT_JOYSTICK}=""
+
+# Template — replace the name with yours:
+#SUBSYSTEM=="input", ENV{ID_INPUT_JOYSTICK}=="1", ATTRS{name}=="YOUR DEVICE NAME HERE", ENV{ID_INPUT_JOYSTICK}=""

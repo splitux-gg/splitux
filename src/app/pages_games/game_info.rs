@@ -22,7 +22,6 @@ impl Splitux {
         let readme_content = std::fs::read_to_string(&readme_path).ok();
         let hero_image = self.handlers[self.selected_handler].hero_image();
         let logo_image = self.handlers[self.selected_handler].logo_image();
-        let box_art = self.handlers[self.selected_handler].box_art();
         let platform_name = self.handlers[self.selected_handler].platform_name();
         let platform_app_id = self.handlers[self.selected_handler].platform_app_id();
         let backend_display = self.handlers[self.selected_handler].backend_display();
@@ -47,8 +46,11 @@ impl Splitux {
                     .corner_radius(4),
             );
 
-            // Overlay logo or box art on top (centered)
-            let overlay_image = logo_image.as_ref().or(box_art.as_ref());
+            // Overlay ONLY a true (transparent) title logo, centered. The old
+            // box_art fallback was the full key-art capsule, which rendered as a
+            // smaller duplicate of the hero ("image-in-image" — Belts of Iron,
+            // LEGO Batman/Party). Games without a real logo now show a clean hero.
+            let overlay_image = logo_image.as_ref();
             if let Some(overlay_url) = overlay_image {
                 // Position the logo overlay in the center of where the banner was drawn
                 let logo_rect = egui::Rect::from_center_size(

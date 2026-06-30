@@ -23,25 +23,13 @@ pub enum TogetherInput {
     KbMouse,
 }
 
-impl TogetherInput {
-    pub fn label(self) -> &'static str {
-        match self {
-            TogetherInput::Gamepad => "Gamepad",
-            TogetherInput::KbMouse => "Kb+Mouse",
-        }
-    }
-    /// Toggle between the two (for the card's cycle control).
-    pub fn next(self) -> Self {
-        match self {
-            TogetherInput::Gamepad => TogetherInput::KbMouse,
-            TogetherInput::KbMouse => TogetherInput::Gamepad,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Instance {
     pub devices: Vec<usize>,
+    /// Which game (unit) this instance belongs to. Index into the launch's
+    /// `&[Handler]` slice. `0` for every single-game launch (the only game), so
+    /// the field is inert until multi-game mode threads multiple handlers.
+    pub game: usize,
     pub profname: String,
     pub profselection: usize,
     pub monitor: usize,

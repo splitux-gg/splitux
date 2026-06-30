@@ -15,13 +15,3 @@ pub(super) enum AudioPrefAction {
     Clear,
 }
 
-/// gptokeyb profile dropdown action
-#[derive(Clone, PartialEq)]
-pub(super) enum GptokeybAction {
-    /// Use handler default (no override)
-    Default,
-    /// Disable gptokeyb for this instance
-    Disabled,
-    /// Use a specific profile
-    Profile(String),
-}

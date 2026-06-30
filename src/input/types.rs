@@ -8,6 +8,20 @@ pub enum DeviceType {
     Other,
 }
 
+impl DeviceType {
+    /// Short stable kind string used by the input-ignore list to tell apart
+    /// same-named endpoints of different kinds (see `IgnoredDevice`).
+    pub fn kind_str(self) -> &'static str {
+        match self {
+            DeviceType::Gamepad => "gamepad",
+            DeviceType::Keyboard => "keyboard",
+            DeviceType::Mouse => "mouse",
+            DeviceType::Other => "other",
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum PadButton {
     Left,
     Right,

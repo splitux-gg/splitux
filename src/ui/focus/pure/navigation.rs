@@ -86,8 +86,11 @@ pub fn navigate_instances_page(
             }
             NavDirection::Down => InstancesNav::None,
         },
-        // InstanceCard and StartButton navigation handled in app_input.rs
-        InstanceFocus::InstanceCard(_, _) | InstanceFocus::StartButton => InstancesNav::None,
+        // InstanceCard, StartButton and the games sidebar are handled by the
+        // legacy instance nav (handle_instance_*), not this pipeline.
+        InstanceFocus::InstanceCard(_, _)
+        | InstanceFocus::StartButton
+        | InstanceFocus::GamesSidebar => InstancesNav::None,
     }
 }
 

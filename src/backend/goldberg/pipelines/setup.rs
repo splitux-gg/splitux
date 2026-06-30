@@ -125,6 +125,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), Box<dyn std::error:
 pub fn create_all_overlays(
     dlls: &[SteamApiDll],
     configs: &[GoldbergConfig],
+    global_indices: &[usize],
     is_windows: bool,
     handler_settings: &HashMap<String, String>,
     disable_networking: bool,
@@ -175,9 +176,11 @@ pub fn create_all_overlays(
     let mut overlays = Vec::new();
 
     for (i, config) in configs.iter().enumerate() {
-        // Create base Goldberg overlay
+        // Create base Goldberg overlay. The overlay DIR is named by the GLOBAL
+        // instance index so two concurrent games never collide on `goldberg-
+        // overlay-0`; `i` stays local for indexing this game's own arrays.
         let overlay = create_instance_overlay(
-            i,
+            global_indices[i],
             dlls,
             config,
             is_windows,

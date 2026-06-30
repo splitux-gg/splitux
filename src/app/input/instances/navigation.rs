@@ -10,7 +10,7 @@ impl Splitux {
                 if self.instances.len() > 0 {
                     self.instance_focus = InstanceFocus::InstanceCard(
                         self.instances.len() - 1,
-                        InstanceCardFocus::AudioOverride
+                        InstanceCardFocus::AudioPreference
                     );
                 } else {
                     self.instance_focus = InstanceFocus::Devices;
@@ -35,7 +35,7 @@ impl Splitux {
                         if idx > 0 {
                             self.instance_focus = InstanceFocus::InstanceCard(
                                 idx - 1,
-                                InstanceCardFocus::AudioOverride
+                                InstanceCardFocus::AudioPreference
                             );
                             return;
                         } else {
@@ -51,8 +51,9 @@ impl Splitux {
                             InstanceCardFocus::Profile
                         }
                     }
-                    InstanceCardFocus::InviteDevice => {
-                        if self.options.gamescope_sdl_backend {
+                    // First device sits below Monitor / SetMaster / Profile.
+                    InstanceCardFocus::Device(0) => {
+                        if self.can_assign_displays() {
                             InstanceCardFocus::Monitor
                         } else if set_master_visible {
                             InstanceCardFocus::SetMaster
@@ -60,22 +61,26 @@ impl Splitux {
                             InstanceCardFocus::Profile
                         }
                     }
-                    InstanceCardFocus::Device(0) => InstanceCardFocus::InviteDevice,
                     InstanceCardFocus::Device(d) => InstanceCardFocus::Device(d - 1),
                     InstanceCardFocus::AudioOverride => {
                         let dev_count = self.instances.get(idx).map(|inst| inst.devices.len()).unwrap_or(0);
                         if dev_count > 0 {
                             InstanceCardFocus::Device(dev_count - 1)
+                        } else if self.can_assign_displays() {
+                            InstanceCardFocus::Monitor
+                        } else if set_master_visible {
+                            InstanceCardFocus::SetMaster
                         } else {
-                            InstanceCardFocus::InviteDevice
+                            InstanceCardFocus::Profile
                         }
                     }
                     InstanceCardFocus::AudioPreference => InstanceCardFocus::AudioOverride,
-                    InstanceCardFocus::GptokeybProfile => InstanceCardFocus::AudioPreference,
                 };
                 self.instance_focus = InstanceFocus::InstanceCard(idx, new_element);
             }
             InstanceFocus::Devices => {}
+            // In the games sidebar, Up moves the game selection (launch tracks it).
+            InstanceFocus::GamesSidebar => self.sidebar_select_prev(),
         }
     }
 
@@ -86,6 +91,7 @@ impl Splitux {
                     self.instance_focus = InstanceFocus::InstanceCard(0, InstanceCardFocus::Profile);
                 }
             }
+            InstanceFocus::GamesSidebar => self.sidebar_select_next(),
             InstanceFocus::LaunchOptions => {
                 self.instance_focus = InstanceFocus::StartButton;
             }
@@ -105,21 +111,24 @@ impl Splitux {
                     InstanceCardFocus::Profile => {
                         if set_master_visible {
                             InstanceCardFocus::SetMaster
-                        } else if self.options.gamescope_sdl_backend {
+                        } else if self.can_assign_displays() {
                             InstanceCardFocus::Monitor
+                        } else if dev_count > 0 {
+                            InstanceCardFocus::Device(0)
                         } else {
-                            InstanceCardFocus::InviteDevice
+                            InstanceCardFocus::AudioOverride
                         }
                     }
                     InstanceCardFocus::SetMaster => {
-                        if self.options.gamescope_sdl_backend {
+                        if self.can_assign_displays() {
                             InstanceCardFocus::Monitor
+                        } else if dev_count > 0 {
+                            InstanceCardFocus::Device(0)
                         } else {
-                            InstanceCardFocus::InviteDevice
+                            InstanceCardFocus::AudioOverride
                         }
                     }
-                    InstanceCardFocus::Monitor => InstanceCardFocus::InviteDevice,
-                    InstanceCardFocus::InviteDevice => {
+                    InstanceCardFocus::Monitor => {
                         if dev_count > 0 {
                             InstanceCardFocus::Device(0)
                         } else {
@@ -134,8 +143,7 @@ impl Splitux {
                         }
                     }
                     InstanceCardFocus::AudioOverride => InstanceCardFocus::AudioPreference,
-                    InstanceCardFocus::AudioPreference => InstanceCardFocus::GptokeybProfile,
-                    InstanceCardFocus::GptokeybProfile => {
+                    InstanceCardFocus::AudioPreference => {
                         if idx + 1 < self.instances.len() {
                             self.instance_focus = InstanceFocus::InstanceCard(
                                 idx + 1,
@@ -157,37 +165,32 @@ impl Splitux {
     pub(super) fn handle_instance_left(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                let player_count = self.instances.len();
-                let has_carousel = player_count >= 2;
-
-                // If on carousel (index 0), cycle preset
-                if has_carousel && self.launch_option_index == 0 {
-                    self.options.layout_presets.cycle_prev(player_count);
-                } else if self.launch_option_index > 0 {
-                    self.launch_option_index -= 1;
+                // The carousel is the only launch option, so Left just cycles it.
+                if self.show_layout_carousel() {
+                    self.options.layout_presets.cycle_prev(self.instances.len());
                 }
             }
             InstanceFocus::InstanceCard(idx, element) => {
                 if *idx > 0 {
                     self.instance_focus = InstanceFocus::InstanceCard(idx - 1, element.clone());
+                } else {
+                    // Left off the first card → step into the games sidebar.
+                    self.enter_games_sidebar();
                 }
             }
-            _ => {}
+            // Devices strip / Start button are the left edge of the setup; the
+            // always-visible games sidebar sits further left.
+            InstanceFocus::Devices | InstanceFocus::StartButton => self.enter_games_sidebar(),
+            InstanceFocus::GamesSidebar => {} // already far-left
         }
     }
 
     pub(super) fn handle_instance_right(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                let player_count = self.instances.len();
-                let has_carousel = player_count >= 2;
-                let max_options = if has_carousel { 2 } else { 1 };
-
-                // If on carousel (index 0), cycle preset
-                if has_carousel && self.launch_option_index == 0 {
-                    self.options.layout_presets.cycle_next(player_count);
-                } else if self.launch_option_index < max_options - 1 {
-                    self.launch_option_index += 1;
+                // The carousel is the only launch option, so Right just cycles it.
+                if self.show_layout_carousel() {
+                    self.options.layout_presets.cycle_next(self.instances.len());
                 }
             }
             InstanceFocus::InstanceCard(idx, element) => {
@@ -195,7 +198,35 @@ impl Splitux {
                     self.instance_focus = InstanceFocus::InstanceCard(idx + 1, element.clone());
                 }
             }
+            // Right out of the sidebar returns to the setup content.
+            InstanceFocus::GamesSidebar => self.instance_focus = InstanceFocus::Devices,
             _ => {}
+        }
+    }
+
+    /// Move focus into the always-visible left games sidebar (Instances page) so a
+    /// controller can change the game in place. `prepare_game_launch` re-pins the
+    /// session to `selected_handler` at launch, so just moving the selection here
+    /// is enough — no need to rebuild the setup.
+    fn enter_games_sidebar(&mut self) {
+        if self.handlers.is_empty() {
+            return;
+        }
+        self.instance_focus = InstanceFocus::GamesSidebar;
+        self.games_scrolled_idx = None; // re-center the list on the selection
+    }
+
+    fn sidebar_select_prev(&mut self) {
+        if self.selected_handler > 0 {
+            self.selected_handler -= 1;
+            self.games_scrolled_idx = None;
+        }
+    }
+
+    fn sidebar_select_next(&mut self) {
+        if self.selected_handler + 1 < self.handlers.len() {
+            self.selected_handler += 1;
+            self.games_scrolled_idx = None;
         }
     }
 }

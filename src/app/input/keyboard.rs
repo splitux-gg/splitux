@@ -2,10 +2,16 @@
 
 use crate::app::app::{MenuPage, SettingsFocus, Splitux};
 use crate::input::PadButton;
+use crate::ui::focus::types::{FocusPane, NavDirection, RegistryFocus};
 use eframe::egui::{self, Key};
 
 impl Splitux {
-    /// Process keyboard navigation events, returns true if events were consumed
+    /// Process keyboard navigation events, returns true if events were consumed.
+    ///
+    /// Keyboard drives the SAME custom focus system as the gamepad on every page:
+    /// arrows move focus, Enter activates, Escape goes back. Games/Registry route
+    /// through `handle_direction_input` (the gamepad's own nav), so the two input
+    /// methods stay in lockstep.
     pub(super) fn process_keyboard_nav(
         &mut self,
         raw_input: &egui::RawInput,
@@ -14,6 +20,8 @@ impl Splitux {
         key: &mut Option<Key>,
         page_changed: &mut bool,
     ) -> bool {
+        let on_games_page = self.cur_page == MenuPage::Games;
+        let on_registry_page = self.cur_page == MenuPage::Registry;
         let mut kb_nav_consumed = false;
 
         for event in &raw_input.events {
@@ -26,12 +34,62 @@ impl Splitux {
                         if on_settings_page {
                             kb_nav_consumed |= self.handle_settings_keyboard(*k, key, page_changed);
                         }
+                        if on_games_page {
+                            kb_nav_consumed |= self.handle_games_keyboard(*k, key);
+                        }
+                        if on_registry_page {
+                            kb_nav_consumed |= self.handle_registry_keyboard(*k, key);
+                        }
                     }
                     _ => {}
                 }
             }
         }
         kb_nav_consumed
+    }
+
+    /// Games page: arrows move focus (same as gamepad), Enter plays the selected
+    /// game (GameList focus) or activates the focused action/info button.
+    fn handle_games_keyboard(&mut self, k: Key, key: &mut Option<Key>) -> bool {
+        match k {
+            Key::ArrowUp => self.handle_direction_input(NavDirection::Up, key),
+            Key::ArrowDown => self.handle_direction_input(NavDirection::Down, key),
+            Key::ArrowLeft => self.handle_direction_input(NavDirection::Left, key),
+            Key::ArrowRight => self.handle_direction_input(NavDirection::Right, key),
+            Key::Enter => {
+                if self.handlers.is_empty() {
+                    return false;
+                }
+                match self.focus_pane {
+                    FocusPane::GameList => self.start_game_setup(),
+                    FocusPane::ActionBar | FocusPane::InfoPane => self.activate_focused = true,
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Registry page: arrows move focus, Enter steps into the install button (from
+    /// the list) or activates it — mirrors the gamepad A-button behaviour.
+    fn handle_registry_keyboard(&mut self, k: Key, key: &mut Option<Key>) -> bool {
+        match k {
+            Key::ArrowUp => self.handle_direction_input(NavDirection::Up, key),
+            Key::ArrowDown => self.handle_direction_input(NavDirection::Down, key),
+            Key::ArrowLeft => self.handle_direction_input(NavDirection::Left, key),
+            Key::ArrowRight => self.handle_direction_input(NavDirection::Right, key),
+            Key::Enter => match self.registry_focus {
+                RegistryFocus::HandlerList => {
+                    if self.registry_selected.is_some() {
+                        self.registry_focus = RegistryFocus::InstallButton;
+                    }
+                }
+                RegistryFocus::InstallButton => self.activate_focused = true,
+            },
+            Key::Escape => return false,
+            _ => return false,
+        }
+        true
     }
 
     fn handle_instances_keyboard(&mut self, k: Key) -> bool {

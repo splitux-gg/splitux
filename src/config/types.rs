@@ -10,6 +10,50 @@ pub enum PadFilterType {
     OnlySteamInput,
 }
 
+/// One entry in the input-ignore list.
+///
+/// Some hardware exposes several evdev nodes that report the SAME name but differ
+/// in kind — e.g. the ZSA Moonlander presents both a Keyboard node and a Mouse
+/// (mousekeys) node, both named "ZSA Technology Labs Moonlander Mark I". A
+/// name-only match can't separate them, so an entry may pin the device kind too.
+/// Serialized untagged: a bare string stays a plain name in the JSON (so existing
+/// configs keep working), while a kind-qualified entry is `{name, kind}`.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(untagged)]
+pub enum IgnoredDevice {
+    /// Match every device with this exact name, regardless of kind (legacy form).
+    Name(String),
+    /// Match only the device with this name AND kind ("keyboard"|"mouse"|"gamepad").
+    Typed { name: String, kind: String },
+}
+
+impl IgnoredDevice {
+    /// The device name this entry targets.
+    pub fn name(&self) -> &str {
+        match self {
+            IgnoredDevice::Name(n) => n,
+            IgnoredDevice::Typed { name, .. } => name,
+        }
+    }
+
+    /// The kind qualifier, if any (`None` = matches any kind).
+    pub fn kind(&self) -> Option<&str> {
+        match self {
+            IgnoredDevice::Name(_) => None,
+            IgnoredDevice::Typed { kind, .. } => Some(kind),
+        }
+    }
+
+    /// Whether this entry drops a device of `(name, kind)`. A bare-name entry
+    /// matches any kind; a typed entry must match both name and kind.
+    pub fn matches(&self, name: &str, kind: &str) -> bool {
+        match self {
+            IgnoredDevice::Name(n) => n == name,
+            IgnoredDevice::Typed { name: n, kind: k } => n == name && k == kind,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
 pub enum WindowManagerType {
     #[default]
@@ -148,6 +192,27 @@ pub struct SplituxConfig {
     pub gamescope_fix_lowres: bool,
     pub gamescope_sdl_backend: bool,
     pub gamescope_force_grab_cursor: bool,
+    /// Auto-hide the mouse cursor after ~1s of no pointer motion (gamescope
+    /// `--hide-cursor-delay`). Off by default: a multi-instance or pad-driven
+    /// session has windows that never see mouse motion, so the cursor would hide
+    /// and never come back (clicks still land — it's just not drawn). Opt in for
+    /// couch/TV play where a lingering arrow is the bigger annoyance.
+    #[serde(default)]
+    pub gamescope_autohide_cursor: bool,
+    /// Bypass the nested gamescope compositor for a single LOCAL seat and run
+    /// the game directly under the host compositor (like Lutris). Eliminates the
+    /// double-compositor scan-line artifact on high-refresh physical panels:
+    /// gamescope nested in niri presents to niri, niri then scans that surface
+    /// out to the DCN at the panel's native refresh, and the two present paths
+    /// desync on motion ("Compositor released us but we were not acquired").
+    /// Opt-in. Engages ONLY when the launch is a single, non-split,
+    /// non-together instance with bwrap enabled — gamescope is still required
+    /// for split-screen geometry and together PipeWire capture, so multi-seat
+    /// and together launches always keep it. The un-nested game inherits the
+    /// session's X display (Xwayland-satellite) so its wine display driver is
+    /// unchanged; only the redundant compositor layer is removed.
+    #[serde(default)]
+    pub disable_gamescope: bool,
     #[serde(alias = "kbm_support")] // backwards compatibility
     pub input_holding: bool,
     pub proton_version: String,
@@ -159,6 +224,13 @@ pub struct SplituxConfig {
     #[serde(default)]
     pub layout_presets: LayoutPresets,
     pub pad_filter_type: PadFilterType,
+    /// Exact evdev device names to drop during input scanning. Used to hide the
+    /// phantom extra endpoints some keyboards/mice expose (e.g. a keyboard's
+    /// "System Control" / "Consumer Control" node, or a trackball's secondary
+    /// nodes) so they never clutter the device strip or get picked as a player
+    /// seat. The in-app analog of the `99-splitux-not-joystick` udev rule.
+    #[serde(default)]
+    pub input_blacklist: Vec<IgnoredDevice>,
     #[serde(default)]
     pub allow_multiple_instances_on_same_device: bool,
     pub disable_mount_gamedirs: bool,
@@ -298,13 +370,16 @@ impl Default for SplituxConfig {
             enable_kwin_script: true,
             gamescope_fix_lowres: true,
             gamescope_sdl_backend: true,
-            gamescope_force_grab_cursor: false,
+            gamescope_force_grab_cursor: true,
             input_holding: true,
             proton_version: "".to_string(),
             proton_separate_pfxs: true,
             vertical_two_player: false,
             layout_presets: LayoutPresets::default(),
+            gamescope_autohide_cursor: false,
+            disable_gamescope: false,
             pad_filter_type: PadFilterType::NoSteamInput,
+            input_blacklist: Vec::new(),
             allow_multiple_instances_on_same_device: false,
             disable_mount_gamedirs: false,
             photon_app_ids: PhotonAppIds::default(),

@@ -653,6 +653,54 @@ download_facepunch() {
     info "SplituxFacepunch downloaded"
 }
 
+# Keen online-backend emulator: host-side auth sidecar for Keen-gated titles
+# (e.g. Enshrouded). Sideloaded like gptokeyb — fetched from a splitux-gg release
+# rather than committed. The binary is staged into build/bin/ and resolved at
+# runtime via the companion-bin search (BIN_KEEN_EMU). Missing -> Keen-gated
+# multiplayer is disabled with a clear log, not a hard failure.
+download_keen() {
+    local keen_out="$SCRIPT_DIR/assets/keen"
+    local keen_repo="splitux-gg/keen-emu-splitux"
+    local keen_release
+    local local_version=""
+
+    keen_release=$(curl -fsSL "https://api.github.com/repos/$keen_repo/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+
+    if [[ -z "$keen_release" ]]; then
+        warn "Failed to fetch latest keen-emu-splitux release, using fallback v0.1.0"
+        keen_release="v0.1.0"
+    fi
+
+    if [[ -f "$keen_out/.version" ]]; then
+        local_version=$(cat "$keen_out/.version")
+    fi
+
+    if [[ -f "$keen_out/keen-emu" ]] && [[ "$local_version" == "$keen_release" ]]; then
+        info "keen-emu-splitux $keen_release already installed"
+        return 0
+    fi
+
+    if [[ -n "$local_version" ]]; then
+        step "Updating keen-emu-splitux $local_version -> $keen_release..."
+    else
+        step "Downloading keen-emu-splitux $keen_release..."
+    fi
+
+    # The release ships a raw x64 binary asset (keen-emu-linux-x64), not a tarball.
+    local base_url="https://github.com/$keen_repo/releases/download/$keen_release"
+
+    mkdir -p "$keen_out"
+    if ! curl -fsSL "$base_url/keen-emu-linux-x64" -o "$keen_out/keen-emu"; then
+        warn "Failed to download keen-emu-splitux (Keen-gated titles will be unavailable)"
+        rm -f "$keen_out/keen-emu"
+        return 1
+    fi
+    chmod +x "$keen_out/keen-emu"
+
+    echo "$keen_release" > "$keen_out/.version"
+    info "keen-emu-splitux $keen_release installed"
+}
+
 # =============================================================================
 # Build
 # =============================================================================
@@ -682,6 +730,8 @@ do_build() {
     local gptk_pid=$!
     download_facepunch &
     local fp_pid=$!
+    download_keen &
+    local keen_pid=$!
 
     # Build splitux while dependencies download
     build_splitux
@@ -692,6 +742,7 @@ do_build() {
     wait $gsc_pid 2>/dev/null || warn "gamescope-splitux download may have failed"
     wait $gptk_pid 2>/dev/null || warn "gptokeyb-splitux download may have failed"
     wait $fp_pid 2>/dev/null || warn "SplituxFacepunch download may have failed"
+    wait $keen_pid 2>/dev/null || warn "keen-emu-splitux download may have failed"
 
     # Setup build directory
     step "Setting up build directory..."
@@ -723,6 +774,15 @@ do_build() {
         info "gptokeyb installed to build/bin/"
     else
         warn "gptokeyb not found - controller-to-keyboard support will be unavailable"
+    fi
+
+    # Copy keen-emu sidecar into bin/ (resolved at runtime via BIN_KEEN_EMU)
+    if [[ -f "$SCRIPT_DIR/assets/keen/keen-emu" ]]; then
+        cp "$SCRIPT_DIR/assets/keen/keen-emu" "$BUILD_DIR/bin/"
+        chmod +x "$BUILD_DIR/bin/keen-emu"
+        info "keen-emu installed to build/bin/"
+    else
+        warn "keen-emu not found - Keen-gated titles (e.g. Enshrouded) will be unavailable"
     fi
 
     info "Build complete: $BUILD_DIR/"

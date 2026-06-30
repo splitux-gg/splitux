@@ -5,4 +5,4 @@ pub mod execute;
 pub mod session;
 
 pub use execute::launch_game;
-pub use session::run_session;
+pub use session::run_launch;

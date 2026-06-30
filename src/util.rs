@@ -237,6 +237,36 @@ pub fn is_mount_point(dir: &PathBuf) -> Result<bool, Box<dyn std::error::Error>>
     Ok(false)
 }
 
+/// Unmount a game overlay mount best-effort and NON-BLOCKING, handling BOTH a
+/// kernel overlay (root-mounted via sudo) and a fuse-overlayfs mount (userspace).
+/// Every attempt is wrapped in `timeout(1)` so a wedged mount can never hang
+/// teardown. Tries in order: `sudo -n umount` (kernel overlay), `fusermount3 -u`
+/// (fuse), then lazy `umount -l` as a last resort. Stops as soon as it's gone.
+pub fn unmount_best_effort(path: &std::path::Path) {
+    let pb = path.to_path_buf();
+    // kernel overlay was mounted by root -> needs sudo to unmount.
+    let _ = Command::new("timeout")
+        .args(["10", "sudo", "-n", "umount"])
+        .arg(path)
+        .status();
+    if !is_mount_point(&pb).unwrap_or(false) {
+        return;
+    }
+    // fuse-overlayfs userspace unmount.
+    let _ = Command::new("timeout")
+        .args(["10", "fusermount3", "-u"])
+        .arg(path)
+        .status();
+    if !is_mount_point(&pb).unwrap_or(false) {
+        return;
+    }
+    // last resort: lazy detach (returns immediately even on a wedged endpoint).
+    let _ = Command::new("timeout")
+        .args(["10", "umount", "-l"])
+        .arg(path)
+        .status();
+}
+
 pub fn fuse_overlayfs_unmount_gamedirs() -> Result<(), Box<dyn std::error::Error>> {
     // LAUNCH-SCOPED: only this launch's own tmp/<ns>/ subtree, so tearing one
     // session down never unmounts a CONCURRENT session's game dirs (each splitux
@@ -258,21 +288,20 @@ pub fn fuse_overlayfs_unmount_gamedirs() -> Result<(), Box<dyn std::error::Error
             if !is_mount_point(&path).unwrap_or(false) {
                 continue;
             }
-            let status = Command::new("umount").arg("-l").arg("-v").arg(&path).status();
-            match status {
-                Ok(s) if s.success() => {}
-                // Raced: it got unmounted between the check and now — fine.
-                _ if !is_mount_point(&path).unwrap_or(false) => {}
-                Ok(_) => failures.push(path.to_string_lossy().into_owned()),
-                Err(e) => failures.push(format!("{} ({e})", path.to_string_lossy())),
+            // Handles kernel-overlay (sudo) and fuse mounts; timeout-guarded.
+            unmount_best_effort(&path);
+            if is_mount_point(&path).unwrap_or(false) {
+                failures.push(path.to_string_lossy().into_owned());
             }
         }
     }
 
     if failures.is_empty() {
         // All unmounted — remove this launch's whole scratch subtree (game-N,
-        // work-N, <backend>-overlay-N, game-patches). No-op if already gone.
-        let _ = std::fs::remove_dir_all(&dir);
+        // work-N, <backend>-overlay-N, game-patches). A kernel overlay leaves a
+        // ROOT-owned `work-N/work` behind, so escalate to sudo when the user can't
+        // (otherwise it lingers and later trips clear_tmp). No-op if already gone.
+        force_remove_dir_all(&dir);
         Ok(())
     } else {
         Err(format!("failed to unmount: {}", failures.join(", ")).into())
@@ -311,7 +340,7 @@ pub fn reap_orphan_launch_scratch() {
                     && e.file_name().to_string_lossy().starts_with("game-")
                     && is_mount_point(&p).unwrap_or(false)
                 {
-                    let _ = Command::new("umount").arg("-l").arg(&p).status();
+                    unmount_best_effort(&p);
                 }
             }
         }
@@ -324,6 +353,29 @@ pub fn pid_alive(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
+/// Remove a directory tree, escalating to passwordless `sudo` if the user can't.
+///
+/// A KERNEL overlay mount (`sudo mount -t overlay`, splitux's preferred path for
+/// stability over fuse-overlayfs) leaves a root-owned `work/work` subdir (mode
+/// 0000) in each workdir. The user can't delete that, so a plain `remove_dir_all`
+/// fails and the leftover lingers. Clean it with the SAME privilege that created
+/// the mount. Best-effort and timeout-guarded — never fatal.
+pub fn force_remove_dir_all(path: &std::path::Path) {
+    if std::fs::remove_dir_all(path).is_ok() || !path.exists() {
+        return;
+    }
+    // Root-owned leftover → escalate. `sudo -n` (no prompt); timeout so a stuck
+    // sudo can't stall teardown / the launcher.
+    let _ = std::process::Command::new("timeout")
+        .args(["10", "sudo", "-n", "rm", "-rf"])
+        .arg(path)
+        .status();
+}
+
+/// Clear splitux's scratch (`tmp/`). Best-effort by design: a leftover — a
+/// root-owned kernel-overlay workdir, or a raced unmount — must NEVER crash the
+/// launcher on startup (this used to `?`-propagate a PermissionDenied straight
+/// into `main`'s `.unwrap()`).
 pub fn clear_tmp() -> Result<(), Box<dyn Error>> {
     let tmp = PATH_PARTY.join("tmp");
 
@@ -331,9 +383,8 @@ pub fn clear_tmp() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    fuse_overlayfs_unmount_gamedirs()?;
-
-    std::fs::remove_dir_all(&tmp)?;
+    let _ = fuse_overlayfs_unmount_gamedirs();
+    force_remove_dir_all(&tmp);
 
     Ok(())
 }

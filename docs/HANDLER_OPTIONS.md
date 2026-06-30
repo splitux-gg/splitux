@@ -76,9 +76,11 @@ in the launcher.
 | `args` | string | `""` | Command-line arguments passed to the game. Supports `$PROFILE`, `$WIDTH`, `$HEIGHT`, `$RESOLUTION`, `$INSTANCENUM`, `$INSTANCECOUNT`, `$GAMEDIR`, `$HANDLERDIR`. |
 | `env` | string | `""` | Space-separated `KEY=VALUE` pairs set in the game's environment. This is where per-game **EOSLAN_\*** tuning goes (see [EOS](#eos-epic-online-services--splitux-eos-lan-emu)). |
 | `proton_path` | string | system default | Proton version, e.g. `"Proton - Experimental"`. Windows games only. |
+| `working_dir` | string | `""` | Working directory for the game process (and Goldberg's `GseAppPath`), relative to the mounted game root. When empty, cwd defaults to the exec's parent dir. Set only for launcher-shim games where the real binary lives in a subdir but must run with cwd higher up, e.g. native Frozenbyte titles: `exec: _enchanted_edition_/bin/trine1_linux_32bit` + `working_dir: _enchanted_edition_`. |
 | `runtime` | string | `""` | Native Linux runtime: `scout`, `soldier`, or empty. |
 | `pause_between_starts` | float | `0` | Seconds to wait between launching each instance. Raise it for heavy games (EOS/UE titles often need 10–15s). |
 | `sdl2_override` | enum | `No` | Force a specific SDL2 for old native games with controller issues: `No`, `Srt` (Steam Runtime 32-bit), `Sys` (system). |
+| `fullscreen` | bool | `false` | Tell gamescope to fullscreen the game (`-f`) so it fills the whole output and confines the cursor (the pointer can't escape the window edges). Right for single-player / online-co-op (`coop_mode: separate`) games. **Leave OFF for `local-split`**, where each instance is a sub-region of one output and must not fullscreen. (splitux still places the window per the chosen layout; with `fullscreen` the window boots already-fullscreen and the WM keeps it that way.) |
 
 ### Co-op Topology
 

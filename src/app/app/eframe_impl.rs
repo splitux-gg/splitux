@@ -16,6 +16,24 @@ impl eframe::App for Splitux {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Responsive zoom: scale the whole UI with the window size, so it stays
+        // usable both at a half-screen window and maximized — instead of the fixed
+        // startup zoom that was too large for a small window. Converges in one
+        // frame (window physical size is independent of zoom) and is stable.
+        // Fullscreen keeps its own startup scaling (fills the display).
+        {
+            let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+            if !is_fullscreen {
+                let cur_zoom = ctx.zoom_factor();
+                let physical_w = ctx.input(|i| i.screen_rect().width()) * cur_zoom;
+                // ~1.0 at a ~960px (half-1080) window, ~1.4 maximized; clamped.
+                let target = (0.6 + physical_w / 2400.0).clamp(0.85, 1.5);
+                if (target - cur_zoom).abs() > 0.02 {
+                    ctx.set_zoom_factor(target);
+                }
+            }
+        }
+
         // Paint full-screen background to fill any gaps between panels
         let screen_rect = ctx.screen_rect();
         ctx.layer_painter(egui::LayerId::background())
@@ -90,51 +108,8 @@ impl eframe::App for Splitux {
                 });
         }
 
-        // Right panel - Devices (collapsible/resizable, only on Instances page)
-        if self.cur_page == MenuPage::Instances {
-            let collapsed = self.devices_panel_collapsed;
-            let (width, width_range) = if collapsed {
-                (36.0, 36.0..=36.0)
-            } else {
-                (self.devices_panel_width, 150.0..=320.0)
-            };
-
-            egui::SidePanel::right("devices_panel")
-                .resizable(!collapsed)
-                .default_width(width)
-                .width_range(width_range)
-                .frame(
-                    egui::Frame::NONE
-                        .fill(crate::ui::theme::colors::BG_MID)
-                        .inner_margin(if collapsed {
-                            egui::Margin::symmetric(4, 8)
-                        } else {
-                            egui::Margin {
-                                left: 16,
-                                right: 8,
-                                top: 8,
-                                bottom: 8,
-                            }
-                        })
-                        .stroke(egui::Stroke::new(1.0, crate::ui::theme::colors::BG_LIGHT)),
-                )
-                .show_separator_line(false)
-                .show(ctx, |ui| {
-                    if self.task.is_some() {
-                        ui.disable();
-                    }
-                    if collapsed {
-                        self.display_collapsed_devices_panel(ui);
-                    } else {
-                        // Track width changes for persistence
-                        let panel_width = ui.available_width() + 24.0; // Account for margins
-                        if (panel_width - self.devices_panel_width).abs() > 2.0 {
-                            self.devices_panel_width = panel_width;
-                        }
-                        self.display_panel_right(ui, ctx);
-                    }
-                });
-        }
+        // (Devices moved off the right SidePanel into a compact strip at the top
+        // of the Instances page — see `display_device_strip`.)
 
         egui::CentralPanel::default()
             .frame(

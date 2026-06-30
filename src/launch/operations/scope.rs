@@ -220,6 +220,25 @@ pub fn slice_name(launch_id: &str) -> String {
     format!("splitux-{launch_id}.slice")
 }
 
+/// Per-unit (per-game) sub-slice, nested under the launch slice.
+///
+/// A "unit" is one game: its instance scopes and its together seat-streamers all
+/// join this sub-slice, so the whole game — every parent PID and its children —
+/// is one cgroup subtree. That makes the unit the real lifecycle boundary:
+/// stopping this slice tears down exactly that game (and nothing else), so units
+/// supervise / crash / get torn down independently. The build-time `Instance.game`
+/// tag and this runtime sub-slice are the same unit.
+///
+/// systemd derives slice hierarchy from `-` separators, so the name nests as
+/// `splitux.slice` ▸ `splitux-<launch_id>.slice` (launch) ▸
+/// `splitux-<launch_id>-g<g>.slice` (unit) automatically — no extra setup. The
+/// launch id keeps its `<pid>_<n>` form (the `_` is NOT a hierarchy separator),
+/// so only the fixed prefix and the `-g<g>` suffix introduce nesting. A
+/// single-game launch is just one unit slice, `g0`.
+pub fn unit_slice_name(launch_id: &str, game: usize) -> String {
+    format!("splitux-{launch_id}-g{game}.slice")
+}
+
 /// The splitux process that owns a unit, recovered from its name — the inverse of
 /// the constructors above (`splitux-main-<pid>`, `splitux-restore-<pid>`, and the
 /// `splitux-<pid>_<n>[...]` launch family). `None` for a unit that belongs to no
@@ -259,11 +278,14 @@ pub fn clear_active_slice() {
 pub fn wrap_command(
     inner: Command,
     launch_id: &str,
+    game: usize,
     instance_idx: usize,
     main_scope: Option<&str>,
 ) -> Command {
-    let unit = format!("splitux-{launch_id}-i{instance_idx}.scope");
-    wrap_in_scope(inner, &unit, &slice_name(launch_id), main_scope)
+    // `instance_idx` stays GLOBAL (unique across the launch) so two units never
+    // collide on a scope name; the unit sub-slice is what groups it by game.
+    let unit = format!("splitux-{launch_id}-g{game}-i{instance_idx}.scope");
+    wrap_in_scope(inner, &unit, &unit_slice_name(launch_id, game), main_scope)
 }
 
 /// Like [`wrap_command`] but for a per-launch together seat-streamer.
@@ -278,11 +300,16 @@ pub fn wrap_command(
 pub fn wrap_seat_command(
     inner: Command,
     launch_id: &str,
+    game: usize,
     seat_idx: usize,
     main_scope: Option<&str>,
 ) -> Command {
-    let unit = format!("splitux-{launch_id}-seat{seat_idx}.scope");
-    wrap_in_scope(inner, &unit, &slice_name(launch_id), main_scope)
+    // Join the SAME unit sub-slice as the game's instances so the seat-streamer
+    // shares that game's lifecycle (dies when the unit is torn down), not just
+    // the launch's. `seat_idx` is global for the same no-collision reason as
+    // instance scopes.
+    let unit = format!("splitux-{launch_id}-g{game}-seat{seat_idx}.scope");
+    wrap_in_scope(inner, &unit, &unit_slice_name(launch_id, game), main_scope)
 }
 
 /// Core: wrap `inner` into a transient `--scope` named `unit` under `slice`,
@@ -347,6 +374,27 @@ pub fn stop_slice(launch_id: &str) {
     }
     let slice = slice_name(launch_id);
     println!("[splitux] scope - Stopping {slice}");
+    let _ = Command::new("systemctl")
+        .args(["--user", "stop", &slice])
+        .status();
+}
+
+/// Stop ONE unit (game) sub-slice — kills just that game's instance + seat
+/// scopes and their cgroups, leaving the other units running. Best-effort and
+/// idempotent. Used for independent per-unit teardown (one game exits/crashes
+/// without disturbing the rest); whole-launch teardown still uses [`stop_slice`],
+/// which cascades to every unit slice under it.
+///
+/// Primitive for the per-unit supervise path (one game exits/crashes → stop just
+/// its unit): not called until the supervise loop tracks handles per unit, but
+/// kept here as the teardown half of the unit abstraction.
+#[allow(dead_code)]
+pub fn stop_unit_slice(launch_id: &str, game: usize) {
+    if !systemd_user_available() {
+        return;
+    }
+    let slice = unit_slice_name(launch_id, game);
+    println!("[splitux] scope - Stopping unit {slice}");
     let _ = Command::new("systemctl")
         .args(["--user", "stop", &slice])
         .status();
@@ -465,10 +513,26 @@ mod tests {
     fn owner_pid_recovers_owner_from_every_leaf_unit() {
         assert_eq!(owner_pid("splitux-main-12345.scope"), Some(12345));
         assert_eq!(owner_pid("splitux-12345_0.slice"), Some(12345));
-        assert_eq!(owner_pid("splitux-12345_0-i0.scope"), Some(12345));
-        assert_eq!(owner_pid("splitux-12345_3-seat2.scope"), Some(12345));
+        // Per-unit sub-slice and the unit-nested instance/seat scopes still
+        // attribute to the owner pid (the `-g<g>` segment is after `<pid>_<n>`).
+        assert_eq!(owner_pid("splitux-12345_0-g0.slice"), Some(12345));
+        assert_eq!(owner_pid("splitux-12345_0-g0-i0.scope"), Some(12345));
+        assert_eq!(owner_pid("splitux-12345_3-g1-seat2.scope"), Some(12345));
         // restore watcher is a .service (not swept) but still attributable
         assert_eq!(owner_pid("splitux-restore-12345.service"), Some(12345));
+    }
+
+    #[test]
+    fn unit_slice_nests_under_launch_slice() {
+        // systemd derives parents by '-': splitux.slice ▸ launch ▸ unit.
+        let launch = slice_name("12345_0");
+        let unit = unit_slice_name("12345_0", 0);
+        assert_eq!(unit, "splitux-12345_0-g0.slice");
+        // The unit name, with its trailing `-g0` stripped, is exactly the launch
+        // slice — i.e. systemd sees the launch slice as the unit's direct parent.
+        assert_eq!(format!("{}.slice", unit.trim_end_matches("-g0.slice")), launch);
+        // A second game is a sibling unit under the same launch slice.
+        assert_eq!(unit_slice_name("12345_0", 1), "splitux-12345_0-g1.slice");
     }
 
     #[test]

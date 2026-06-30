@@ -9,6 +9,38 @@ use crate::wm::presets::{get_preset_by_id, get_presets_for_count};
 use eframe::egui::{self, RichText, Ui};
 
 impl Splitux {
+    /// True when EVERY game in the current session is local-split (couch co-op).
+    /// Such games collapse to ONE fullscreen instance at launch, so the layout /
+    /// split-style option is meaningless and is hidden. A `handler_lite` one-off
+    /// launch checks that handler; otherwise the session's `selected_games`.
+    pub(crate) fn is_local_coop_session(&self) -> bool {
+        let is_local = |h: &crate::handler::Handler| h.is_local_split();
+        if let Some(h) = &self.handler_lite {
+            return is_local(h);
+        }
+        let games: Vec<usize> = if self.selected_games.is_empty() {
+            vec![self.selected_handler]
+        } else {
+            self.selected_games.clone()
+        };
+        !games.is_empty()
+            && games
+                .iter()
+                .all(|&i| self.handlers.get(i).map(is_local).unwrap_or(false))
+    }
+
+    /// Whether to show the split-screen layout carousel.
+    ///
+    /// The carousel only makes sense when 2+ players share ONE local screen that
+    /// gets tiled between them. So it shows only when there are 2+ LOCAL seats
+    /// (Together/remote seats stream their own fullscreen window to a browser and
+    /// never participate in the local split), and the game isn't a local-split
+    /// couch title (those collapse to a single fullscreen instance).
+    pub(crate) fn show_layout_carousel(&self) -> bool {
+        let local_seats = self.instances.iter().filter(|i| !i.together).count();
+        local_seats >= 2 && !self.is_local_coop_session()
+    }
+
     /// Display the bottom bar with launch options and start button
     pub(super) fn display_launch_options(&mut self, ui: &mut Ui) {
         if self.instances.is_empty() {
@@ -16,14 +48,16 @@ impl Splitux {
         }
 
         let player_count = self.instances.len();
+        // Carousel only for 2+ local (non-Together) seats sharing one screen.
+        let show_layout = self.show_layout_carousel();
         let preset_id = self
             .options
             .layout_presets
             .get_for_count(player_count)
             .to_string();
 
-        // Handle custom mode rendering
-        if self.layout_custom_mode && player_count >= 2 {
+        // Handle custom mode rendering (never for local-coop — no layout to edit)
+        if self.layout_custom_mode && show_layout {
             self.display_custom_layout_mode(ui, player_count, &preset_id);
             return;
         }
@@ -53,22 +87,20 @@ impl Splitux {
                 egui::Stroke::NONE
             };
 
-            theme::card_frame()
-                .fill(theme::colors::BG_DARK)
-                .stroke(frame_stroke)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Launch Options").strong());
-                        ui.add_space(16.0);
+            // The split-screen layout carousel is the only launch option (the
+            // KB/mouse-support toggle was removed — input holding is derived from
+            // whether a keyboard/mouse seat exists). Show the bar only when the
+            // carousel is relevant: 2+ local seats sharing one screen.
+            if show_layout {
+                theme::card_frame()
+                    .fill(theme::colors::BG_DARK)
+                    .stroke(frame_stroke)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Layout").strong());
+                            ui.add_space(16.0);
 
-                        let mut option_idx = 0;
-
-                        // Layout preset carousel - show for 2+ players
-                        if player_count >= 2 {
-                            let layout_focused =
-                                is_launch_options_focused && self.launch_option_index == option_idx;
-
-                            ui.label("Layout:");
+                            let layout_focused = is_launch_options_focused;
 
                             let current_index =
                                 self.options.layout_presets.get_index_for_count(player_count);
@@ -117,32 +149,11 @@ impl Splitux {
                                     "Left/Right: cycle presets | Y/Right-click: customize positions".to_string()
                                 };
                             }
-
-                            ui.add_space(16.0);
-                            ui.add(egui::Separator::default().vertical());
-                            ui.add_space(16.0);
-                            option_idx += 1;
-                        }
-
-                        // Keyboard/mouse support option
-                        let kb_focused =
-                            is_launch_options_focused && self.launch_option_index == option_idx;
-                        let kb_text = if kb_focused {
-                            RichText::new("Keyboard/mouse support").color(theme::colors::ACCENT)
-                        } else {
-                            RichText::new("Keyboard/mouse support")
-                        };
-
-                        let checkbox_response =
-                            ui.checkbox(&mut self.options.input_holding, kb_text);
-
-                        if checkbox_response.hovered() || kb_focused {
-                            self.infotext = "Uses gamescope-splitux with input device holding support. This allows assigning keyboards and mice to specific players. Press A to toggle.".to_string();
-                        }
+                        });
                     });
-                });
-            ui.add_space(8.0);
-            ui.separator();
+                ui.add_space(8.0);
+                ui.separator();
+            }
         });
     }
 

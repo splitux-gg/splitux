@@ -72,6 +72,7 @@ impl Backend for Standalone {
         &self,
         _handler: &Handler,
         instances: &[Instance],
+        global_indices: &[usize],
         _is_windows: bool,
         _game_dir: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -87,9 +88,10 @@ impl Backend for Standalone {
         let mut overlays = Vec::new();
 
         for i in 0..instances.len() {
+            // GLOBAL index in the dir name so two concurrent games don't collide.
             let overlay_dir = PATH_PARTY
                 .join("tmp")
-                .join(format!("standalone-{}", i));
+                .join(format!("standalone-{}", global_indices[i]));
 
             // Clean previous overlay
             if overlay_dir.exists() {

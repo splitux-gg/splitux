@@ -45,9 +45,121 @@ pub fn has_steamstub(exe: &Path) -> bool {
     false
 }
 
+fn rd_u16(d: &[u8], o: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(d.get(o..o + 2)?.try_into().ok()?))
+}
+fn rd_u32(d: &[u8], o: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(d.get(o..o + 4)?.try_into().ok()?))
+}
+fn rd_u64(d: &[u8], o: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(d.get(o..o + 8)?.try_into().ok()?))
+}
+
+/// True if `data` is a NATIVE Linux x86-64 ELF carrying a SteamStub `.bind`
+/// section (the DRM gate, with the ELF entry point inside it). Linux SteamStub
+/// does NOT encrypt `.text` — it just gates on Steam then jumps to the real OEP.
+fn has_steamstub_elf(data: &[u8]) -> bool {
+    if !data.starts_with(b"\x7fELF") || data.get(4) != Some(&2) {
+        return false; // not ELF64
+    }
+    let (shoff, shentsize, shnum, shstrndx) = match (
+        rd_u64(data, 0x28),
+        rd_u16(data, 0x3a),
+        rd_u16(data, 0x3c),
+        rd_u16(data, 0x3e),
+    ) {
+        (Some(a), Some(b), Some(c), Some(d)) => (a as usize, b as usize, c as usize, d as usize),
+        _ => return false,
+    };
+    // shstrtab: section names blob
+    let str_sh = shoff + shstrndx * shentsize;
+    let strtab_off = match rd_u64(data, str_sh + 0x18) {
+        Some(v) => v as usize,
+        None => return false,
+    };
+    for i in 0..shnum {
+        let sh = shoff + i * shentsize;
+        let Some(name_off) = rd_u32(data, sh).map(|v| strtab_off + v as usize) else {
+            continue;
+        };
+        let end = data[name_off..].iter().position(|&b| b == 0).unwrap_or(0);
+        if &data[name_off..name_off + end] == b".bind" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Find the original entry point (glibc `_start`) in a SteamStub'd ELF by its
+/// fixed x86-64 prologue, mapping the file offset back to a vaddr via PT_LOAD.
+/// Requires EXACTLY one match (the real `_start`) to avoid mis-patching.
+fn find_oep_elf(data: &[u8]) -> Option<u64> {
+    // xor ebp,ebp; mov r9,rdx; pop rsi; mov rdx,rsp; and rsp,-16
+    const SIG: &[u8] = &[
+        0x31, 0xED, 0x49, 0x89, 0xD1, 0x5E, 0x48, 0x89, 0xE2, 0x48, 0x83, 0xE4, 0xF0,
+    ];
+    let hits: Vec<usize> = data
+        .windows(SIG.len())
+        .enumerate()
+        .filter(|(_, w)| *w == SIG)
+        .map(|(i, _)| i)
+        .collect();
+    if hits.len() != 1 {
+        return None;
+    }
+    let off = hits[0] as u64;
+    // map file offset -> vaddr via the containing PT_LOAD segment
+    let (phoff, phentsize, phnum) = (
+        rd_u64(data, 0x20)? as usize,
+        rd_u16(data, 0x36)? as usize,
+        rd_u16(data, 0x38)? as usize,
+    );
+    for i in 0..phnum {
+        let ph = phoff + i * phentsize;
+        if rd_u32(data, ph)? != 1 {
+            continue; // PT_LOAD
+        }
+        let p_off = rd_u64(data, ph + 0x08)?;
+        let p_vaddr = rd_u64(data, ph + 0x10)?;
+        let p_filesz = rd_u64(data, ph + 0x20)?;
+        if off >= p_off && off < p_off + p_filesz {
+            return Some(p_vaddr + (off - p_off));
+        }
+    }
+    None
+}
+
+/// Strip a native-Linux SteamStub by repointing the ELF entry point to the real
+/// `_start` (the stub then never runs). Writes the patched copy to `dst`. The
+/// original is untouched (the overlay shadows it with `dst`).
+fn strip_steamstub_elf(data: &[u8], dst: &Path) -> bool {
+    let Some(oep) = find_oep_elf(data) else {
+        println!("[splitux] SteamStub(ELF): couldn't locate a unique _start — not stripping");
+        return false;
+    };
+    let cur_entry = rd_u64(data, 0x18).unwrap_or(0);
+    let mut out = data.to_vec();
+    out[0x18..0x20].copy_from_slice(&oep.to_le_bytes());
+    match fs::write(dst, &out) {
+        Ok(()) => {
+            let _ = std::fs::set_permissions(dst, std::os::unix::fs::PermissionsExt::from_mode(0o755));
+            println!(
+                "[splitux] SteamStub(ELF): stripped — entry 0x{cur_entry:x} -> _start 0x{oep:x} → {}",
+                dst.display()
+            );
+            true
+        }
+        Err(e) => {
+            println!("[splitux] SteamStub(ELF): write failed: {e}");
+            false
+        }
+    }
+}
+
 /// Ensure a DRM-free copy of `game_root/exec_rel` exists in the cache, stripping it
-/// with Steamless if needed. Returns the cached stripped exe path, or None if the
-/// exe isn't DRM-wrapped (no strip needed) or the strip failed.
+/// if needed. Native Linux ELF → repoint entry to `_start` (in-Rust). Windows PE →
+/// Steamless under Proton. Returns the cached stripped exe path, or None if the exe
+/// isn't DRM-wrapped (no strip needed) or the strip failed.
 pub fn ensure_stripped(game_root: &Path, exec_rel: &Path, appid: u32) -> Option<PathBuf> {
     let exe_name = exec_rel.file_name()?;
     let cache_dir = PATH_PARTY.join("steamless").join(appid.to_string());
@@ -57,7 +169,26 @@ pub fn ensure_stripped(game_root: &Path, exec_rel: &Path, appid: u32) -> Option<
     }
 
     let src = game_root.join(exec_rel);
-    if !src.exists() || !has_steamstub(&src) {
+    if !src.exists() {
+        return None;
+    }
+
+    // NATIVE Linux ELF SteamStub: strip in-process (no Steamless/Proton needed).
+    if let Ok(data) = fs::read(&src) {
+        if data.starts_with(b"\x7fELF") {
+            if !has_steamstub_elf(&data) {
+                return None; // not wrapped
+            }
+            println!(
+                "[splitux] SteamStub(ELF) detected on {} — stripping (one-time)…",
+                exec_rel.display()
+            );
+            let _ = fs::create_dir_all(&cache_dir);
+            return strip_steamstub_elf(&data, &cache).then_some(cache);
+        }
+    }
+
+    if !has_steamstub(&src) {
         return None; // not wrapped — nothing to strip
     }
 

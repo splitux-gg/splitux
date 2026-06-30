@@ -75,6 +75,7 @@ impl Backend for Facepunch {
         &self,
         _handler: &Handler,
         instances: &[Instance],
+        global_indices: &[usize],
         is_windows: bool,
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -82,6 +83,7 @@ impl Backend for Facepunch {
             &self.settings,
             &self.runtime_patches,
             instances,
+            global_indices,
             is_windows,
             game_root,
         )

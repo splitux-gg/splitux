@@ -1,11 +1,10 @@
 //! Main instance cards display - the core of the instance setup page
 
 use super::focus::{element_focus_stroke, is_element_focused};
-use super::types::{AudioOverrideAction, AudioPrefAction, GptokeybAction};
+use super::types::{AudioOverrideAction, AudioPrefAction};
 use crate::app::app::{ActiveDropdown, InstanceFocus, Splitux};
 use crate::config::save_cfg;
 use crate::ui::theme;
-use crate::gptokeyb::{list_builtin_profiles, list_user_profiles};
 use crate::profile_prefs::ProfilePreferences;
 use crate::ui::components::dropdown::{render_gamepad_dropdown, DropdownItem};
 use crate::ui::focus::types::InstanceCardFocus;
@@ -63,6 +62,7 @@ impl Splitux {
         ui.separator();
 
         self.display_instance_help_bar(ui);
+        self.display_device_strip(ui);
         self.display_instance_warnings(ui);
 
         // Ensure prev_profile_selections matches instances count
@@ -90,6 +90,9 @@ impl Splitux {
         let current_focus = self.instance_focus.clone();
         let activate_focused = self.activate_focused;
         let display_names = self.device_display_names.clone();
+        // Computed before the mutable `self.instances` borrow below — the card
+        // closure can't re-borrow all of `self` to call the method.
+        let can_assign_displays = self.can_assign_displays();
 
         // ── Render instance cards ──────────────────────────────────────────
         for (i, instance) in &mut self.instances.iter_mut().enumerate() {
@@ -183,7 +186,7 @@ impl Splitux {
 
                         // Wide mode: monitor + invite on same row
                         if !card_mode.is_narrow() {
-                            if self.options.gamescope_sdl_backend {
+                            if can_assign_displays {
                                 ui.add_space(8.0);
                                 ui.label("Monitor:");
                                 let monitor_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Monitor);
@@ -208,33 +211,13 @@ impl Splitux {
                                 }
                             }
 
-                            ui.add_space(8.0);
-                            if self.instance_add_dev.is_none() {
-                                let invite_focused = is_element_focused(&current_focus, i, InstanceCardFocus::InviteDevice);
-                                let invite_text = if card_mode == LayoutMode::Medium { " +Dev" } else { " Invite Device" };
-                                let invite_btn = egui::Button::image_and_text(
-                                    egui::Image::new(egui::include_image!("../../../assets/BTN_Y.png"))
-                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
-                                    invite_text,
-                                )
-                                .min_size(egui::vec2(0.0, 26.0))
-                                .stroke(element_focus_stroke(&current_focus, i, InstanceCardFocus::InviteDevice));
-                                if ui.add(invite_btn).clicked() || (invite_focused && activate_focused) {
-                                    self.instance_add_dev = Some(i);
-                                }
-                            } else if self.instance_add_dev == Some(i) {
-                                ui.label(RichText::new("Waiting...").italics());
-                                if ui.add(egui::Button::new("x").min_size(egui::vec2(26.0, 26.0))).clicked() {
-                                    self.instance_add_dev = None;
-                                }
-                            }
                         }
                     });
 
-                    // ── Row 2: Monitor + Invite (narrow mode only) ──
+                    // ── Row 2: Monitor (narrow mode only) ──
                     if card_mode.is_narrow() {
                         ui.horizontal(|ui| {
-                            if self.options.gamescope_sdl_backend {
+                            if can_assign_displays {
                                 ui.label("Mon:");
                                 let monitor_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Monitor);
                                 let monitor_open = self.active_dropdown == Some(ActiveDropdown::InstanceMonitor(i));
@@ -258,22 +241,6 @@ impl Splitux {
                                 }
                             }
 
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if self.instance_add_dev.is_none() {
-                                    let invite_focused = is_element_focused(&current_focus, i, InstanceCardFocus::InviteDevice);
-                                    let invite_btn = egui::Button::new("+")
-                                        .min_size(egui::vec2(26.0, 26.0))
-                                        .stroke(element_focus_stroke(&current_focus, i, InstanceCardFocus::InviteDevice));
-                                    if ui.add(invite_btn).on_hover_text("Invite Device").clicked() || (invite_focused && activate_focused) {
-                                        self.instance_add_dev = Some(i);
-                                    }
-                                } else if self.instance_add_dev == Some(i) {
-                                    ui.label(RichText::new("...").italics());
-                                    if ui.add(egui::Button::new("x").min_size(egui::vec2(26.0, 26.0))).clicked() {
-                                        self.instance_add_dev = None;
-                                    }
-                                }
-                            });
                         });
                     }
 
@@ -351,10 +318,10 @@ impl Splitux {
 
                     // ── Together (remote seat) ──
                     // Mark this player as a remote Together seat: a seat-streamer
-                    // owns its input + streams its screen to a browser, and
-                    // splitux pops an invite URL on launch. The type picks whether
-                    // the game sees this player as a gamepad (held kbd/mouse work
-                    // either way; see crate::together).
+                    // owns its input + streams its screen to a browser, and splitux
+                    // pops an invite URL on launch. No input-type picker — the
+                    // remote seat captures everything (gamepad + kbd/mouse) and
+                    // pipes it into the game; nothing to choose here.
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut instance.together, "Together (remote)")
@@ -363,21 +330,6 @@ impl Splitux {
                                  their browser input drives this seat. splitux shows an invite \
                                  URL when you launch.",
                             );
-                        if instance.together {
-                            let label = format!("Input: {}", instance.together_input.label());
-                            if ui
-                                .button(label)
-                                .on_hover_text(
-                                    "Gamepad: the remote controller drives the game. \
-                                     Kb+Mouse: no gamepad identity for this player — they drive \
-                                     the held keyboard/mouse only (so a pad game won't invent an \
-                                     extra player).",
-                                )
-                                .clicked()
-                            {
-                                instance.together_input = instance.together_input.next();
-                            }
-                        }
                     });
 
                     // ── Audio section ──
@@ -522,73 +474,6 @@ impl Splitux {
                         });
                     }
 
-                    // ── gptokeyb KB/Mouse section ──
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(icons::KEYBOARD);
-                        if !card_mode.is_narrow() {
-                            ui.label(RichText::new("KB/Mouse:").small());
-                        }
-
-                        let gptokeyb_focused = is_element_focused(&current_focus, i, InstanceCardFocus::GptokeybProfile);
-                        let gptokeyb_open = self.active_dropdown == Some(ActiveDropdown::InstanceGptokeyb(i));
-
-                        let has_override = self.gptokeyb_instance_overrides.contains_key(&i);
-                        let current_gptokeyb = self.gptokeyb_instance_overrides.get(&i);
-
-                        let mut items: Vec<DropdownItem<GptokeybAction>> = Vec::new();
-                        items.push(DropdownItem::new(GptokeybAction::Default, "Default (handler)", !has_override));
-                        items.push(DropdownItem::new(GptokeybAction::Disabled, format!("{} Disabled", icons::PROHIBIT), current_gptokeyb == Some(&String::new())));
-
-                        for profile in list_builtin_profiles() {
-                            items.push(DropdownItem::new(
-                                GptokeybAction::Profile(profile.to_string()),
-                                format!("{} {} (built-in)", icons::GAME_CONTROLLER, profile),
-                                current_gptokeyb == Some(&profile.to_string()),
-                            ));
-                        }
-                        for profile in list_user_profiles() {
-                            items.push(DropdownItem::new(
-                                GptokeybAction::Profile(profile.clone()),
-                                format!("{} {} (custom)", icons::USER, profile),
-                                current_gptokeyb == Some(&profile),
-                            ));
-                        }
-
-                        let button_text = if card_mode.is_narrow() {
-                            ""
-                        } else if has_override {
-                            current_gptokeyb
-                                .map(|p| if p.is_empty() { "Disabled" } else { p.as_str() })
-                                .unwrap_or("Default")
-                        } else {
-                            "Default"
-                        };
-
-                        let gptokeyb_width = combo_width(ui, 100.0, 50.0);
-
-                        let gptokeyb_response = render_gamepad_dropdown(
-                            ui, &format!("gptokeyb_{i}"), button_text, gptokeyb_width,
-                            &items, gptokeyb_focused, gptokeyb_open,
-                            self.dropdown_selection_idx, gptokeyb_focused && activate_focused,
-                        );
-
-                        if let Some(action) = gptokeyb_response.selected {
-                            match action {
-                                GptokeybAction::Default => { self.gptokeyb_instance_overrides.remove(&i); }
-                                GptokeybAction::Disabled => { self.gptokeyb_instance_overrides.insert(i, String::new()); }
-                                GptokeybAction::Profile(name) => { self.gptokeyb_instance_overrides.insert(i, name); }
-                            }
-                            self.active_dropdown = None;
-                        } else if gptokeyb_response.toggled || (gptokeyb_focused && activate_focused) {
-                            if gptokeyb_open {
-                                self.active_dropdown = None;
-                            } else {
-                                self.active_dropdown = Some(ActiveDropdown::InstanceGptokeyb(i));
-                                self.dropdown_selection_idx = 0;
-                            }
-                        }
-                    });
                 });
             ui.add_space(4.0);
         }

@@ -1,17 +1,48 @@
 // Input device scanning operations (I/O: evdev enumeration, device opening)
 
 use crate::app::PadFilterType;
+use crate::config::IgnoredDevice;
 use crate::input::operations::device::InputDevice;
 use crate::input::pure::classify::{calculate_stick_calibration, classify_device, is_device_enabled};
 use crate::input::types::DeviceType;
 use evdev::*;
 
-/// Scan all input devices and return those matching the filter
-pub fn scan_input_devices(filter: &PadFilterType) -> Vec<InputDevice> {
+/// True for virtual/uinput devices that aren't real userspace hardware — splitux's
+/// own passthrough / gptokeyb / input-holding nodes. splitux's passthrough devices
+/// carry the sentinel Vendor=0xbeef / Product=0xdead (they fake a USB bus, so
+/// BUS_VIRTUAL alone misses them). We match on that sentinel rather than an empty
+/// `phys`, because some real HID keyboards (e.g. the ZSA Moonlander) report an
+/// empty EVIOCGPHYS and would be wrongly dropped.
+fn is_virtual_device(dev: &Device) -> bool {
+    let id = dev.input_id();
+    id.bus_type() == BusType::BUS_VIRTUAL || (id.vendor() == 0xbeef && id.product() == 0xdead)
+}
+
+/// Scan all input devices and return those matching the filter.
+///
+/// `blacklist` is a list of exact evdev device names to drop entirely — the
+/// phantom extra endpoints some keyboards/mice expose. A blacklisted device is
+/// never opened, so it can't appear in the device strip or be assigned a seat.
+pub fn scan_input_devices(filter: &PadFilterType, blacklist: &[IgnoredDevice]) -> Vec<InputDevice> {
     let mut pads: Vec<InputDevice> = Vec::new();
     for dev in evdev::enumerate() {
-        let enabled = is_device_enabled(filter, dev.1.input_id().vendor());
+        // Skip virtual (uinput) devices — these are splitux's own plumbing
+        // (gptokeyb keyboards/mice, the touch "passthrough" pointer, gamescope
+        // input-holding nodes), never real userspace IO to assign to a seat.
+        // They fake a USB bus (Vendor=beef/Product=dead) so BUS_VIRTUAL alone
+        // misses them; the reliable tell is an empty physical path — real
+        // hardware always reports a `phys` (USB topology, PNP id, BT MAC…).
+        if is_virtual_device(&dev.1) {
+            continue;
+        }
+        let name = dev.1.name().unwrap_or("");
+        // Classify first so the ignore list can match on name+kind — two endpoints
+        // of one device can share a name but differ in kind (keyboard vs mouse).
         let device_type = classify_device(dev.1.supported_keys());
+        if blacklist.iter().any(|b| b.matches(name, device_type.kind_str())) {
+            continue;
+        }
+        let enabled = is_device_enabled(filter, dev.1.input_id().vendor());
 
         if device_type != DeviceType::Other {
             if dev.1.set_nonblocking(true).is_err() {
@@ -65,7 +96,7 @@ pub fn scan_input_devices(filter: &PadFilterType) -> Vec<InputDevice> {
 
 /// Try to open a single device by path and create an InputDevice.
 /// Retries with exponential backoff for udev race conditions.
-pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
+pub fn open_device(path: &str, filter: &PadFilterType, blacklist: &[IgnoredDevice]) -> Option<InputDevice> {
     let dev = {
         let mut attempts = 0;
         let max_attempts = 8;
@@ -102,8 +133,18 @@ pub fn open_device(path: &str, filter: &PadFilterType) -> Option<InputDevice> {
         }
     };
 
-    let enabled = is_device_enabled(filter, dev.input_id().vendor());
+    if is_virtual_device(&dev) {
+        return None;
+    }
     let device_type = classify_device(dev.supported_keys());
+    if blacklist
+        .iter()
+        .any(|b| b.matches(dev.name().unwrap_or(""), device_type.kind_str()))
+    {
+        return None;
+    }
+
+    let enabled = is_device_enabled(filter, dev.input_id().vendor());
 
     if device_type == DeviceType::Other {
         println!(

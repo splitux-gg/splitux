@@ -101,8 +101,8 @@ impl Splitux {
             || (is_buttons_focused && self.settings_button_index == 1 && self.activate_focused)
         {
             self.options = SplituxConfig::default();
-            self.input_devices = scan_input_devices(&self.options.pad_filter_type);
-            self.refresh_device_display_names();
+            let devices = scan_input_devices(&self.options.pad_filter_type, &self.options.input_blacklist);
+            self.set_input_devices(devices);
         }
 
         ui.add_space(4.0);

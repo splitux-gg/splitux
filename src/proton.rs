@@ -11,12 +11,29 @@ use crate::handler::Handler;
 use crate::paths::{PATH_PARTY, PATH_STEAM, BIN_UMU_RUN};
 use crate::util::resolve_proton_path;
 
-/// Get the Wine prefix path for an instance
-pub fn get_prefix_path(cfg: &SplituxConfig, instance_idx: usize) -> PathBuf {
-    PATH_PARTY.join("prefixes").join(match cfg.proton_separate_pfxs {
-        true => (instance_idx + 1).to_string(),
+/// Get the Wine prefix path for an instance, keyed by PROFILE name.
+///
+/// Per-profile (not per-instance-index) so that CONCURRENT splitux launches — each
+/// of which has instance_idx 0 and would otherwise both map to prefix "1" — get
+/// distinct prefixes and don't collide. Proton file-locks STEAM_COMPAT_DATA_PATH
+/// (== the prefix), so a shared prefix means only one same-game instance boots.
+/// Keyed by profile (vs launch namespace) so each user's prefix is STABLE/reusable
+/// across launches — no Wine-prefix re-init cost per run.
+pub fn get_prefix_path(cfg: &SplituxConfig, profname: &str, game: usize) -> PathBuf {
+    let base = match cfg.proton_separate_pfxs {
+        true => profname.replace(['/', '\\'], "_"),
         false => "1".to_string(),
-    })
+    };
+    // Multi-game: namespace games AFTER the first so two concurrent games that
+    // reuse the same profile name don't share — and fight over — one Wine prefix.
+    // Game 0 keeps the legacy name, so existing single-game prefixes stay valid
+    // (no re-init) and single-game is byte-identical.
+    let dir = if game == 0 {
+        base
+    } else {
+        format!("{base}-g{game}")
+    };
+    PATH_PARTY.join("prefixes").join(dir)
 }
 
 /// Set up Proton environment variables on a command
@@ -27,9 +44,10 @@ pub fn setup_env(
     cmd: &mut Command,
     handler: &Handler,
     cfg: &SplituxConfig,
-    instance_idx: usize,
+    profname: &str,
+    game: usize,
 ) {
-    let path_pfx = get_prefix_path(cfg, instance_idx);
+    let path_pfx = get_prefix_path(cfg, profname, game);
 
     // Proton version to use
     let protonpath = match cfg.proton_version.is_empty() {
@@ -120,6 +138,6 @@ pub fn uses_direct_proton(handler: &Handler) -> bool {
 }
 
 /// Get the Wine prefix user directory path for binding profile data
-pub fn get_prefix_user_path(cfg: &SplituxConfig, instance_idx: usize) -> PathBuf {
-    get_prefix_path(cfg, instance_idx).join("drive_c/users/steamuser")
+pub fn get_prefix_user_path(cfg: &SplituxConfig, profname: &str, game: usize) -> PathBuf {
+    get_prefix_path(cfg, profname, game).join("drive_c/users/steamuser")
 }

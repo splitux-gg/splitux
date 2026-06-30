@@ -4,9 +4,18 @@ use std::process::Command;
 
 /// Add base bwrap arguments to command
 ///
-/// Sets up the container with full filesystem access but isolated /tmp
-pub fn add_base_args(cmd: &mut Command) {
-    cmd.arg("bwrap");
+/// Sets up the container with full filesystem access but isolated /tmp.
+///
+/// `as_program` selects how the command is rooted. In the normal path the
+/// command's program is gamescope and bwrap is its child after `--`, so we emit
+/// a literal `bwrap` argument (as_program = false). When gamescope is bypassed
+/// (single local seat, `disable_gamescope`) the command is rooted directly at
+/// bwrap — the program is already `bwrap`, so the leading argument is skipped
+/// (as_program = true) to avoid `bwrap bwrap …`.
+pub fn add_base_args(cmd: &mut Command, as_program: bool) {
+    if !as_program {
+        cmd.arg("bwrap");
+    }
     cmd.arg("--die-with-parent");
     cmd.args(["--dev-bind", "/", "/"]);
     cmd.args(["--tmpfs", "/tmp"]);

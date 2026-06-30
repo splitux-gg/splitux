@@ -139,8 +139,12 @@ impl Handler {
             if let Ok(entry) = entry_result
                 && let Ok(file_type) = entry.file_type()
                 && file_type.is_file()
+                && let Some(file_name) = entry.file_name().to_str().map(|s| s.to_owned())
                 && let Some(path_str) = entry.path().to_str()
                 && (path_str.ends_with(".png") || path_str.ends_with(".jpg"))
+                // Skip the bundled split-screen "local-coop" mockup — it's a crude
+                // preview, not a real screenshot, and looks out of place in the strip.
+                && !file_name.to_ascii_lowercase().starts_with("local-coop")
             {
                 out.push(entry.path());
             }

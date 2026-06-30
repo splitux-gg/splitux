@@ -64,10 +64,20 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, _monitors: &[Monitor], c
         &instance.height.to_string(),
     ]);
 
-    // Cursor hiding
-    cmd.args(["--hide-cursor-delay", "1000"]);
+    // Cursor auto-hide (opt-in). Forcing this hid the cursor in any window that
+    // never sees mouse motion (a second instance, or a pad-driven seat) and it
+    // never came back — clicks still landed, but the pointer wasn't drawn.
+    if cfg.gamescope_autohide_cursor {
+        cmd.args(["--hide-cursor-delay", "1000"]);
+    }
 
-    // Force grab cursor if enabled
+    // Pin the pointer inside the game (gamescope relative-mouse grab). ON BY
+    // DEFAULT for every instance: `-f` fullscreen confines the WINDOW to the
+    // output but does NOT lock the POINTER, so during mouse-look the cursor
+    // drifts to the edge and slips onto another monitor. `--force-grab-cursor`
+    // makes gamescope always grab the cursor so it can't escape; you switch
+    // instances via WM bindings, not by the cursor leaving. Toggle off only for
+    // point-and-click / touch games that need a free host cursor.
     if cfg.gamescope_force_grab_cursor {
         cmd.arg("--force-grab-cursor");
     }
@@ -92,10 +102,29 @@ pub fn add_args(cmd: &mut Command, instance: &Instance, _monitors: &[Monitor], c
     }
 }
 
+/// Fullscreen the hosted game (`-f`).
+///
+/// Makes gamescope own the whole output: the game fills it at the output
+/// resolution (instead of a default ~720p floating window) AND the cursor is
+/// confined to that output — moving the mouse to a screen edge can't escape onto
+/// the host desktop or another monitor. This is the correct cursor-confinement
+/// primitive (own the output), not an exclusive device grab. Gate it to single /
+/// online-co-op games via the handler `fullscreen` flag — NOT local split-screen,
+/// where each instance is a sub-region of one output.
+pub fn add_fullscreen(cmd: &mut Command) {
+    cmd.arg("-f");
+}
+
 /// Add input device holding arguments for gamescope-splitux
 ///
 /// When a virtual device path is provided (from gptokeyb), gamescope will
 /// read exclusively from that device for keyboard/mouse input.
+///
+/// NOTE: this deliberately does NOT hold the instance's REAL keyboard/mouse.
+/// An exclusive grab of the real mouse (to "confine the cursor") took the device
+/// away from the host without gamescope drawing a usable confined cursor — the
+/// mouse simply locked up. A kb/mouse seat must keep a usable mouse, so only
+/// gptokeyb's virtual output device is held.
 pub fn add_input_holding_args(
     cmd: &mut Command,
     virtual_device: Option<&Path>,
@@ -105,20 +134,26 @@ pub fn add_input_holding_args(
         return;
     }
 
+    // gptokeyb's virtual kbd/mouse (controller→kb/m translation output).
     if let Some(vdev) = virtual_device {
         cmd.arg(format!("--libinput-hold-dev={}", vdev.display()));
     }
 }
 
-/// Drive a together instance's nested compositor at the fps tier.
+/// Cap the nested compositor's refresh (`-r`) at the configured fps tier — for
+/// EVERY instance, local or together.
 ///
-/// Set ONCE per together instance (independent of how many seats it carries):
-/// the PipeWire capture is clocked at the compositor's refresh, and the headless
-/// backend otherwise defaults to 60Hz — capping the producer at one frame per
-/// vblank. `resolved_fps()` is the same source the seat-streamer `--fps` uses,
-/// so capture and encode rates always agree. Local splitscreen (no together
-/// seats) keeps the monitor's native refresh.
-pub fn add_together_refresh_rate(cmd: &mut Command, cfg: &SplituxConfig) {
+/// Applied to TOGETHER instances ONLY (gated at the call site on a non-empty seat
+/// list). Their PipeWire capture is clocked at the compositor's refresh and the
+/// headless backend otherwise defaults to 60Hz, so `-r` must match the stream tier
+/// for capture/encode pacing. `resolved_fps()` is the same source the seat-streamer
+/// `--fps` uses, so the capture and encode rates always agree.
+///
+/// LOCAL instances are deliberately NOT capped here: gamescope frame-limiting a
+/// local seat below the panel's native refresh (e.g. 60 on a 200Hz display) strobes
+/// black frames on motion — a gamescope-only present-pacing artifact (native
+/// presentation is clean). Local seats render at the display's native refresh.
+pub fn add_refresh_rate(cmd: &mut Command, cfg: &SplituxConfig) {
     cmd.args(["-r", &cfg.together.resolved_fps().to_string()]);
 }
 

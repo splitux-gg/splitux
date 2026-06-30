@@ -33,22 +33,4 @@ impl Splitux {
         });
     }
 
-    /// Display collapsed devices panel (just expand button)
-    pub fn display_collapsed_devices_panel(&mut self, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(4.0);
-            if ui
-                .add(egui::Button::new(icons::CARET_LEFT).min_size(egui::vec2(24.0, 24.0)))
-                .on_hover_text("Expand Devices panel")
-                .clicked()
-            {
-                self.devices_panel_collapsed = false;
-            }
-            ui.add_space(8.0);
-            // Vertical label
-            for ch in "Devices".chars() {
-                ui.label(RichText::new(ch.to_string()).small().weak());
-            }
-        });
-    }
 }

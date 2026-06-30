@@ -39,8 +39,19 @@ impl RegistryEntry {
         format!("{}/{}/icon.jpg", REGISTRY_BASE, self.id)
     }
 
-    pub fn header_url(&self) -> String {
-        format!("{}/{}/header.jpg", REGISTRY_BASE, self.id)
+    /// Wide banner. The art pipeline (`fetch-art.py`) and the app's local resolver
+    /// both use `hero.jpg` — NOT `header.jpg` — so the registry must match, or the
+    /// banner 404s even when the art exists.
+    pub fn hero_url(&self) -> String {
+        format!("{}/{}/hero.jpg", REGISTRY_BASE, self.id)
+    }
+
+    pub fn logo_url(&self) -> String {
+        format!("{}/{}/logo.png", REGISTRY_BASE, self.id)
+    }
+
+    pub fn box_art_url(&self) -> String {
+        format!("{}/{}/box_art.jpg", REGISTRY_BASE, self.id)
     }
 
     /// Check if this handler is already installed locally
@@ -97,28 +108,20 @@ pub fn download_handler(entry: &RegistryEntry) -> Result<(), Box<dyn Error>> {
     let yaml_content = yaml_response.text()?;
     std::fs::write(handler_dir.join("handler.yaml"), yaml_content)?;
 
-    // Download icon.jpg (optional - don't fail if missing)
-    if let Ok(icon_response) = client
-        .get(&entry.icon_url())
-        .header("User-Agent", "splitux")
-        .send()
-    {
-        if icon_response.status().is_success() {
-            if let Ok(icon_bytes) = icon_response.bytes() {
-                let _ = std::fs::write(handler_dir.join("icon.jpg"), icon_bytes);
-            }
-        }
-    }
-
-    // Download header.jpg (optional - don't fail if missing)
-    if let Ok(header_response) = client
-        .get(&entry.header_url())
-        .header("User-Agent", "splitux")
-        .send()
-    {
-        if header_response.status().is_success() {
-            if let Ok(header_bytes) = header_response.bytes() {
-                let _ = std::fs::write(handler_dir.join("header.jpg"), header_bytes);
+    // Download the art bundle (all optional — don't fail if missing). File names
+    // match the app's local art resolver: icon.jpg (list icon), hero.jpg (wide
+    // banner), logo.png (transparent title overlay), box_art.jpg (portrait cover).
+    for (url, file) in [
+        (entry.icon_url(), "icon.jpg"),
+        (entry.hero_url(), "hero.jpg"),
+        (entry.logo_url(), "logo.png"),
+        (entry.box_art_url(), "box_art.jpg"),
+    ] {
+        if let Ok(resp) = client.get(&url).header("User-Agent", "splitux").send() {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes() {
+                    let _ = std::fs::write(handler_dir.join(file), bytes);
+                }
             }
         }
     }

@@ -92,6 +92,33 @@ fn build_invite_url(cfg: &SplituxConfig, token: &str) -> String {
 /// "<seat> mouse" — the exact, proven lookup the bench uses. Retries until all
 /// three appear or `timeout` elapses (the devices are created at streamer
 /// startup, a beat after spawn).
+/// Parse the seat-streamer's `--device-report` file (`label=/dev/input/eventN`
+/// lines). Returns the seat's devices only once ALL four are present. This is the
+/// authoritative source AND the only way to learn the raw-gadget pad node (named
+/// "Microsoft X-Box 360 pad", which /proc name-matching for "splitux-together
+/// <seat>" can never find — leaving the pad unwired and un-barriered).
+fn read_device_report(seat: &str) -> Option<TogetherSeatDevices> {
+    let path = format!("/tmp/splitux-together-{seat}.devices");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let mut devs = TogetherSeatDevices::default();
+    for line in text.lines() {
+        let Some((label, p)) = line.split_once('=') else { continue };
+        let p = PathBuf::from(p.trim());
+        match label.trim() {
+            "pad" => devs.pad = Some(p),
+            "kbd" => devs.kbd = Some(p),
+            "mouse" => devs.mouse = Some(p),
+            "ptr" => devs.ptr = Some(p),
+            _ => {}
+        }
+    }
+    if devs.pad.is_some() && devs.kbd.is_some() && devs.mouse.is_some() && devs.ptr.is_some() {
+        Some(devs)
+    } else {
+        None
+    }
+}
+
 fn wait_for_seat_devices(seat: &str, timeout: Duration) -> TogetherSeatDevices {
     let pad_name = format!("splitux-together {seat}");
     let kbd_name = format!("splitux-together {seat} kbd");
@@ -100,6 +127,12 @@ fn wait_for_seat_devices(seat: &str, timeout: Duration) -> TogetherSeatDevices {
 
     let deadline = Instant::now() + timeout;
     loop {
+        // Preferred: the seat-streamer's own device-report (authoritative; the only
+        // way to find the raw-gadget pad). Fall through to /proc name-matching if
+        // it's absent/incomplete (uinput pads, or an older seat-streamer).
+        if let Some(devs) = read_device_report(seat) {
+            return devs;
+        }
         let mut devs = TogetherSeatDevices::default();
         if let Ok(text) = std::fs::read_to_string("/proc/bus/input/devices") {
             // Blocks are separated by blank lines; within a block `N: Name="…"`
@@ -175,8 +208,16 @@ fn spawn_seat_streamer(
     let log = std::fs::File::create(&log_path)?;
     let log_err = log.try_clone()?;
 
+    // seat-streamer writes its resolved device nodes here once created; we read it
+    // in wait_for_seat_devices to learn the REAL pad node (the raw-gadget pad isn't
+    // named "splitux-together <seat>", so /proc name-matching can't find it). Clear
+    // any stale file from a prior run so we never read a dead seat's paths.
+    let device_report = format!("/tmp/splitux-together-{seat}.devices");
+    let _ = std::fs::remove_file(&device_report);
+
     let mut cmd = Command::new(BIN_SEAT_STREAMER.as_path());
     cmd.args(["--seat", seat])
+        .args(["--device-report", &device_report])
         .args(["--name", name])
         .args(["--invite-token", token])
         .args(["--signalling", &cfg.together.signalling_uri])
@@ -217,7 +258,13 @@ fn spawn_seat_streamer(
     for (k, v) in cfg.gpu_vendor.driver_env() {
         cmd.env(k, v);
     }
-    cmd.env("RUST_LOG", "info");
+    // Honor an inherited RUST_LOG so a debug trace of the seat-streamer (pad
+    // lifecycle, frame streaming) can be turned on from the parent env, e.g.
+    // `RUST_LOG=debug splitux launch ...`; default to "info" when unset.
+    cmd.env(
+        "RUST_LOG",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+    );
 
     // The Vulkan zero-copy encoder needs the custom `dmabufvulkanupload` plugin
     // (libgstdmabufvulkan.so) — it imports gamescope's NV12 dmabuf straight into
@@ -259,7 +306,7 @@ fn spawn_seat_streamer(
     // gamescope --libinput-hold-dev grab. stdio is applied AFTER the wrap because
     // wrap_seat_command copies program/args/env/cwd but not stdio.
     let mut cmd = if scoping {
-        crate::launch::scope::wrap_seat_command(cmd, launch_id, seat_idx, main_scope)
+        crate::launch::scope::wrap_seat_command(cmd, launch_id, instance.game, seat_idx, main_scope)
     } else {
         cmd
     };
@@ -326,7 +373,9 @@ fn ensure_orchestrator(cfg: &SplituxConfig) -> Option<Child> {
 pub fn setup_together_seats(
     instances: &[Instance],
     cfg: &SplituxConfig,
-    game_label: &str,
+    // One label per game (indexed by `Instance.game`), so a multi-game launch
+    // gives each seat its own game's name on the invite. Single-game = length-1.
+    game_labels: &[String],
     launch_id: &str,
     main_scope: Option<&str>,
     scoping: bool,
@@ -385,6 +434,11 @@ pub fn setup_together_seats(
             .get(i)
             .filter(|s| !s.is_empty())
             .map(|s| format!("{s}.monitor"));
+        // This seat's invite carries its OWN game's label (multi-game safe).
+        let game_label = game_labels
+            .get(instance.game)
+            .map(String::as_str)
+            .unwrap_or("");
         for _ in 0..instance.together_seats {
             let seat = seat_id(seat_index);
             let name = if remote_count == 1 {
@@ -473,6 +527,46 @@ pub fn collapse_for_local_split(
     vec![base]
 }
 
+/// Collapse each game's instances independently for local-split (couch co-op).
+///
+/// Multi-game safe wrapper over [`collapse_for_local_split`]: groups instances by
+/// `Instance.game` (first-seen order), folds each game with ITS own handler, and
+/// preserves the game tag on the folded instance. A single-game launch is one
+/// group → the legacy single `collapse_for_local_split` call, byte-identical.
+///
+/// This is the FIRST step of the shared launch-core (see
+/// [`crate::launch::run_launch`]) so every presentation layer collapses the same
+/// way — previously only the CLI did, leaving the GUI's local-split path
+/// divergent.
+pub fn collapse_instances_per_game(
+    instances: Vec<Instance>,
+    handlers: &[crate::handler::Handler],
+) -> Vec<Instance> {
+    use std::collections::HashMap;
+    let mut order: Vec<usize> = Vec::new();
+    let mut by_game: HashMap<usize, Vec<Instance>> = HashMap::new();
+    for inst in instances {
+        by_game
+            .entry(inst.game)
+            .or_insert_with(|| {
+                order.push(inst.game);
+                Vec::new()
+            })
+            .push(inst);
+    }
+    let mut out: Vec<Instance> = Vec::new();
+    for game in order {
+        let group = by_game.remove(&game).unwrap_or_default();
+        // Guard against an out-of-range game tag (shouldn't happen post-parse).
+        if let Some(handler) = handlers.get(game) {
+            out.extend(collapse_for_local_split(group, handler));
+        } else {
+            out.extend(group);
+        }
+    }
+    out
+}
+
 /// Show the invite URLs to the host so they can hand them to friends. Also
 /// prints them and writes them to a file (the dialog text isn't easily
 /// copyable). Runs the dialog on a detached thread so it never blocks session
@@ -507,10 +601,38 @@ pub fn popup_invites(links: &[InviteLink]) {
 }
 
 /// Terminate all seat-streamer (and local-orchestrator) children at teardown.
+///
+/// SIGTERM, NOT SIGKILL: seat-streamer installs a SIGTERM handler that runs its
+/// graceful raw-gadget shutdown (SIGTERM xpad360 -> EP_DISABLE -> join the ep-io
+/// threads -> close the raw-gadget fd). That clean release is what avoids the
+/// dummy_hcd use-after-free oops (dummy_timer completing a freed in-flight
+/// request -> HW-watchdog hard reset). A blunt `child.kill()` (SIGKILL) skips the
+/// handler entirely — the exact abrupt death of a raw_gadget holder that wedges
+/// the kernel gadget layer. We SIGTERM all of them first (parallel graceful
+/// teardown), wait against a shared deadline, then SIGKILL only as a backstop.
 pub fn terminate_all(handles: &mut Vec<Child>) {
+    use std::time::{Duration, Instant};
+    for child in handles.iter_mut() {
+        unsafe {
+            libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+        }
+    }
+    // Generous deadline: each seat's xpad360 now joins its kernel ep-io threads on
+    // the way out (up to ~2s per pad), and seats tear down in parallel.
+    let deadline = Instant::now() + Duration::from_millis(4000);
     for mut child in handles.drain(..) {
-        let _ = child.kill();
-        let _ = child.wait();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill(); // SIGKILL backstop for a stuck streamer
+                    let _ = child.wait();
+                    break;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Err(_) => break,
+            }
+        }
     }
 }
 
@@ -523,6 +645,7 @@ mod tests {
     fn together_instance(devices: Vec<usize>) -> Instance {
         Instance {
             devices,
+            game: 0,
             profname: String::new(),
             profselection: 0,
             monitor: 0,

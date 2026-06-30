@@ -32,7 +32,7 @@ use super::super::types::SDL_GAMECONTROLLER_IGNORE_DEVICES;
 /// number of args before the child command. Device blocking args are inserted
 /// at this position at spawn time for fresh permission checks.
 pub fn launch_cmds(
-    h: &Handler,
+    handlers: &[Handler],
     input_devices: &[DeviceInfo],
     instances: &Vec<Instance>,
     monitors: &[Monitor],
@@ -41,33 +41,67 @@ pub fn launch_cmds(
     gptokeyb_virtual_devices: &[Option<PathBuf>],
     together_devices: &[Vec<crate::together::TogetherSeatDevices>],
 ) -> Result<Vec<(std::process::Command, usize)>, Box<dyn std::error::Error>> {
-    let win = h.win();
-    let exec = Path::new(&h.exec);
-    let runtime = h.runtime.as_str();
+    // The per-instance loop reads its own `handlers[instance.game]`; the batch
+    // ops below are now grouped per game internally, so single-game (every
+    // `instance.game == 0`) is byte-identical.
 
-    // Validate Steam Runtime if needed
-    validate_runtime(runtime)?;
+    // Per-game (unit) instance numbering. `$INSTANCENUM`/`$INSTANCECOUNT` and the
+    // goldberg "first instance reports the real save's steam id" rule are
+    // per-unit, not global. For a single-game launch these equal the global
+    // index / total, so nothing changes.
+    let games: Vec<usize> = instances.iter().map(|inst| inst.game).collect();
+    let (game_inst_nums, game_inst_counts) =
+        crate::launch::pure::per_game_instance_numbering(&games);
 
-    // Create backend overlays if needed (before mounting game dirs)
-    let backend_overlays = if h.is_saved_handler() {
-        backend::create_backend_overlays(h, instances, win)?
-    } else {
-        vec![]
-    };
+    // Backend overlays, GLOBAL-indexed, grouped per game (each unit built from
+    // its own handler → mixed backends across games + per-game goldberg lobby
+    // isolation). Non-saved-handler games contribute empty lists.
+    let backend_overlays = backend::create_backend_overlays(handlers, instances)?;
 
-    // Generate Photon configs at launch time (needs instance count)
-    if h.has_photon() && h.is_saved_handler() {
-        photon_generate_configs(h, instances)?;
+    // Generate Photon configs at launch time, per game (each game's own instance
+    // count drives its configs). Group by game in first-seen order; emit only for
+    // photon + saved-handler games.
+    {
+        let mut games_seen: Vec<usize> = Vec::new();
+        let mut insts_by_game: std::collections::HashMap<usize, Vec<Instance>> =
+            std::collections::HashMap::new();
+        for inst in instances {
+            insts_by_game
+                .entry(inst.game)
+                .or_insert_with(|| {
+                    games_seen.push(inst.game);
+                    Vec::new()
+                })
+                .push(inst.clone());
+        }
+        for game in games_seen {
+            let gh = &handlers[game];
+            if gh.has_photon() && gh.is_saved_handler() {
+                photon_generate_configs(gh, &insts_by_game[&game])?;
+            }
+        }
     }
 
-    // Mount game directories with overlays
-    if h.is_saved_handler() && !cfg.disable_mount_gamedirs {
-        fuse_overlayfs_mount_gamedirs(h, instances, &backend_overlays)?;
+    // Mount game directories with overlays. Per-instance handler inside; the
+    // mount skips non-saved-handler games (they run from their real game root).
+    if !cfg.disable_mount_gamedirs {
+        fuse_overlayfs_mount_gamedirs(handlers, instances, &backend_overlays)?;
     }
 
     let mut cmds: Vec<(Command, usize)> = Vec::new();
 
     for (i, instance) in instances.iter().enumerate() {
+        // This instance's unit handler. Single-game: always handlers[0].
+        let h = &handlers[instance.game];
+        let win = h.win();
+        let exec = Path::new(&h.exec);
+        let runtime = h.runtime.as_str();
+        validate_runtime(runtime)?;
+
+        let game_inst_num = game_inst_nums[i];
+        let game_inst_count = game_inst_counts[i];
+        let is_first_in_game = game_inst_num == 0;
+
         let gamedir = if h.is_saved_handler() && !cfg.disable_mount_gamedirs {
             crate::paths::launch_tmp_dir().join(format!("game-{}", i))
         } else {
@@ -94,12 +128,51 @@ pub fn launch_cmds(
         };
         let path_prof = PATH_PARTY.join("profiles").join(&instance.profname);
 
-        // 1. Create gamescope command
-        let mut cmd = gamescope::create_command(cfg);
+        // splitux-together: this instance's remote seats (if any). One in the
+        // online/LAN case; N for a local-split (couch-co-op) game where several
+        // browsers drive the one instance. Each seat's virtual kbd/mouse are
+        // ALWAYS held by gamescope (so remote keystrokes reach the game, not the
+        // host desktop); their pads are wired into the game's SDL below only when
+        // the player is set to Gamepad input. Bound here (before the command root)
+        // so the gamescope-bypass decision can see whether this instance streams.
+        let seats: &[crate::together::TogetherSeatDevices] =
+            together_devices.get(i).map(Vec::as_slice).unwrap_or(&[]);
+
+        // Gamescope-bypass (cfg.disable_gamescope): run a single LOCAL seat
+        // directly under the host compositor, with NO nested gamescope. ONLY for
+        // a lone, non-together, bwrap'd instance — split-screen needs gamescope's
+        // per-instance geometry and together needs its PipeWire capture, so those
+        // always keep the nested compositor. Removes the double-compositor
+        // scan-line artifact on high-refresh panels (see SplituxConfig docs). The
+        // game inherits the session's X display (Xwayland-satellite), so its wine
+        // display driver is unchanged — only the redundant compositor is dropped.
+        let bypass_gamescope = h.effective_disable_gamescope(cfg)
+            && instances.len() == 1
+            && seats.is_empty()
+            && !h.disable_bwrap;
+        if bypass_gamescope {
+            println!(
+                "[splitux] Instance {}: disable_gamescope — running directly under the host \
+                 compositor (no nested gamescope)",
+                i
+            );
+        }
+
+        // 1. Create the root command: gamescope normally, or bwrap directly when
+        // bypassing gamescope for a single local seat.
+        let mut cmd = if bypass_gamescope {
+            Command::new("bwrap")
+        } else {
+            gamescope::create_command(cfg)
+        };
         cmd.current_dir(&cwd);
 
-        // 2. Set up gamescope environment
-        gamescope::setup_env(&mut cmd);
+        // 2. Set up gamescope environment (skipped when bypassing — these env
+        // vars steer gamescope itself; the un-nested game inherits the session
+        // environment, including DISPLAY for the host's Xwayland).
+        if !bypass_gamescope {
+            gamescope::setup_env(&mut cmd);
+        }
 
         // Align the game's graphics driver with the configured GPU vendor
         // (gpu_vendor=auto detects from the DRM render node). Centralizes the
@@ -128,7 +201,21 @@ pub fn launch_cmds(
 
         // Proton environment (for Windows games)
         if win {
-            proton::setup_env(&mut cmd, h, cfg, i);
+            proton::setup_env(&mut cmd, h, cfg, &instance.profname, instance.game);
+
+            // Gamescope-bypass: with no nested gamescope there is no embedded
+            // Xwayland, and the host's rootless Xwayland (xwayland-satellite)
+            // drops the warp-based relative-mouse that wine games use for
+            // mouse-look (cursor is grabbed but the camera never turns). Run wine
+            // as a NATIVE WAYLAND client (winewayland.drv) instead: relative
+            // pointer + pointer-lock go through the Wayland protocols niri
+            // implements, so mouse-look works AND the host compositor owns the
+            // cursor grab (clean release on unfocus). It also makes niri see the
+            // real game window (correct pid/app_id) so splitux can position it.
+            // GE-Proton ships winewayland.drv. VALIDATED live on Enshrouded.
+            if bypass_gamescope {
+                cmd.env("PROTON_ENABLE_WAYLAND", "1");
+            }
 
             // BepInEx doorstop requires native winhttp.dll override
             // Without this, Wine uses its builtin and BepInEx never loads
@@ -235,7 +322,7 @@ pub fn launch_cmds(
             if std::fs::create_dir_all(&global_settings).is_ok() {
                 // Must match the per-game GoldbergConfig.steam_id (goldberg.rs):
                 // first instance reports the REAL save's id, others a generated id.
-                let sid = if i == 0 {
+                let sid = if is_first_in_game {
                     crate::save_sync::pure::effective_steam_id(h, &instance.profname)
                 } else {
                     crate::profiles::generate_steam_id(&instance.profname)
@@ -273,50 +360,67 @@ pub fn launch_cmds(
             println!("[splitux] Instance {}: GSE_IP_P2P_BRIDGE=1 (goldberg P2P bridge)", i);
         }
 
-        // splitux-together: this instance's remote seats (if any). One in the
-        // online/LAN case; N for a local-split (couch-co-op) game where several
-        // browsers drive the one instance. Each seat's virtual kbd/mouse are
-        // ALWAYS held by gamescope (so remote keystrokes reach the game, not the
-        // host desktop); their pads are wired into the game's SDL below only when
-        // the player is set to Gamepad input.
-        let seats: &[crate::together::TogetherSeatDevices] =
-            together_devices.get(i).map(Vec::as_slice).unwrap_or(&[]);
-
-        // 3. Add gamescope arguments
-        gamescope::add_args(&mut cmd, instance, monitors, cfg);
-        let virtual_device = gptokeyb_virtual_devices.get(i).and_then(|v| v.as_ref());
-        gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
-        if !seats.is_empty() {
-            // Drive the compositor at the fps tier once for the instance, then
-            // hold EVERY seat's kbd/mouse (gamescope takes repeated
-            // --libinput-hold-dev). Give the instance's PipeWire capture a
-            // unique, targetable node name so its seat-streamer(s) bind to THIS
-            // gamescope; all of this instance's seats share that one node
-            // (multi-consumer) — which is exactly how local-split fans out.
-            gamescope::add_together_refresh_rate(&mut cmd, cfg);
-            for seat in seats {
-                gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
+        // 3. Add gamescope arguments (skipped entirely when bypassing — the game
+        // runs directly under the host compositor with no nested gamescope).
+        if !bypass_gamescope {
+            gamescope::add_args(&mut cmd, instance, monitors, cfg);
+            // Fullscreen single / online-co-op games (handler flag): fills the output
+            // at native res instead of a ~720p floating window AND confines the cursor
+            // to the output. Skipped for local split-screen (sub-region instances).
+            if h.fullscreen {
+                gamescope::add_fullscreen(&mut cmd);
             }
-            // Mixed couch session: a local host shares this collapsed instance
-            // with the remote seat(s). Holding the seat devices blocks parent
-            // compositor input by default, so re-open it for the host's kb/m.
-            if instance.local_input {
-                gamescope::add_libinput_allow_parent(&mut cmd, cfg);
-                println!(
-                    "[splitux] Instance {}: --libinput-allow-parent (local host shares this together instance)",
-                    i
+            let virtual_device = gptokeyb_virtual_devices.get(i).and_then(|v| v.as_ref());
+            // NOTE: the instance's REAL keyboard/mouse are deliberately NOT held here.
+            // Exclusively grabbing them (--libinput-hold-dev) to "confine the cursor"
+            // removed the mouse from the host without gamescope presenting a usable
+            // confined cursor — the device just vanished. For a kb/mouse seat the mouse
+            // must stay usable, so gamescope gets input via normal compositor focus and
+            // the fullscreen window naturally keeps the pointer. Only gptokeyb's virtual
+            // device (controller→kb/m output) is held below. Real confinement, if ever
+            // needed for multi-instance, must use pointer-constraints, not an exclusive
+            // grab — see ~/.claude/plans/skittish-grabbing-cursor.md.
+            gamescope::add_input_holding_args(&mut cmd, virtual_device.map(|p| p.as_path()), cfg);
+            if !seats.is_empty() {
+                // Cap the compositor at the stream fps tier — TOGETHER instances ONLY,
+                // for PipeWire capture pacing (the headless backend else defaults to
+                // 60Hz and the encode rate must match). LOCAL instances are left
+                // UNCAPPED at the display's native refresh: capping a local seat to the
+                // stream tier (e.g. 60 on a 200Hz panel) makes gamescope's frame limiter
+                // strobe black frames on motion — a gamescope-only present artifact,
+                // absent under native presentation (native Lutris clean; -r 60 not).
+                gamescope::add_refresh_rate(&mut cmd, cfg);
+                // Hold EVERY seat's kbd/mouse (gamescope takes repeated
+                // --libinput-hold-dev). Give the instance's PipeWire capture a
+                // unique, targetable node name so its seat-streamer(s) bind to THIS
+                // gamescope; all of this instance's seats share that one node
+                // (multi-consumer) — which is exactly how local-split fans out.
+                for seat in seats {
+                    gamescope::add_seat_hold_args(&mut cmd, seat, cfg);
+                }
+                // Mixed couch session: a local host shares this collapsed instance
+                // with the remote seat(s). Holding the seat devices blocks parent
+                // compositor input by default, so re-open it for the host's kb/m.
+                if instance.local_input {
+                    gamescope::add_libinput_allow_parent(&mut cmd, cfg);
+                    println!(
+                        "[splitux] Instance {}: --libinput-allow-parent (local host shares this together instance)",
+                        i
+                    );
+                }
+                cmd.env(
+                    "GAMESCOPE_PIPEWIRE_NODE",
+                    crate::together::node_name_for_instance(i),
                 );
             }
-            cmd.env(
-                "GAMESCOPE_PIPEWIRE_NODE",
-                crate::together::node_name_for_instance(i),
-            );
+            gamescope::add_separator(&mut cmd);
         }
-        gamescope::add_separator(&mut cmd);
 
-        // 4. Add bwrap container (unless disabled)
+        // 4. Add bwrap container (unless disabled). When bypassing gamescope the
+        // command is rooted directly at bwrap, so add_base_args must not re-emit
+        // the leading `bwrap` argument (as_program = bypass_gamescope).
         if !h.disable_bwrap {
-            bwrap::add_base_args(&mut cmd);
+            bwrap::add_base_args(&mut cmd, bypass_gamescope);
 
             // goldberg.steamclient: shadow Proton's steamclient COPY SOURCE with
             // goldberg's experimental steamclient. These games resolve Steam via
@@ -344,7 +448,7 @@ pub fn launch_cmds(
                 // which falls through to steam://run and exits. Writing goldberg's
                 // here makes the warm path correct; the shadow (b) covers the
                 // cold/copy-runs path (Proton then copies goldberg, not real Steam).
-                let pfx_steam = proton::get_prefix_path(cfg, i)
+                let pfx_steam = proton::get_prefix_path(cfg, &instance.profname, instance.game)
                     .join("drive_c/Program Files (x86)/Steam");
                 match std::fs::create_dir_all(&pfx_steam) {
                     Ok(()) => {
@@ -502,7 +606,7 @@ pub fn launch_cmds(
 
             // 5. Profile bindings
             if win {
-                let path_pfx_user = proton::get_prefix_user_path(cfg, i);
+                let path_pfx_user = proton::get_prefix_user_path(cfg, &instance.profname, instance.game);
                 cmd.arg("--bind")
                     .args([&path_prof.join("windata"), &path_pfx_user]);
             } else {
@@ -584,13 +688,19 @@ pub fn launch_cmds(
                 "$WIDTH" => &instance.width.to_string(),
                 "$HEIGHT" => &instance.height.to_string(),
                 "$RESOLUTION" => &format!("{}x{}", instance.width, instance.height),
-                "$INSTANCECOUNT" => &instances.len().to_string(),
-                "$INSTANCENUM" => &i.to_string(),
+                "$INSTANCECOUNT" => &game_inst_count.to_string(),
+                "$INSTANCENUM" => &game_inst_num.to_string(),
                 "$GAMEDIR" => &gamedir.os_fmt(win),
                 "$HANDLERDIR" => &h.path_handler.os_fmt(win),
                 _ => &String::from(arg).sanitize_path(),
             };
             cmd.arg(processed_arg);
+        }
+
+        // 9b. Backend-injected launch args (e.g. Keen's
+        // --keenonline-server-data-file). `win` is this game's Proton/wine-ness.
+        for arg in crate::backend::collect_backend_launch_args(h, win) {
+            cmd.arg(arg);
         }
 
         cmds.push((cmd, bwrap_arg_count));

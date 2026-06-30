@@ -172,6 +172,32 @@ impl Splitux {
     }
 
     /// Helper to display the handler list (used by both layouts)
+    /// Find the locally-installed handler matching a registry entry.
+    ///
+    /// Registry ids are kebab-case (`deep-rock-galactic`) but local handler dirs
+    /// are often PascalCase (`DeepRockGalactic`), so a plain id/dir comparison
+    /// misses. Match on the stable **Steam appid** first, then a
+    /// separator/case-insensitive id fallback. This is what lets the registry use
+    /// the REAL local art + correct "installed" state (your machine is the source
+    /// of truth) instead of depending on the remote CDN by id.
+    fn registry_local_handler(&self, entry: &RegistryEntry) -> Option<usize> {
+        if let Some(appid) = entry.steam_appid {
+            if let Some(i) = self.handlers.iter().position(|h| h.steam_appid == Some(appid)) {
+                return Some(i);
+            }
+        }
+        let norm = |s: &str| -> String {
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .map(|c| c.to_ascii_lowercase())
+                .collect()
+        };
+        let want = norm(&entry.id);
+        self.handlers
+            .iter()
+            .position(|h| norm(h.handler_dir_name()) == want)
+    }
+
     fn display_registry_handler_list(
         &mut self,
         ui: &mut Ui,
@@ -180,7 +206,8 @@ impl Splitux {
     ) {
         for (original_idx, entry) in filtered_handlers {
             let is_selected = self.registry_selected == Some(*original_idx);
-            let is_installed = entry.is_installed();
+            let local = self.registry_local_handler(entry);
+            let is_installed = local.is_some() || entry.is_installed();
             let show_focus = is_selected && is_list_focused;
 
             let frame = if is_selected {
@@ -200,55 +227,103 @@ impl Splitux {
                     .inner_margin(egui::Margin::symmetric(6, 4))
             };
 
-            let frame_resp = frame.show(ui, |ui| {
-                let response = ui.horizontal(|ui| {
-                    // Icon from registry CDN
-                    let icon_url = entry.icon_url();
-                    ui.add(
-                        egui::Image::new(&icon_url)
-                            .max_width(18.0)
-                            .corner_radius(3),
-                    );
-                    ui.add_space(4.0);
+            // The whole highlighted row is the click target (not just the text),
+            // so there's no dead gap between entries: force the frame full-width,
+            // keep the inner widgets non-interactive, and sense clicks on the
+            // frame's full rect.
+            let frame_resp = frame
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        // Icon: prefer the LOCAL handler's art (source of truth, always
+                        // present once installed), else the registry CDN, else the
+                        // app's generic icon (never egui's broken-image ⚠️).
+                        if let Some(li) = local {
+                            ui.add(
+                                egui::Image::new(self.handlers[li].icon())
+                                    .max_width(18.0)
+                                    .corner_radius(3),
+                            );
+                        } else {
+                            let icon_url = entry.icon_url();
+                            let icon_ready = matches!(
+                                ui.ctx().try_load_texture(
+                                    &icon_url,
+                                    egui::TextureOptions::default(),
+                                    egui::SizeHint::Scale(1.0.into()),
+                                ),
+                                Ok(egui::load::TexturePoll::Ready { .. })
+                            );
+                            if icon_ready {
+                                ui.add(
+                                    egui::Image::new(&icon_url).max_width(18.0).corner_radius(3),
+                                );
+                            } else {
+                                ui.add(
+                                    egui::Image::new(egui::include_image!(
+                                        "../../assets/executable_icon.png"
+                                    ))
+                                    .max_width(18.0)
+                                    .corner_radius(3),
+                                );
+                            }
+                        }
+                        ui.add_space(4.0);
 
-                    // Name with installed indicator
-                    let mut name_text = RichText::new(&entry.name);
-                    if is_installed {
-                        name_text = name_text.color(theme::colors::SUCCESS);
-                    }
-                    let label = ui.add(
-                        egui::Label::new(name_text)
-                            .selectable(false)
-                            .sense(egui::Sense::click()),
-                    );
-                    label
-                }).inner;
+                        // Name with installed indicator
+                        let mut name_text = RichText::new(&entry.name);
+                        if is_installed {
+                            name_text = name_text.color(theme::colors::SUCCESS);
+                        }
+                        ui.add(egui::Label::new(name_text).selectable(false));
+                    });
+                })
+                .response
+                .interact(egui::Sense::click());
 
-                if response.clicked() {
-                    self.registry_selected = Some(*original_idx);
-                }
-            });
-            // Auto-scroll to keep focused handler visible
-            if show_focus {
-                frame_resp.response.scroll_to_me(Some(egui::Align::Center));
+            if frame_resp.clicked() {
+                self.registry_selected = Some(*original_idx);
             }
-            ui.add_space(2.0);
+            // Auto-scroll to keep focused handler visible — but ONLY when the
+            // selection actually changed (keyboard/gamepad nav), not every frame.
+            // Otherwise the constant re-centering fights the mouse wheel and the
+            // list feels locked to the selection.
+            if show_focus && self.registry_scrolled_idx != Some(*original_idx) {
+                frame_resp.scroll_to_me(Some(egui::Align::Center));
+                self.registry_scrolled_idx = Some(*original_idx);
+            }
+            // No inter-row spacer: contiguous rows mean a click can't fall
+            // "between" two entries and select neither.
         }
     }
 
     fn display_registry_handler_details(&mut self, ui: &mut Ui, entry: &RegistryEntry) {
-        let is_installed = entry.is_installed();
+        let local = self.registry_local_handler(entry);
+        let is_installed = local.is_some() || entry.is_installed();
         let is_installing = self.registry_installing.as_ref() == Some(&entry.id);
 
-        // Header image
-        let header_url = entry.header_url();
-        ui.add(
-            egui::Image::new(&header_url)
-                .max_width(ui.available_width())
-                .max_height(140.0)
-                .corner_radius(4),
+        // Wide banner (hero): prefer the LOCAL handler's banner; else the CDN.
+        // Probe the load and only draw when ready, so a not-yet-present banner
+        // shows nothing rather than egui's broken-image ⚠️.
+        let local_hero = local.and_then(|li| self.handlers[li].hero_image());
+        let hero_uri = local_hero.unwrap_or_else(|| entry.hero_url());
+        let hero_ready = matches!(
+            ui.ctx().try_load_texture(
+                &hero_uri,
+                egui::TextureOptions::default(),
+                egui::SizeHint::Scale(1.0.into()),
+            ),
+            Ok(egui::load::TexturePoll::Ready { .. })
         );
-        ui.add_space(8.0);
+        if hero_ready {
+            ui.add(
+                egui::Image::new(&hero_uri)
+                    .max_width(ui.available_width())
+                    .max_height(140.0)
+                    .corner_radius(4),
+            );
+            ui.add_space(8.0);
+        }
 
         // Name and metadata
         ui.heading(&entry.name);

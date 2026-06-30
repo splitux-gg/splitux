@@ -18,6 +18,7 @@ pub fn create_all_overlays(
     settings: &FacepunchSettings,
     runtime_patches: &[RuntimePatch],
     instances: &[Instance],
+    global_indices: &[usize],
     is_windows: bool,
     game_dir: &Path,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -37,6 +38,8 @@ pub fn create_all_overlays(
 
     for (i, instance) in instances.iter().enumerate() {
         let config = FacepunchConfig {
+            // player_index stays LOCAL (this game's player slot 0,1,…); only the
+            // overlay dir is named by the GLOBAL index to avoid cross-game clash.
             player_index: i,
             account_name: instance.profname.clone(),
             steam_id: generate_steam_id(&instance.profname),
@@ -44,7 +47,7 @@ pub fn create_all_overlays(
             runtime_patches: runtime_patches.to_vec(),
         };
 
-        let overlay = create_instance_overlay(i, &config, is_windows, backend)?;
+        let overlay = create_instance_overlay(global_indices[i], &config, is_windows, backend)?;
         overlays.push(overlay);
     }
 

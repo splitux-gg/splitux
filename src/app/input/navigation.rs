@@ -101,8 +101,7 @@ impl Splitux {
                 ActiveDropdown::InstanceProfile(_)
                 | ActiveDropdown::InstanceMonitor(_)
                 | ActiveDropdown::InstanceAudioOverride(_)
-                | ActiveDropdown::InstanceAudioPreference(_)
-                | ActiveDropdown::InstanceGptokeyb(_) => return,
+                | ActiveDropdown::InstanceAudioPreference(_) => return,
             };
             if self.dropdown_selection_idx < max_items.saturating_sub(1) {
                 self.dropdown_selection_idx += 1;

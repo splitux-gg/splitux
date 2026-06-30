@@ -14,6 +14,9 @@ impl Splitux {
         let mut scroll_delta: Option<Vec2> = None;
         let mut page_changed = false;
         let mut start_pressed = false;
+        // evdev path of the device that triggered a game-setup start, so we can
+        // inject it as player 1 on the setup screen (A / Start on a game).
+        let mut start_pressed_device_path: Option<String> = None;
         let mut confirm_profile_selection = false;
         let mut open_profile_dropdown = false;
         let mut fetch_registry_needed = false;
@@ -40,15 +43,17 @@ impl Splitux {
             });
         }
 
-        // Collect poll results
-        let results: Vec<PollResult> = self.input_devices
+        // Collect poll results, keeping each device's index so a game-activate
+        // press can be traced back to the device that made it.
+        let results: Vec<(usize, PollResult)> = self.input_devices
             .iter_mut()
-            .filter(|pad| pad.enabled())
-            .map(|pad| pad.poll())
+            .enumerate()
+            .filter(|(_, pad)| pad.enabled())
+            .map(|(i, pad)| (i, pad.poll()))
             .collect();
 
         // Process each result
-        for result in results {
+        for (dev_idx, result) in results {
             match result {
                 PollResult::DeviceDisabled(reason) => {
                     eprintln!("[splitux] evdev: {}", reason);
@@ -168,6 +173,13 @@ impl Splitux {
                 }
                 _ => {}
             }
+            // Remember which device kicked off a game-setup start (A or Start on a
+            // game) so it becomes player 1 once we reach the setup screen.
+            if start_pressed && on_games_page && start_pressed_device_path.is_none() {
+                if let Some(dev) = self.input_devices.get(dev_idx) {
+                    start_pressed_device_path = Some(dev.path().to_string());
+                }
+            }
         }
 
         // Inject key events
@@ -200,7 +212,7 @@ impl Splitux {
             self.fetch_registry();
         }
         if start_pressed && on_games_page && has_handlers {
-            self.start_game_setup();
+            self.start_game_setup_injecting(start_pressed_device_path.take());
             page_changed = true;
         }
         // Focus state is preserved when switching pages (no reset)
@@ -228,7 +240,7 @@ impl Splitux {
     /// Unified direction input handler
     ///
     /// Uses new focus pipeline for all pages. State is captured via build_nav_context().
-    fn handle_direction_input(&mut self, direction: NavDirection, key: &mut Option<Key>) {
+    pub(super) fn handle_direction_input(&mut self, direction: NavDirection, key: &mut Option<Key>) {
         // Handle dropdown navigation first (uses new pipeline)
         if self.profile_dropdown_open {
             let ctx = self.build_nav_context();

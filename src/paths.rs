@@ -143,6 +143,24 @@ pub static BIN_SEAT_STREAMER: LazyLock<PathBuf> = LazyLock::new(|| resolve_compa
 /// pointing at a remote service.
 pub static BIN_ORCHESTRATOR: LazyLock<PathBuf> = LazyLock::new(|| resolve_companion_bin("orchestrator"));
 
+/// Keen online-backend emulator: host-side auth sidecar for Keen-gated titles
+/// (e.g. Enshrouded). Sideloaded like gptokeyb/seat-streamer rather than
+/// committed — sourced from `splitux-gg/keen-emu-splitux` and staged by
+/// `splitux.sh do_build`/`do_install`. Resolves through the standard
+/// companion-bin search, falling back to the legacy in-assets path so an
+/// existing local drop (`assets/keen/keen-emu`) keeps working.
+pub static BIN_KEEN_EMU: LazyLock<PathBuf> = LazyLock::new(|| {
+    let companion = resolve_companion_bin("keen-emu");
+    if companion.exists() {
+        return companion;
+    }
+    let legacy = PATH_ASSETS.join("keen").join("keen-emu");
+    if legacy.exists() {
+        return legacy;
+    }
+    companion
+});
+
 /// Resolve a companion binary by name across the standard install locations,
 /// preferring splitux's own data dir (`~/.local/share/splitux/bin`).
 fn resolve_companion_bin(name: &str) -> PathBuf {

@@ -66,6 +66,7 @@ fn install_plugin_to_overlay(
 pub fn create_all_overlays(
     handler: &Handler,
     instances: &[Instance],
+    global_indices: &[usize],
     is_windows: bool,
     game_dir: &Path,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -95,9 +96,11 @@ pub fn create_all_overlays(
         None => Vec::new(),
     };
 
-    // Generate ports for each instance
-    let instance_ports: Vec<u16> = (0..instances.len())
-        .map(|i| BASE_PORT + i as u16)
+    // Generate ports for each instance, keyed by GLOBAL index so two concurrent
+    // games never reuse a port.
+    let instance_ports: Vec<u16> = global_indices
+        .iter()
+        .map(|&gi| BASE_PORT + gi as u16)
         .collect();
 
     let mut overlays = Vec::new();
@@ -108,7 +111,8 @@ pub fn create_all_overlays(
             listen_port: instance_ports[i],
         };
 
-        let overlay = create_instance_overlay(i, &config, is_windows, backend)?;
+        // Overlay dir named by the GLOBAL index (cross-game collision-free).
+        let overlay = create_instance_overlay(global_indices[i], &config, is_windows, backend)?;
 
         // Install plugin DLLs to overlay
         install_plugin_to_overlay(&overlay, &plugin_dlls)?;

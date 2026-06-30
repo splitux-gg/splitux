@@ -145,6 +145,7 @@ impl Backend for Goldberg {
         &self,
         handler: &Handler,
         instances: &[Instance],
+        global_indices: &[usize],
         is_windows: bool,
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -161,10 +162,14 @@ impl Backend for Goldberg {
             return Ok(vec![]);
         }
 
-        // Generate unique ports for each instance
+        // Generate unique ports for each instance, keyed by the GLOBAL index so
+        // two concurrent games never reuse a port. `broadcast_ports` below is
+        // built from THIS call's instances only (one game), so a unit's LAN
+        // discovery stays inside its own lobby — the multi-game isolation.
         const BASE_PORT: u16 = 47584;
-        let instance_ports: Vec<u16> = (0..instances.len())
-            .map(|i| BASE_PORT + i as u16)
+        let instance_ports: Vec<u16> = global_indices
+            .iter()
+            .map(|&gi| BASE_PORT + gi as u16)
             .collect();
 
         // Build configs for each instance
@@ -172,7 +177,7 @@ impl Backend for Goldberg {
             .iter()
             .enumerate()
             .map(|(i, instance)| {
-                // Broadcast ports = all other instances' ports
+                // Broadcast ports = all other instances' ports IN THIS GAME
                 let broadcast_ports: Vec<u16> = instance_ports
                     .iter()
                     .enumerate()
@@ -182,11 +187,13 @@ impl Backend for Goldberg {
 
                 GoldbergConfig {
                     app_id: handler.get_steam_appid().unwrap_or(480),
-                    // First instance owns the canonical save → report the REAL
-                    // Steam id (so a save_steam_id_remap game reads the real save
-                    // in place; goldberg uses the real passwd home, not $HOME).
-                    // Extra instances keep a generated id so their lobby identities
-                    // stay distinct.
+                    // First instance of THIS game owns the canonical save → report
+                    // the REAL Steam id (so a save_steam_id_remap game reads the
+                    // real save in place; goldberg uses the real passwd home, not
+                    // $HOME). Extra instances keep a generated id so their lobby
+                    // identities stay distinct. `i` is local-to-this-game, so
+                    // `i == 0` is the per-game first instance — matching
+                    // build_cmds.rs's `is_first_in_game`.
                     steam_id: if i == 0 {
                         crate::save_sync::pure::effective_steam_id(handler, &instance.profname)
                     } else {
@@ -202,6 +209,7 @@ impl Backend for Goldberg {
         let overlays = pipeline_create_all_overlays(
             &dlls,
             &configs,
+            global_indices,
             is_windows,
             &self.settings.settings,
             self.settings.disable_networking,
@@ -211,16 +219,20 @@ impl Backend for Goldberg {
             self.settings.steamclient,
         )?;
 
-        // SteamStub DRM shadow: some steamclient games (e.g. Patch Quest) ship a
-        // SteamStub-wrapped exe (a `.bind` PE section). Run under goldberg it errors
-        // with "Application load error 3:0000065432" because the stub can't validate
-        // ownership/decrypt without real Steam. The fix is a DRM-free exe produced by
-        // Steamless. To keep the real install pristine we DON'T patch in place —
-        // `ensure_stripped` produces (once) a Steamless-stripped copy cached under
-        // `{PATH_PARTY}/steamless/{appid}/`, and we copy it into each instance overlay
-        // at the exe's path so fuse-overlayfs serves the stripped exe over the real
-        // one. Returns None when the exe isn't DRM-wrapped (no shadow needed).
-        if self.settings.steamclient {
+        // SteamStub DRM shadow: some games ship a SteamStub-wrapped exe (a `.bind`
+        // section). Run under goldberg it errors "Application load error 3:..." (PE)
+        // or hard-needs real Steam (native ELF — e.g. Overcooked! 2), because the
+        // stub validates ownership with Steam before the game runs. The fix is a
+        // DRM-free exe: Windows PE → Steamless under Proton; native ELF → repoint
+        // the entry point to the real _start (the stub never runs). To keep the real
+        // install pristine we DON'T patch in place — `ensure_stripped` produces
+        // (once) a stripped copy cached under `{PATH_PARTY}/steamless/{appid}/`, and
+        // we copy it into each instance overlay at the exe's path so fuse-overlayfs
+        // serves it over the real one (the real _Data dir still resolves via the
+        // overlay lowerdir). Returns None when the exe isn't DRM-wrapped.
+        // Gate: Windows steamclient games (the original case) OR any native goldberg
+        // game (ELF SteamStub is detected cheaply and is a no-op when absent).
+        if self.settings.steamclient || !is_windows {
             if let Some(appid) = handler.get_steam_appid() {
                 let exec_rel = std::path::Path::new(&handler.exec);
                 if let Some(stripped) = operations::ensure_stripped(game_root, exec_rel, appid) {

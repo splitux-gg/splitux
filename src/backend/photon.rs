@@ -70,9 +70,10 @@ impl Backend for Photon {
         &self,
         handler: &Handler,
         instances: &[Instance],
+        global_indices: &[usize],
         is_windows: bool,
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-        pipelines::create_all_overlays(handler, instances, is_windows, game_root)
+        pipelines::create_all_overlays(handler, instances, global_indices, is_windows, game_root)
     }
 }

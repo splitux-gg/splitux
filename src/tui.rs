@@ -29,8 +29,10 @@ use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::StatefulImage;
 
 use crate::handler::scan_handlers;
+use crate::monitor::get_monitors_sdl;
 use crate::profiles::scan_profiles;
 use crate::session_store::{self, SavedPlayer, SavedSession, SaveAnchor, StoredInput};
+use crate::wm::presets::get_presets_for_count;
 
 #[derive(Clone, Copy, PartialEq)]
 enum InputMode {
@@ -71,6 +73,64 @@ impl InputMode {
     }
 }
 
+/// Session window layout, mirroring the CLI's `--layout` choices plus a
+/// `Default` (emit no flag → settings.json decides). Which concrete choices are
+/// valid depends on player count (see [`valid_layouts`]).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum LayoutChoice {
+    Default,
+    Vertical,
+    Horizontal,
+    Grid,
+    Fullscreen,
+}
+
+impl LayoutChoice {
+    /// The `--layout` value (lowercase mode), or None for `Default` (no flag).
+    /// Matches the CLI `Layout` ValueEnum names.
+    fn mode(self) -> Option<&'static str> {
+        match self {
+            LayoutChoice::Default => None,
+            LayoutChoice::Vertical => Some("vertical"),
+            LayoutChoice::Horizontal => Some("horizontal"),
+            LayoutChoice::Grid => Some("grid"),
+            LayoutChoice::Fullscreen => Some("fullscreen"),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            LayoutChoice::Default => "default (settings)",
+            LayoutChoice::Vertical => "vertical (side-by-side)",
+            LayoutChoice::Horizontal => "horizontal (stacked)",
+            LayoutChoice::Grid => "grid (2x2)",
+            LayoutChoice::Fullscreen => "fullscreen (per display)",
+        }
+    }
+}
+
+/// Layout choices that produce a VALID preset for `count` players (so the TUI
+/// can't offer a layout the CLI would reject at launch). `Default` is always
+/// first. Derived from the registered presets: e.g. Grid only exists for 4,
+/// Vertical/Horizontal only for 2-3, Fullscreen for all.
+fn valid_layouts(count: usize) -> Vec<LayoutChoice> {
+    let mut out = vec![LayoutChoice::Default];
+    for lc in [
+        LayoutChoice::Vertical,
+        LayoutChoice::Horizontal,
+        LayoutChoice::Grid,
+        LayoutChoice::Fullscreen,
+    ] {
+        if let Some(mode) = lc.mode() {
+            let id = format!("{count}p_{mode}");
+            if get_presets_for_count(count).iter().any(|p| p.id == id) {
+                out.push(lc);
+            }
+        }
+    }
+    out
+}
+
 #[derive(Clone)]
 struct Player {
     profile: usize, // index into App::profiles
@@ -78,6 +138,10 @@ struct Player {
     /// false = local (drives the host directly), true = a remote Together seat.
     /// Per-player so one session can mix local and together players.
     together: bool,
+    /// Index into `App::monitors` this player's window renders on, or None for
+    /// the default (settings / primary). Only meaningful with >1 monitor; a
+    /// Together seat streams its own surface, so its display is moot.
+    display: Option<usize>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -119,6 +183,7 @@ fn from_saved_players(saved: &[SavedPlayer], profiles: &[String]) -> Vec<Player>
                 StoredInput::Gamepad => InputMode::Gamepad,
             },
             together: s.together,
+            display: None,
         })
         .collect()
 }
@@ -179,6 +244,13 @@ struct App {
     /// Whether the session being built anchors the master profile's real save
     /// (carry it in at start, sync back at end). Part of the session's config.
     build_anchor: bool,
+    /// Session window layout override for this Build (`--layout`). Default emits
+    /// no flag. Not persisted onto saved Sessions (restart uses settings).
+    build_layout: LayoutChoice,
+    /// Active display connector names (e.g. "DP-3", "HDMI-A-1"), position-sorted
+    /// to match `--display` ordering. Empty / single → the per-player display
+    /// picker is hidden (nothing to choose).
+    monitors: Vec<String>,
 
     // sessions (saved presets correlated with live runtimes)
     sessions: Vec<SavedSession>,
@@ -240,6 +312,11 @@ impl App {
             players: Vec::new(),
             player_cursor: 0,
             build_anchor: false,
+            build_layout: LayoutChoice::Default,
+            monitors: get_monitors_sdl()
+                .iter()
+                .map(|m| m.connector_name().to_string())
+                .collect(),
             sessions: Vec::new(),
             active_ids: HashSet::new(),
             session_cursor: 0,
@@ -274,7 +351,14 @@ impl App {
         let live = scan_active_units();
         let mut active = HashSet::new();
         for m in session_store::list_markers() {
-            if live.iter().any(|u| u == &m.main_scope) {
+            // A session is live if its launch SLICE is still an active unit. The
+            // slice always exists; the main scope may be empty (detached launch
+            // with no splitux-main scope), so don't rely on it. Still accept a
+            // matching main scope for older markers.
+            let is_live = live
+                .iter()
+                .any(|u| u == &m.slice || (!m.main_scope.is_empty() && u == &m.main_scope));
+            if is_live {
                 active.insert(m.session_id);
             } else {
                 // Runtime gone (normal exit, crash, or already reaped) — drop it.
@@ -308,6 +392,7 @@ impl App {
             profile,
             input: InputMode::Gamepad,
             together: false,
+            display: None,
         }
     }
 
@@ -366,7 +451,38 @@ impl App {
         let live_anchor = anchor.clone().filter(|a| a.enabled && !a.save_path.is_empty());
         let n_together = players.iter().filter(|p| p.together).count();
 
-        match spawn_session(&game, &players, &self.profiles, live_anchor.as_ref(), &id) {
+        // Per-player display → positional `--display` flags (instance i ↔ player
+        // i). Emit only with >1 monitor AND at least one explicit pick; then emit
+        // a connector for EVERY player so the CLI's positional mapping stays
+        // aligned (un-picked players fall on the primary, monitor 0).
+        let displays: Vec<String> = if self.monitors.len() > 1
+            && players.iter().any(|p| p.display.is_some())
+        {
+            players
+                .iter()
+                .map(|p| self.monitors.get(p.display.unwrap_or(0)).cloned().unwrap_or_default())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Layout override, clamped to what's valid for this player count (None =
+        // emit no `--layout`, settings decide).
+        let layout: Option<&str> = if valid_layouts(players.len()).contains(&self.build_layout) {
+            self.build_layout.mode()
+        } else {
+            None
+        };
+
+        match spawn_session(
+            &game,
+            &players,
+            &self.profiles,
+            live_anchor.as_ref(),
+            layout,
+            &displays,
+            &id,
+        ) {
             Ok((log, _pid)) => {
                 let mut sessions = session_store::load();
                 session_store::upsert(&mut sessions, &game, saved);
@@ -405,7 +521,9 @@ impl App {
         }
         let players = from_saved_players(&s.players, &self.profiles);
         let anchor = s.anchor.clone().filter(|a| a.enabled);
-        match spawn_session(&s.game, &players, &self.profiles, anchor.as_ref(), &s.id) {
+        // Saved-session restart uses settings.json for layout/display (the
+        // per-launch overrides live on the Build screen, not persisted yet).
+        match spawn_session(&s.game, &players, &self.profiles, anchor.as_ref(), None, &[], &s.id) {
             Ok((log, _pid)) => {
                 let mut sessions = session_store::load();
                 session_store::upsert(&mut sessions, &s.game, s.players.clone()); // bump last_used
@@ -443,8 +561,10 @@ impl App {
     fn force_kill(&mut self, idx: usize) {
         let Some(s) = self.sessions.get(idx).cloned() else { return };
         if let Some(m) = session_store::find_marker(&s.id) {
-            let _ = systemctl_stop(&m.main_scope);
-            let _ = systemctl_stop(&m.slice); // belt-and-suspenders
+            if !m.main_scope.is_empty() {
+                let _ = systemctl_stop(&m.main_scope);
+            }
+            let _ = systemctl_stop(&m.slice); // the reliable handle
         }
         session_store::remove_marker(&s.id);
         self.refresh_sessions();
@@ -737,6 +857,36 @@ fn handle_build(app: &mut App, code: KeyCode) {
                 pl.input = pl.input.toggled();
             }
         }
+        // Cycle the focused player's display: default → monitor 0 → 1 → … →
+        // default. Only meaningful with >1 monitor.
+        KeyCode::Char('m') => {
+            let n = app.monitors.len();
+            if n < 2 {
+                app.status =
+                    "Only one display detected — nothing to assign (m needs 2+ monitors).".into();
+            } else if let Some(pl) = app.players.get_mut(app.player_cursor) {
+                pl.display = match pl.display {
+                    None => Some(0),
+                    Some(i) if i + 1 < n => Some(i + 1),
+                    Some(_) => None,
+                };
+                let where_ = pl
+                    .display
+                    .and_then(|i| app.monitors.get(i))
+                    .map(|c| c.as_str())
+                    .unwrap_or("default");
+                app.status = format!("Player display → {where_}.");
+            }
+        }
+        // Cycle the session layout among the choices VALID for the current
+        // player count (so we never emit a layout the CLI rejects). `l` for
+        // layout (accept either case); launch is Enter-only, so `l` is safe.
+        KeyCode::Char('l') | KeyCode::Char('L') => {
+            let choices = valid_layouts(app.players.len());
+            let cur = choices.iter().position(|&c| c == app.build_layout).unwrap_or(0);
+            app.build_layout = choices[(cur + 1) % choices.len()];
+            app.status = format!("Layout → {}.", app.build_layout.label());
+        }
         // Toggle save anchoring for this session (carry the master profile's real
         // save in/out). Part of the session config — persisted on launch.
         KeyCode::Char('c') => app.toggle_build_anchor(),
@@ -744,7 +894,10 @@ fn handle_build(app: &mut App, code: KeyCode) {
             app.screen = Screen::Sessions;
             app.refresh_sessions();
         }
-        KeyCode::Enter | KeyCode::Char('l') => app.launch(),
+        // Enter-only launch. A bare letter must NOT launch a game session — `l`
+        // used to alias launch here, which collided with `L` (layout) and was an
+        // easy fat-finger. Enter is the sole launch key (matches the footer).
+        KeyCode::Enter => app.launch(),
         _ => {}
     }
 }
@@ -761,7 +914,8 @@ fn handle_sessions(app: &mut App, code: KeyCode) {
             }
         }
         // Start an inactive session (active = no-op, handled in start_saved).
-        KeyCode::Enter | KeyCode::Char('l') => {
+        // Enter-only — no bare-letter launch alias (see handle_build).
+        KeyCode::Enter => {
             if sel.is_some() {
                 app.start_saved(cursor);
             }
@@ -919,6 +1073,7 @@ fn commit_edit(app: &mut App) {
 // ---------------------------------------------------------------------------
 
 fn draw(f: &mut Frame, app: &mut App) {
+    let area = f.area();
     let has_invite = app.invite_url.is_some();
     let mut constraints = vec![
         Constraint::Length(3), // title
@@ -927,11 +1082,15 @@ fn draw(f: &mut Frame, app: &mut App) {
     if has_invite {
         constraints.push(Constraint::Length(4)); // invite box
     }
-    constraints.push(Constraint::Length(3)); // footer
+    // Footer FLEXES to fit its wrapped key-hints + status line. A fixed height
+    // clipped the longer hint rows (Build/Sessions exceed the terminal width)
+    // and left no room for the status line. Sized to the current width so every
+    // hint is visible at any terminal size.
+    constraints.push(Constraint::Length(footer_height(app, area.width)));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(f.area());
+        .split(area);
 
     draw_title(f, chunks[0], app);
     match app.screen {
@@ -971,7 +1130,12 @@ fn draw_title(f: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::BOLD),
             )
         } else {
-            Span::styled(format!(" {name} "), Style::default().fg(Color::DarkGray))
+            // Brighter than DarkGray (which was nearly invisible) so inactive
+            // tabs stay readable; the active tab still stands out via its bg.
+            Span::styled(
+                format!(" {name} "),
+                Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+            )
         }
     };
     let line = Line::from(vec![
@@ -982,7 +1146,7 @@ fn draw_title(f: &mut Frame, area: Rect, app: &App) {
         tab("Build", app.screen == Screen::Build),
         Span::raw(" "),
         tab("Sessions", app.screen == Screen::Sessions),
-        Span::raw(format!("   ({} active)", app.sessions.len())),
+        Span::raw(format!("   ({} active)", app.active_ids.len())),
     ]);
     f.render_widget(
         Paragraph::new(line).block(Block::default().borders(Borders::ALL)),
@@ -1167,10 +1331,18 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         Line::from(vec![
             Span::raw("Save:  "),
-            Span::styled("fresh (press c to anchor real save)", Style::default().fg(Color::DarkGray)),
+            Span::styled("fresh (press c to anchor real save)", Style::default().fg(Color::Gray)),
         ])
     };
-    let lines = vec![
+    // Layout line (set with `L`), gated to the choices valid for this count.
+    let layout_line = Line::from(vec![
+        Span::raw("Layout: "),
+        Span::styled(
+            app.build_layout.label(),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    let mut lines = vec![
         Line::from(vec![Span::raw("Game:  "), Span::styled(game, Style::default().add_modifier(Modifier::BOLD))]),
         Line::from(vec![
             Span::raw("Mix:   "),
@@ -1179,20 +1351,38 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
             Span::styled(format!("{n_together} together"), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         ]),
         save_line,
+        layout_line,
+    ];
+    // Display assignment is only offered with >1 monitor (single-display has
+    // nothing to choose).
+    if app.monitors.len() > 1 {
+        lines.push(Line::from(vec![
+            Span::raw("Display:"),
+            Span::styled(
+                format!(" {} monitors — m assigns per player", app.monitors.len()),
+                Style::default().fg(Color::Gray),
+            ),
+        ]));
+    }
+    lines.extend([
         Line::from(""),
         Line::from(Span::styled(
-            "Per player: t = local/together, i = kb-m/gamepad.",
-            Style::default().fg(Color::DarkGray),
+            "Per player: t local/together, i kb-m/gamepad,",
+            Style::default().fg(Color::Gray),
         )),
         Line::from(Span::styled(
-            "Local drives the host; together is a remote seat",
-            Style::default().fg(Color::DarkGray),
+            "m display.  Session: l layout.",
+            Style::default().fg(Color::Gray),
         )),
         Line::from(Span::styled(
-            "with an invite link. Mix freely.",
-            Style::default().fg(Color::DarkGray),
+            "Local drives the host; together is a remote",
+            Style::default().fg(Color::Gray),
         )),
-    ];
+        Line::from(Span::styled(
+            "seat with an invite link. Mix freely.",
+            Style::default().fg(Color::Gray),
+        )),
+    ]);
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
@@ -1208,7 +1398,23 @@ fn draw_build(f: &mut Frame, area: Rect, app: &mut App) {
         .map(|(i, p)| {
             let prof = app.profiles.get(p.profile).map(|s| s.as_str()).unwrap_or("?");
             let scope = if p.together { "together" } else { "local" };
-            let line = format!("P{}  {:<12}  [{:<8} {}]", i + 1, prof, scope, p.input.label());
+            // Show the per-player display only when one is assignable (>1 monitor)
+            // and this is a local seat (Together streams its own surface, so its
+            // display is irrelevant).
+            let disp = if app.monitors.len() > 1 && !p.together {
+                let conn = p
+                    .display
+                    .and_then(|d| app.monitors.get(d))
+                    .map(|c| c.as_str())
+                    .unwrap_or("default");
+                format!("  @{conn}")
+            } else {
+                String::new()
+            };
+            let line = format!(
+                "P{}  {:<12}  [{:<8} {}]{}",
+                i + 1, prof, scope, p.input.label(), disp
+            );
             ListItem::new(line)
         })
         .collect();
@@ -1306,14 +1512,17 @@ fn draw_sessions(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
-    let keys = if app.editing.is_some() {
+/// Footer content: the per-screen key-hints line + the status/edit line. Built
+/// once and reused both to size the footer box ([`footer_height`]) and to render
+/// it, so the height always matches what's drawn.
+fn footer_lines(app: &App) -> Vec<Line<'static>> {
+    let keys: &'static str = if app.editing.is_some() {
         "type to edit · Enter save · Esc cancel"
     } else {
         match app.screen {
             Screen::Games => "↑↓ move · type filter · Enter select · S sessions · q quit",
             Screen::Build => {
-                "↑↓ player · a add · d del · p profile · i input · t local/together · c save-anchor · Enter launch · s sessions · Esc back"
+                "↑↓ player · a add · d del · p profile · i input · m display · t local/together · l layout · c save-anchor · Enter launch · s sessions · Esc"
             }
             Screen::Sessions => {
                 "↑↓ · Enter start · E end&sync · k force-kill · R restart · r rename · p pin · d del · e edit · K kill-all · Esc back"
@@ -1326,12 +1535,32 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     } else {
         app.status.clone()
     };
-    let text = vec![
-        Line::from(Span::styled(keys, Style::default().fg(Color::DarkGray))),
+    vec![
+        // Gray (not DarkGray) so the key hints at the bottom stay legible.
+        Line::from(Span::styled(keys, Style::default().fg(Color::Gray))),
         Line::from(Span::styled(status_line, Style::default().fg(Color::White))),
-    ];
+    ]
+}
+
+/// Footer height (including box borders) needed to show every footer line fully
+/// WRAPPED at `width`. Each logical line takes `ceil(display_width / inner)`
+/// rows; for the short, `·`-separated hint tokens that packs efficiently, so it
+/// upper-bounds ratatui's word wrap and a hint is never clipped. Clamped to the
+/// original 3-row minimum.
+fn footer_height(app: &App, width: u16) -> u16 {
+    let inner = width.saturating_sub(2).max(1) as usize; // minus left/right border
+    let rows: usize = footer_lines(app)
+        .iter()
+        .map(|l| l.width().div_ceil(inner).max(1))
+        .sum();
+    (rows as u16).saturating_add(2).max(3) // + top/bottom border, never below 3
+}
+
+fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(
-        Paragraph::new(text).block(Block::default().borders(Borders::ALL)),
+        Paragraph::new(footer_lines(app))
+            .wrap(Wrap { trim: true })
+            .block(Block::default().borders(Borders::ALL)),
         area,
     );
 }
@@ -1347,6 +1576,8 @@ fn launch_args(
     players: &[Player],
     profiles: &[String],
     anchor: Option<&SaveAnchor>,
+    layout: Option<&str>,
+    displays: &[String],
 ) -> Vec<String> {
     let mut args = vec!["launch".to_string(), "--game".to_string(), game.to_string()];
     for p in players {
@@ -1354,6 +1585,19 @@ fn launch_args(
         let input = p.input.spec(p.together);
         args.push("--player".to_string());
         args.push(format!("profile={prof},input={input}"));
+    }
+    // Layout / per-player display overrides (single-game: bare `--layout
+    // <mode>`, one positional `--display <connector>` per player). Empty → omit,
+    // letting settings.json decide (the pre-parity behavior).
+    if let Some(l) = layout {
+        args.push("--layout".to_string());
+        args.push(l.to_string());
+    }
+    for conn in displays {
+        if !conn.is_empty() {
+            args.push("--display".to_string());
+            args.push(conn.clone());
+        }
     }
     if let Some(a) = anchor.filter(|a| a.enabled) {
         if !a.master_profile.is_empty() {
@@ -1375,15 +1619,18 @@ fn launch_args(
 /// Spawn `splitux launch ...` fully detached (new session via setsid), with its
 /// output going to a log file so the TUI keeps the terminal. `run_session`
 /// blocks for the session's lifetime, so it must not be a child we wait on.
+#[allow(clippy::too_many_arguments)]
 fn spawn_session(
     game: &str,
     players: &[Player],
     profiles: &[String],
     anchor: Option<&SaveAnchor>,
+    layout: Option<&str>,
+    displays: &[String],
     session_id: &str,
 ) -> std::io::Result<(PathBuf, u32)> {
     let exe = std::env::current_exe()?;
-    let args = launch_args(game, players, profiles, anchor);
+    let args = launch_args(game, players, profiles, anchor, layout, displays);
     let log_path = std::env::temp_dir().join(format!(
         "splitux-tui-{}.log",
         game.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-")
@@ -1474,4 +1721,73 @@ fn stop_all_sessions() {
     // ...then run the teardown the killed supervisors skipped, so no stale fuse
     // mounts or orphaned seat-streamers block the next launch.
     cleanup_after_kill();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn player(profile: usize, together: bool, display: Option<usize>) -> Player {
+        Player { profile, input: InputMode::Gamepad, together, display }
+    }
+
+    #[test]
+    fn valid_layouts_gate_by_count() {
+        // 2-3 players: vertical/horizontal/fullscreen, never grid.
+        for n in [2usize, 3] {
+            let v = valid_layouts(n);
+            assert!(v.contains(&LayoutChoice::Default));
+            assert!(v.contains(&LayoutChoice::Vertical));
+            assert!(v.contains(&LayoutChoice::Horizontal));
+            assert!(v.contains(&LayoutChoice::Fullscreen));
+            assert!(!v.contains(&LayoutChoice::Grid), "grid invalid for {n}p");
+        }
+        // 4 players: grid + fullscreen, but not the 2p-only vertical/horizontal.
+        let v4 = valid_layouts(4);
+        assert!(v4.contains(&LayoutChoice::Grid));
+        assert!(v4.contains(&LayoutChoice::Fullscreen));
+        assert!(!v4.contains(&LayoutChoice::Vertical));
+        assert!(!v4.contains(&LayoutChoice::Horizontal));
+        // Unsupported counts collapse to just Default.
+        assert_eq!(valid_layouts(1), vec![LayoutChoice::Default]);
+        assert_eq!(valid_layouts(5), vec![LayoutChoice::Default]);
+    }
+
+    #[test]
+    fn launch_args_omit_overrides_by_default() {
+        let players = vec![player(0, false, None), player(0, false, None)];
+        let profiles = vec!["Gabe".to_string()];
+        let args = launch_args("Enshrouded", &players, &profiles, None, None, &[]);
+        assert!(!args.iter().any(|a| a == "--layout"));
+        assert!(!args.iter().any(|a| a == "--display"));
+        assert!(args.windows(2).any(|w| w[0] == "--game" && w[1] == "Enshrouded"));
+    }
+
+    #[test]
+    fn launch_args_emit_layout_and_positional_displays() {
+        let players = vec![player(0, false, Some(0)), player(0, false, Some(0))];
+        let profiles = vec!["Gabe".to_string()];
+        let displays = vec!["DP-3".to_string(), "DP-3".to_string()];
+        let args = launch_args("Enshrouded", &players, &profiles, None, Some("fullscreen"), &displays);
+        // --layout fullscreen present.
+        assert!(args.windows(2).any(|w| w[0] == "--layout" && w[1] == "fullscreen"));
+        // One --display per player, both DP-3 (same-display split scenario).
+        let disp: Vec<&String> = args
+            .iter()
+            .enumerate()
+            .filter(|(i, a)| *a == "--display" && args.get(i + 1).is_some())
+            .map(|(i, _)| &args[i + 1])
+            .collect();
+        assert_eq!(disp, vec!["DP-3", "DP-3"]);
+    }
+
+    #[test]
+    fn launch_args_skip_empty_connectors() {
+        let players = vec![player(0, false, None)];
+        let profiles = vec!["Gabe".to_string()];
+        // An empty connector (e.g. an out-of-range index) is dropped, not emitted
+        // as a bare `--display ""`.
+        let args = launch_args("Game", &players, &profiles, None, None, &[String::new()]);
+        assert!(!args.iter().any(|a| a == "--display"));
+    }
 }

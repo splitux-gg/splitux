@@ -1,7 +1,7 @@
 //! Helper methods for Splitux
 
 use super::Splitux;
-use crate::input::{open_device, DeviceEvent};
+use crate::input::{open_device, DeviceEvent, InputDevice};
 use crate::monitor::get_monitors_sdl;
 use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icons;
@@ -23,34 +23,42 @@ impl Splitux {
 
     /// Poll for device hotplug events and update input_devices list
     pub(crate) fn poll_device_events(&mut self) {
-        let monitor = match &mut self.device_monitor {
-            Some(m) => m,
+        // Drain events first so the `device_monitor` borrow ends before we mutate
+        // `input_devices` (which `reindex_instances_by_paths` reads).
+        let events = match &mut self.device_monitor {
+            Some(m) => m.poll_events(),
             None => return,
         };
+        if events.is_empty() {
+            return;
+        }
 
-        for event in monitor.poll_events() {
+        // Snapshot each seat's assigned devices BY PATH before we touch the device
+        // list. `instance.devices` stores indices into `input_devices`, but a
+        // hotplug push+sort (Add) or a mid-list remove (Remove) shifts those
+        // indices — even a benign controller reconnect was enough to scramble a
+        // live seat. We rebuild the indices from these stable paths afterward
+        // instead of hand-patching them (the old decrement math only handled
+        // Remove, and ignored the re-sort on Add entirely).
+        let assigned_paths = self.snapshot_assigned_paths();
+
+        for event in events {
             match event {
                 DeviceEvent::Added(path) => {
-                    println!("[splitux] udev: Add event for {}", path);
-                    // Remove any stale entry with the same path first
-                    if let Some(idx) = self.input_devices.iter().position(|d| d.path() == path) {
-                        println!("[splitux] udev: Removing stale entry for {}", path);
-                        // Clean up instances referencing this device
-                        for instance in &mut self.instances {
-                            instance.devices.retain(|&d| d != idx);
-                        }
-                        self.instances.retain(|i| !i.devices.is_empty());
-                        for instance in &mut self.instances {
-                            for dev_idx in &mut instance.devices {
-                                if *dev_idx > idx {
-                                    *dev_idx -= 1;
-                                }
-                            }
-                        }
-                        self.input_devices.remove(idx);
+                    // A duplicate Add for a device we already track is spurious:
+                    // composite keyboards/mice/trackballs (ZSA Moonlander, Ploopy
+                    // trackball) re-emit udev `add` events while live, and USB
+                    // autosuspend/resume can too. A real reconnect arrives as Remove
+                    // THEN Add; a bare Add for a known path is a no-op.
+                    if self.input_devices.iter().any(|d| d.path() == path) {
+                        continue;
                     }
-                    // Try to open the device
-                    if let Some(device) = open_device(&path, &self.options.pad_filter_type) {
+                    println!("[splitux] udev: Add event for {}", path);
+                    if let Some(device) = open_device(
+                        &path,
+                        &self.options.pad_filter_type,
+                        &self.options.input_blacklist,
+                    ) {
                         println!(
                             "[splitux] udev: Device connected: {} ({})",
                             device.fancyname(),
@@ -58,40 +66,74 @@ impl Splitux {
                         );
                         self.input_devices.push(device);
                         self.input_devices.sort_by_key(|d| d.path().to_string());
-                        self.refresh_device_display_names();
                     }
                 }
                 DeviceEvent::Removed(path) => {
-                    // Find and remove the device
                     if let Some(idx) = self.input_devices.iter().position(|d| d.path() == path) {
-                        let device = &self.input_devices[idx];
                         println!(
                             "[splitux] udev: Device disconnected: {} ({})",
-                            device.fancyname(),
+                            self.input_devices[idx].fancyname(),
                             path
                         );
-
-                        // Also remove from any instances
-                        for instance in &mut self.instances {
-                            instance.devices.retain(|&d| d != idx);
-                        }
-                        // Remove empty instances
-                        self.instances.retain(|i| !i.devices.is_empty());
-                        // Update device indices in instances (since we're removing one)
-                        for instance in &mut self.instances {
-                            for dev_idx in &mut instance.devices {
-                                if *dev_idx > idx {
-                                    *dev_idx -= 1;
-                                }
-                            }
-                        }
-
                         self.input_devices.remove(idx);
-                        self.refresh_device_display_names();
                     }
                 }
             }
         }
+
+        // Re-resolve every seat against the new device list by path and drop seats
+        // whose every device unplugged. This is the SINGLE place indices are
+        // rebuilt after a hotplug — no scattered decrement math to get wrong, and a
+        // device that bounced Remove→Add within one poll keeps its seat assignment.
+        self.reindex_instances_by_paths(assigned_paths);
+        self.refresh_device_display_names();
+    }
+
+    /// Snapshot each instance's assigned devices as stable evdev paths.
+    ///
+    /// `instance.devices` holds indices into `input_devices`; those indices go
+    /// stale whenever the list is re-sorted or re-sized (hotplug, rescan). Capture
+    /// paths before such a mutation, then restore via [`Self::reindex_instances_by_paths`].
+    fn snapshot_assigned_paths(&self) -> Vec<Vec<String>> {
+        self.instances
+            .iter()
+            .map(|inst| {
+                inst.devices
+                    .iter()
+                    .filter_map(|&i| self.input_devices.get(i).map(|d| d.path().to_string()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Rebuild `instance.devices` indices from a path snapshot against the CURRENT
+    /// `input_devices`, preserving per-seat order and dropping devices that no
+    /// longer exist. Seats left with no devices are removed.
+    fn reindex_instances_by_paths(&mut self, assigned_paths: Vec<Vec<String>>) {
+        let path_to_idx: std::collections::HashMap<&str, usize> = self
+            .input_devices
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (d.path(), i))
+            .collect();
+        for (inst, paths) in self.instances.iter_mut().zip(assigned_paths) {
+            inst.devices = paths
+                .iter()
+                .filter_map(|p| path_to_idx.get(p.as_str()).copied())
+                .collect();
+        }
+        self.instances.retain(|i| !i.devices.is_empty());
+    }
+
+    /// Replace the input-device list while keeping each seat pointed at the SAME
+    /// physical devices. Use this for every full rescan (`scan_input_devices`) —
+    /// the raw `self.input_devices = scan(...)` assignment re-sorts the list and
+    /// silently invalidates the indices stored in `instance.devices`.
+    pub(crate) fn set_input_devices(&mut self, new_devices: Vec<InputDevice>) {
+        let assigned_paths = self.snapshot_assigned_paths();
+        self.input_devices = new_devices;
+        self.reindex_instances_by_paths(assigned_paths);
+        self.refresh_device_display_names();
     }
 
     /// Poll for monitor changes (throttled to every 2 seconds)
