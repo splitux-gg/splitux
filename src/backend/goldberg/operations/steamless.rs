@@ -82,8 +82,13 @@ fn has_steamstub_elf(data: &[u8]) -> bool {
         let Some(name_off) = rd_u32(data, sh).map(|v| strtab_off + v as usize) else {
             continue;
         };
-        let end = data[name_off..].iter().position(|&b| b == 0).unwrap_or(0);
-        if &data[name_off..name_off + end] == b".bind" {
+        // Bounds-check: section-header fields are packer-controlled, so an
+        // out-of-range name offset must decide "not DRM-wrapped", not panic.
+        let Some(rest) = data.get(name_off..) else {
+            continue;
+        };
+        let end = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
+        if &rest[..end] == b".bind" {
             return true;
         }
     }

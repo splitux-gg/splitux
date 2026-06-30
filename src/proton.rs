@@ -19,7 +19,13 @@ use crate::util::resolve_proton_path;
 /// (== the prefix), so a shared prefix means only one same-game instance boots.
 /// Keyed by profile (vs launch namespace) so each user's prefix is STABLE/reusable
 /// across launches — no Wine-prefix re-init cost per run.
-pub fn get_prefix_path(cfg: &SplituxConfig, profname: &str, game: usize) -> PathBuf {
+///
+/// `dup_idx` disambiguates the rare case of TWO instances in the SAME launch+game
+/// sharing one profile name: the first (dup_idx 0) keeps the bare per-profile
+/// prefix (so the common one-instance-per-profile case is unchanged and stays
+/// reusable), and each additional same-profile sibling gets a `-p<n>` suffix so
+/// they don't collide on — and file-lock — one prefix.
+pub fn get_prefix_path(cfg: &SplituxConfig, profname: &str, game: usize, dup_idx: usize) -> PathBuf {
     let base = match cfg.proton_separate_pfxs {
         true => profname.replace(['/', '\\'], "_"),
         false => "1".to_string(),
@@ -28,11 +34,14 @@ pub fn get_prefix_path(cfg: &SplituxConfig, profname: &str, game: usize) -> Path
     // reuse the same profile name don't share — and fight over — one Wine prefix.
     // Game 0 keeps the legacy name, so existing single-game prefixes stay valid
     // (no re-init) and single-game is byte-identical.
-    let dir = if game == 0 {
+    let mut dir = if game == 0 {
         base
     } else {
         format!("{base}-g{game}")
     };
+    if dup_idx > 0 {
+        dir = format!("{dir}-p{dup_idx}");
+    }
     PATH_PARTY.join("prefixes").join(dir)
 }
 
@@ -46,8 +55,9 @@ pub fn setup_env(
     cfg: &SplituxConfig,
     profname: &str,
     game: usize,
+    dup_idx: usize,
 ) {
-    let path_pfx = get_prefix_path(cfg, profname, game);
+    let path_pfx = get_prefix_path(cfg, profname, game, dup_idx);
 
     // Proton version to use
     let protonpath = match cfg.proton_version.is_empty() {
@@ -138,6 +148,6 @@ pub fn uses_direct_proton(handler: &Handler) -> bool {
 }
 
 /// Get the Wine prefix user directory path for binding profile data
-pub fn get_prefix_user_path(cfg: &SplituxConfig, profname: &str, game: usize) -> PathBuf {
-    get_prefix_path(cfg, profname, game).join("drive_c/users/steamuser")
+pub fn get_prefix_user_path(cfg: &SplituxConfig, profname: &str, game: usize, dup_idx: usize) -> PathBuf {
+    get_prefix_path(cfg, profname, game, dup_idx).join("drive_c/users/steamuser")
 }

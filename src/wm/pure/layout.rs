@@ -47,8 +47,8 @@ pub fn plan_tiling_layout(preset_id: &str, window_count: usize) -> TilingPlan {
         }
 
         LayoutType::Grid => {
-            // 2x2 grid: 2 columns with 2 stacked windows each
-            // Window ordering depends on preset
+            // 2x2 grid: 2 columns with 2 stacked windows each.
+            // Window ordering depends on preset.
             let order: [usize; 4] = match preset_id {
                 // 4p_columns: P1/P2 left column, P3/P4 right column
                 "4p_columns" => [0, 1, 2, 3],
@@ -56,18 +56,26 @@ pub fn plan_tiling_layout(preset_id: &str, window_count: usize) -> TilingPlan {
                 _ => [0, 2, 1, 3],
             };
 
-            TilingPlan {
-                columns: vec![
-                    TilingColumn {
-                        windows: vec![order[0], order[1]],
-                        width_percent: 50,
-                    },
-                    TilingColumn {
-                        windows: vec![order[2], order[3]],
-                        width_percent: 50,
-                    },
-                ],
+            // Place ONLY the windows that exist: a multi-monitor layout can hand
+            // this monitor a subgroup with window_count < 4, in which case the
+            // fixed 4-index grid referenced absent indices and stacked everything
+            // into the left column (right half empty). Distribute the present
+            // windows across two columns (single full-width column for one).
+            let present: Vec<usize> = order.iter().copied().filter(|&w| w < window_count).collect();
+            let mid = present.len().div_ceil(2);
+            let left = present[..mid].to_vec();
+            let right = present[mid..].to_vec();
+            let mut columns = vec![TilingColumn {
+                windows: left,
+                width_percent: if right.is_empty() { 100 } else { 50 },
+            }];
+            if !right.is_empty() {
+                columns.push(TilingColumn {
+                    windows: right,
+                    width_percent: 50,
+                });
             }
+            TilingPlan { columns }
         }
     }
 }

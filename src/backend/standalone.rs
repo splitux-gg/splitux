@@ -12,7 +12,6 @@ use crate::bepinex::install_plugin_dlls;
 use crate::handler::Handler;
 use crate::instance::Instance;
 use crate::mods::{self, filter_plugin_files, PluginSource};
-use crate::paths::PATH_PARTY;
 
 /// Standalone backend settings
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -88,9 +87,10 @@ impl Backend for Standalone {
         let mut overlays = Vec::new();
 
         for (i, &global_index) in global_indices.iter().enumerate() {
-            // GLOBAL index in the dir name so two concurrent games don't collide.
-            let overlay_dir = PATH_PARTY
-                .join("tmp")
+            // Per-launch namespaced scratch (tmp/<launch_ns>/standalone-<idx>) so
+            // two CONCURRENT splitux processes don't collide on tmp/standalone-0
+            // and wipe each other's live overlay — matching prepare_overlay_dir.
+            let overlay_dir = crate::paths::launch_tmp_dir()
                 .join(format!("standalone-{}", global_index));
 
             // Clean previous overlay

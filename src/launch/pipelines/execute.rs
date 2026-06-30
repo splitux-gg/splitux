@@ -94,7 +94,6 @@ pub fn launch_game(
     monitors: &[Monitor],
     cfg: &SplituxConfig,
     ready: &std::sync::atomic::AtomicBool,
-    displays_assigned: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // All handler reads are now per-unit: session-wide steps that genuinely need
     // a representative handler index `handlers[…]` explicitly; the spawn loop and
@@ -241,12 +240,16 @@ pub fn launch_game(
     }
     println!("[splitux] Layout: instance_to_region = {:?}", instance_to_region);
 
-    // Gamescope-bypass: mirror the per-instance decision in build_cmds so the WM
-    // knows the game window is a plain host surface (not a gamescope window).
-    // Engages only for a lone, non-together, bwrap'd local seat with
-    // `disable_gamescope` set; multi-seat / together always keep gamescope.
+    // Gamescope-bypass: mirror build_cmds' per-instance decision EXACTLY so the WM
+    // agrees with the command that was actually built. build_cmds gates on the
+    // instance's resolved seat list being empty (`seats.is_empty()`), NOT on
+    // `inst.together` — a together instance whose seat-streamer failed to spawn
+    // has an empty seat list, so build_cmds bypasses gamescope; if we keyed off
+    // `inst.together` here instead, the WM would wait for a gamescope window that
+    // was never created and the LaunchGuard would kill the running game. Use the
+    // same seat-list emptiness (instance 0, since this only engages for len==1).
     let no_gamescope = instances.len() == 1
-        && !instances.iter().any(|inst| inst.together)
+        && together_devices.first().map(|s| s.is_empty()).unwrap_or(true)
         && !handlers[instances[0].game].disable_bwrap
         && handlers[instances[0].game].effective_disable_gamescope(cfg);
 
@@ -255,7 +258,6 @@ pub fn launch_game(
         monitors: monitors.to_vec(),
         preset,
         instance_to_region,
-        displays_assigned,
         no_gamescope,
     };
 

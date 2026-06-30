@@ -38,14 +38,6 @@ pub struct LayoutContext {
     /// Maps spawn index to region index (for custom layout ordering)
     /// e.g., [1, 0] means window 0 goes to region 1, window 1 goes to region 0
     pub instance_to_region: Vec<usize>,
-    /// Whether the launch expressed an explicit per-instance display assignment
-    /// (`--display`, a GUI/TUI display pick, or any multi-monitor sizing). When
-    /// true, the fullscreen placement path HONORS each instance's `monitor`
-    /// exactly — two instances targeting one output share it and tile
-    /// side-by-side. When false (a bare launch with no display intent), it
-    /// auto-spreads colliding fullscreen windows onto free outputs so they don't
-    /// stack invisibly. See `NiriManager::position_windows_fullscreen`.
-    pub displays_assigned: bool,
     /// The launch is bypassing the nested gamescope compositor for a single
     /// local seat (`cfg.disable_gamescope`). The game window is then a plain
     /// host-compositor surface, NOT a gamescope window, so the niri backend

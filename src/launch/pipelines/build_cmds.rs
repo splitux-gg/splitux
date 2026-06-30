@@ -102,6 +102,17 @@ pub fn launch_cmds(
         let game_inst_count = game_inst_counts[i];
         let is_first_in_game = game_inst_num == 0;
 
+        // Wine-prefix disambiguator: how many EARLIER instances in this launch
+        // share this one's (game, profile)? 0 for the first (the common
+        // one-instance-per-profile case keeps its bare, reusable per-profile
+        // prefix); >0 gives same-profile siblings a distinct `-p<n>` prefix so
+        // Proton's STEAM_COMPAT_DATA_PATH file-lock can't block the 2nd from
+        // booting (two seats on one profile would otherwise share one prefix).
+        let prefix_dup_idx = instances[..i]
+            .iter()
+            .filter(|prev| prev.game == instance.game && prev.profname == instance.profname)
+            .count();
+
         let gamedir = if h.is_saved_handler() && !cfg.disable_mount_gamedirs {
             crate::paths::launch_tmp_dir().join(format!("game-{}", i))
         } else {
@@ -201,7 +212,7 @@ pub fn launch_cmds(
 
         // Proton environment (for Windows games)
         if win {
-            proton::setup_env(&mut cmd, h, cfg, &instance.profname, instance.game);
+            proton::setup_env(&mut cmd, h, cfg, &instance.profname, instance.game, prefix_dup_idx);
 
             // Gamescope-bypass: with no nested gamescope there is no embedded
             // Xwayland, and the host's rootless Xwayland (xwayland-satellite)
@@ -448,7 +459,7 @@ pub fn launch_cmds(
                 // which falls through to steam://run and exits. Writing goldberg's
                 // here makes the warm path correct; the shadow (b) covers the
                 // cold/copy-runs path (Proton then copies goldberg, not real Steam).
-                let pfx_steam = proton::get_prefix_path(cfg, &instance.profname, instance.game)
+                let pfx_steam = proton::get_prefix_path(cfg, &instance.profname, instance.game, prefix_dup_idx)
                     .join("drive_c/Program Files (x86)/Steam");
                 match std::fs::create_dir_all(&pfx_steam) {
                     Ok(()) => {
@@ -604,7 +615,7 @@ pub fn launch_cmds(
 
             // 5. Profile bindings
             if win {
-                let path_pfx_user = proton::get_prefix_user_path(cfg, &instance.profname, instance.game);
+                let path_pfx_user = proton::get_prefix_user_path(cfg, &instance.profname, instance.game, prefix_dup_idx);
                 cmd.arg("--bind")
                     .args([&path_prof.join("windata"), &path_pfx_user]);
             } else {

@@ -23,7 +23,7 @@ use std::process::{Child, Command, Stdio};
 
 use crate::handler::Handler;
 use crate::instance::Instance;
-use crate::paths::{BIN_KEEN_EMU, PATH_PARTY};
+use crate::paths::BIN_KEEN_EMU;
 
 /// Keen emulator settings from handler YAML (dot-notation: keen.*)
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -57,8 +57,15 @@ impl Keen {
 }
 
 /// Path the emu writes its data file to (shared across all instances of the run).
+///
+/// Per-launch namespaced (`tmp/<launch_ns>/keen/`) so a SECOND concurrent splitux
+/// process can't overwrite a running session's freshly-generated keypair file
+/// mid-game. NB: the emu's loopback PORT (`settings.addr`, default 27503) is
+/// still fixed, so two concurrent Keen-gated sessions on one host still serialize
+/// on that port — a per-launch port would need the keen-emu binary to advertise
+/// its bound port back into this data file.
 fn data_file_path() -> PathBuf {
-    PATH_PARTY.join("keen").join("keenonline-emu.json")
+    crate::paths::launch_tmp_dir().join("keen").join("keenonline-emu.json")
 }
 
 impl Backend for Keen {
@@ -89,6 +96,13 @@ impl Backend for Keen {
     /// auth at the emu. For Proton/wine titles the path is given as a Windows
     /// path on the `Z:` drive (which wine maps to `/`).
     fn extra_launch_args(&self, _handler: &Handler, is_windows: bool) -> Vec<String> {
+        // Lockstep with start_services' presence guard: if the sideloaded emu
+        // isn't installed we never start it, so don't point the game at a data
+        // file it never wrote (that just hangs/fails the Keen handshake). Inject
+        // nothing and let the game run without the Keen auth gate.
+        if !BIN_KEEN_EMU.exists() {
+            return Vec::new();
+        }
         let p = data_file_path();
         let path_arg = if is_windows {
             format!("Z:{}", p.to_string_lossy().replace('/', "\\"))

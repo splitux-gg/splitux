@@ -374,15 +374,15 @@ pub fn force_remove_dir_all(path: &std::path::Path) {
 /// launcher on startup (this used to `?`-propagate a PermissionDenied straight
 /// into `main`'s `.unwrap()`).
 pub fn clear_tmp() -> Result<(), Box<dyn Error>> {
-    let tmp = PATH_PARTY.join("tmp");
-
-    if !tmp.exists() {
-        return Ok(());
-    }
-
-    let _ = fuse_overlayfs_unmount_gamedirs();
-    force_remove_dir_all(&tmp);
-
+    // Reap ONLY dead-pid orphan launch scratch (pid-aware). A concurrent LIVE
+    // session's tmp/<ns> — with its mounted game-N overlays and the player-save
+    // upperdir — MUST be left intact. The previous unconditional
+    // force_remove_dir_all(tmp/) `rm -rf`'d the WHOLE scratch tree, and since the
+    // unmount step was narrowed to this process's own namespace it would delete
+    // straight through a running session's overlay mount into the player's saves
+    // (data loss) and yank the mount out from under the live game. Orphan reaping
+    // gives the same startup-cleanup without touching live sessions.
+    reap_orphan_launch_scratch();
     Ok(())
 }
 

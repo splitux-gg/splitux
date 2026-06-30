@@ -235,28 +235,6 @@ impl NiriManager {
     /// what splitux-together needs to capture. Multiple instances on one
     /// monitor land in adjacent columns you scroll between; each is its own
     /// fullscreen window.
-    /// Pick a distinct output for a fullscreen window: prefer the instance's
-    /// assigned monitor, but if it's already taken by an earlier fullscreen
-    /// window, hand back the first still-free output (position order). Records the
-    /// choice in `used`. Returns the preferred name (sharing) only when every
-    /// output is already taken — i.e. more instances than monitors.
-    fn pick_distinct_output(
-        preferred: Option<&str>,
-        outputs: &[WmMonitor],
-        used: &mut Vec<String>,
-    ) -> Option<String> {
-        if let Some(p) = preferred
-            && !used.iter().any(|u| u == p) {
-                used.push(p.to_string());
-                return Some(p.to_string());
-            }
-        if let Some(free) = outputs.iter().find(|o| !used.iter().any(|u| u == &o.name)) {
-            used.push(free.name.clone());
-            return Some(free.name.clone());
-        }
-        preferred.map(|p| p.to_string())
-    }
-
     fn position_windows_fullscreen(
         &self,
         ctx: &LayoutContext,
@@ -267,30 +245,22 @@ impl NiriManager {
             windows.len()
         );
 
-        // Every niri output, position-sorted. Used to spill colliding instances
-        // onto distinct displays (see pick_distinct_output).
+        // Every niri output, position-sorted (used for the fullscreen-size check).
         let outputs = self.get_monitors().unwrap_or_default();
-        let mut used_outputs: Vec<String> = Vec::new();
 
-        // Pass 1: resolve each window's ACTUAL target output. The instance's
-        // assigned monitor is the PREFERRED output. When the launch EXPLICITLY
-        // assigned displays (`--display` / a GUI/TUI pick), honor that exactly —
-        // two windows targeting one output share it and STACK (fullscreen each)
-        // below. Otherwise (a bare fullscreen launch with no display intent),
-        // pick_distinct_output spills a colliding instance onto the next FREE
-        // display so independent fullscreen windows don't stack invisibly — only
-        // sharing an output once there are more instances than outputs.
+        // Pass 1: each window's target = its instance's assigned/preferred monitor,
+        // ALWAYS honored. Two instances on the same monitor STACK as niri columns
+        // (each fullscreen; scroll to swap). We deliberately do NOT auto-spread a
+        // colliding instance onto another free output: that could relocate a
+        // window onto an UNINTENDED display — e.g. a virtual Sunshine output whose
+        // nested capture wedges the compositor — which is far worse than stacking.
+        // To spread across monitors on purpose, pass --display per instance.
         let mut assigned: Vec<(usize, Option<String>)> = Vec::with_capacity(windows.len());
         for (i, window) in windows.iter().enumerate() {
-            let preferred = self.resolve_instance_monitor(ctx, i);
-            let target = if ctx.displays_assigned {
-                preferred.clone()
-            } else {
-                Self::pick_distinct_output(preferred.as_deref(), &outputs, &mut used_outputs)
-            };
+            let target = self.resolve_instance_monitor(ctx, i);
             println!(
-                "[splitux] wm::niri - Fullscreen window {}: id={} app_id={} -> monitor {:?} (preferred {:?}, assigned={})",
-                i, window.id, window.app_id, target, preferred, ctx.displays_assigned
+                "[splitux] wm::niri - Fullscreen window {}: id={} app_id={} -> monitor {:?}",
+                i, window.id, window.app_id, target
             );
             assigned.push((i, target));
         }
@@ -445,7 +415,7 @@ impl NiriManager {
             if group.len() == 1 {
                 self.ensure_window_fullscreen(&windows[group[0]], target.as_deref(), &outputs)?;
             } else {
-                self.tile_windows_on_monitor(ctx, &group, target.as_deref(), ctx.preset.id, &outputs)?;
+                self.tile_windows_on_monitor(ctx, &group, target.as_deref(), ctx.preset.id, &outputs, &windows)?;
             }
         }
         Ok(())
@@ -552,11 +522,14 @@ impl NiriManager {
         target: Option<&str>,
         preset_id: &str,
         outputs: &[WmMonitor],
+        windows: &[NiriWindow],
     ) -> WmResult<()> {
         let plan = plan_tiling_layout(preset_id, group.len());
 
-        // Step 1: move this group onto its monitor + ensure tiled.
-        let windows = self.get_gamescope_windows()?;
+        // Step 1: move this group onto its monitor + ensure tiled. Index the SAME
+        // window snapshot the caller built `group` from — re-fetching here and
+        // indexing by global index would mis-map if niri reordered its window
+        // list (focus/MRU) between snapshots, tiling the wrong window.
         for &gi in group {
             if let Some(win) = windows.get(gi) {
                 self.niri_action("focus-window", &["--id", &win.id.to_string()])?;
@@ -580,8 +553,8 @@ impl NiriManager {
             }
         }
 
-        // Step 2: apply the plan, mapping group-local column indices → global.
-        let windows = self.get_gamescope_windows()?;
+        // Step 2: apply the plan, mapping group-local column indices → global,
+        // against the same stable snapshot.
         for column in &plan.columns {
             let width = format!("{}%", column.width_percent);
             let actual: Vec<usize> = column

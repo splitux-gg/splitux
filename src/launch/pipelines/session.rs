@@ -77,7 +77,6 @@ pub fn run_launch(
         master_profile,
         ready,
         notify,
-        use_multimonitor,
     );
 }
 
@@ -95,7 +94,6 @@ pub fn run_session(
     master_profile: Option<&str>,
     ready: &AtomicBool,
     notify: &dyn Fn(&str, &str),
-    displays_assigned: bool,
 ) {
     // Single-game shim: until profile/save setup is grouped per game (step 4),
     // these session-level steps operate on the first (only) game's handler. A
@@ -127,7 +125,7 @@ pub fn run_session(
 
     // Note: fuse_overlayfs_mount_gamedirs runs inside launch_cmds with proper
     // Goldberg overlay support.
-    if let Err(err) = launch_game(handlers, dev_infos, instances, monitors, cfg, ready, displays_assigned) {
+    if let Err(err) = launch_game(handlers, dev_infos, instances, monitors, cfg, ready) {
         println!("[splitux] Error launching instances: {}", err);
         notify("Launch Error", &format!("{err}"));
     }
