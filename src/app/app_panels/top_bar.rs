@@ -66,10 +66,12 @@ impl Splitux {
                 }
 
                 ui.add_space(8.0);
+                // Version baked from git at build time (see build.rs) — already
+                // includes the leading "v" and any -dirty/-ahead suffix.
                 let version_label = if self.needs_update.load(std::sync::atomic::Ordering::Relaxed) {
-                    format!("v{} (update available)", env!("CARGO_PKG_VERSION"))
+                    format!("{} (update available)", env!("SPLITUX_VERSION"))
                 } else {
-                    format!("v{}", env!("CARGO_PKG_VERSION"))
+                    env!("SPLITUX_VERSION").to_string()
                 };
                 ui.label(RichText::new(version_label).small().weak());
             });

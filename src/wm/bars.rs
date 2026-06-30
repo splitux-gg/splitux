@@ -51,12 +51,27 @@ const BAR_ENV_PASSTHROUGH: &[&str] = &[
 /// user manager (it cannot be reaped by the restorer's teardown). Falls back to
 /// a plain spawn when systemd-user is unavailable.
 fn spawn_bar(program: &str, args: &[String]) {
+    let base = std::path::Path::new(program)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("bar");
+
+    // IDEMPOTENT: never start a bar that's already running — whether the user's
+    // own bar, or one a racing restorer/teardown already brought back. This is
+    // what stops the "double waybar" after a force-kill, where more than one
+    // restore path (a session's in-process restore_all + the restore-on-death
+    // watcher) can fire for the same bar.
+    if !StatusBarManager::get_pids(base).is_empty() {
+        println!("[splitux] wm::bars - {base} already running, not restarting");
+        return;
+    }
+
     if systemd_run_available() {
-        let base = std::path::Path::new(program)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("bar");
-        let unit = format!("splitux-bar-{}-{}.service", base, std::process::id());
+        // DETERMINISTIC unit name (no restorer pid): two restorers racing both
+        // try the SAME unit, so systemd registers it once and the loser's
+        // `--unit` fails instead of spawning a second bar. `--collect` frees the
+        // name when the bar exits, so the next session can restart it.
+        let unit = format!("splitux-bar-{base}.service");
         let mut cmd = Command::new("systemd-run");
         cmd.args([
             "--user",
@@ -72,12 +87,20 @@ fn spawn_bar(program: &str, args: &[String]) {
         cmd.arg("--").arg(program).args(args);
         // `--user` service registration returns promptly; status() ensures it's
         // registered before we move on (and exit).
-        match cmd.status() {
-            Ok(s) if s.success() => return,
-            _ => eprintln!(
-                "[splitux] wm::bars - systemd-run service failed for {program}, spawning directly"
-            ),
+        if let Ok(s) = cmd.status() {
+            if s.success() {
+                return;
+            }
         }
+        // systemd-run failed — either systemd-user is unavailable, OR a racer
+        // already registered the unit (the bar is up now). Only fall back to a
+        // direct spawn if the bar is STILL not running, so we never double it.
+        if !StatusBarManager::get_pids(base).is_empty() {
+            return;
+        }
+        eprintln!(
+            "[splitux] wm::bars - systemd-run service failed for {program}, spawning directly"
+        );
     }
     let _ = Command::new(program).args(args).spawn();
 }

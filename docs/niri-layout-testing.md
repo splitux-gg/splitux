@@ -1,6 +1,8 @@
 # Niri Layout Testing Guide
 
-Testing the niri window manager integration with 1-4 game instances on a single display.
+How splitux places gamescope windows on [niri](https://github.com/YaLTeR/niri), and
+how to exercise the layout code by hand. Covers 1–4 instances on one display plus
+multi-monitor and same-display-split cases.
 
 ## Architecture Overview
 
@@ -11,218 +13,147 @@ niri (host compositor)
               └── game process
 ```
 
-Each game instance runs inside its own gamescope window. Splitux's niri integration:
-1. Detects gamescope windows via `app_id == "gamescope"`
-2. Moves windows to floating mode
-3. Sets window size based on layout preset
-4. Positions windows at absolute coordinates (via delta calculation)
+Each game instance is its own gamescope window. splitux's niri integration
+(`src/wm/niri.rs`) drives placement entirely through **niri's IPC** (`niri msg`),
+using niri's native **tiling columns and fullscreen state** — *not* floating
+windows or absolute coordinates.
+
+1. **Find this launch's windows.** A window is ours when its `app_id` contains
+   `gamescope` **or** its PID's exe/comm is a gamescope binary (Proton titles on
+   niri surface with an unset `app_id`). Results are filtered to the launch's own
+   systemd scope cgroup (`splitux-<launch_ns>`), so two concurrent splitux
+   sessions never grab each other's windows.
+2. **Assign each window to an output** by the instance's chosen monitor
+   (`move-window-to-monitor`).
+3. **Tile or fullscreen** per the layout:
+   - **Tiled presets** (`vertical`/`horizontal`/`grid`): ensure each window is
+     tiled (`move-window-to-tiling`), then build columns with `set-column-width`
+     and `consume-window-into-column`.
+   - **Fullscreen preset / a lone window on an output**: put it into niri
+     fullscreen state (`fullscreen-window`), edge-to-edge at full resolution.
+
+### Fullscreen is idempotent (important)
+
+`fullscreen-window` is a **toggle**, and niri exposes no fullscreen-state field.
+gamescope's `-f` (the handler [`fullscreen`](HANDLER_OPTIONS.md) flag) boots the
+surface *already fullscreen*, so a blind toggle would flip it back to a tiled
+column. splitux instead reads the geometry: a fullscreen window's `window_size`
+equals the output's logical size **exactly** (a tiled full-width column is
+slightly smaller — gaps/border, e.g. 1894×1054 vs 1920×1080). It toggles only
+when the window isn't already covering the output. This is the only reliable
+fullscreen tell on niri.
 
 ## Layout Presets
+
+These are the presets that actually exist (`src/wm/presets.rs`); the friendly
+names are what the launcher shows.
 
 ### 2-Player
 | Preset ID | Name | Layout |
 |-----------|------|--------|
-| `2p_horizontal` | Top / Bottom | P1 top half, P2 bottom half |
-| `2p_vertical` | Side by Side | P1 left half, P2 right half |
+| `2p_horizontal` | Top / Bottom | One column, P1 stacked over P2 |
+| `2p_vertical` | Side by Side | Two columns, P1 left / P2 right |
+| `2p_fullscreen` | Fullscreen | Each its own full-resolution output |
 
 ### 3-Player
 | Preset ID | Name | Layout |
 |-----------|------|--------|
-| `3p_t_shape` | T-Shape | P1 full top, P2/P3 bottom halves |
-| `3p_inverted_t` | Inverted T | P1/P2 top halves, P3 full bottom |
-| `3p_left_main` | Left Main | P1 left half, P2/P3 stacked right |
-| `3p_right_main` | Right Main | P1/P2 stacked left, P3 right half |
+| `3p_vertical` | Side by Side | Three equal columns |
+| `3p_horizontal` | Stacked | One column, three stacked |
+| `3p_fullscreen` | Fullscreen | Each its own full-resolution output |
 
 ### 4-Player
 | Preset ID | Name | Layout |
 |-----------|------|--------|
-| `4p_grid` | Grid | 2x2 grid (standard quad) |
-| `4p_rows` | Rows | Same as grid, reads L→R, T→B |
+| `4p_grid` | Grid | 2×2 — two columns, two stacked each |
+| `4p_rows` | Rows | 2×2, read L→R, T→B |
 | `4p_columns` | Columns | P1/P2 left column, P3/P4 right |
-| `4p_main_plus_3` | Main + 3 | P1 left 50%, P2/P3/P4 stacked right thirds |
+| `4p_fullscreen` | Fullscreen | Each its own full-resolution output |
+
+## Multi-monitor & same-display split
+
+- **One instance per output** → that instance is fullscreened on its output.
+- **Several instances, each on a distinct output** → each fullscreened on its own.
+- **More instances than outputs** → instances that must share an output are
+  **tiled side-by-side** on it (via a default split for the count: 2→side-by-side,
+  3→three columns, 4→2×2 grid), so every player stays visible instead of
+  fullscreen-stacking (where niri shows only the focused window). See
+  `position_windows_fullscreen` + `default_split_preset`. Tiled slots are
+  smaller than the full surface, so gamescope downscales — acceptable, not crisp.
 
 ## Manual Testing
 
 ### Prerequisites
 - Running niri compositor
-- gamescope installed
-- glxgears (from mesa-utils) for test windows
+- gamescope installed (or splitux's bundled `gamescope-splitux`)
+- `glxgears` (mesa-utils / mesa-demos) for cheap test clients
 
-### Test Script
+### Quick layout iteration without launching a real game
+
+A bare gamescope+glxgears window is enough to iterate placement (it dies without
+a graphical client, so keep glxgears as the child):
 
 ```bash
-#!/bin/bash
-# niri-layout-test.sh - Test niri window positioning
-
-INSTANCE_COUNT=${1:-2}
-MONITOR=${2:-DP-1}  # Change to your monitor name
-
-# Get monitor dimensions
-MONITOR_INFO=$(niri msg --json outputs | jq -r ".\"$MONITOR\".logical")
-MON_X=$(echo $MONITOR_INFO | jq -r '.x')
-MON_Y=$(echo $MONITOR_INFO | jq -r '.y')
-MON_W=$(echo $MONITOR_INFO | jq -r '.width')
-MON_H=$(echo $MONITOR_INFO | jq -r '.height')
-
-echo "Monitor: $MONITOR at ${MON_W}x${MON_H}+${MON_X}+${MON_Y}"
-
-# Kill existing test windows
-pkill -f "gamescope.*glxgears" 2>/dev/null
-sleep 0.5
-
-# Launch gamescope instances
-for i in $(seq 1 $INSTANCE_COUNT); do
-    gamescope -W 640 -H 480 -- glxgears &
-    echo "Launched instance $i"
-    sleep 0.5
+# Bring up N cheap gamescope windows, then inspect what niri sees
+N=${1:-2}
+for i in $(seq 1 "$N"); do
+  gamescope -W 1920 -H 1080 -- glxgears &
+  sleep 0.5
 done
-
 sleep 2
 
-# Get all gamescope window IDs
-WINDOW_IDS=$(niri msg --json windows | jq -r '.[] | select(.app_id == "gamescope") | .id')
-echo "Found windows: $WINDOW_IDS"
-
-# Position windows based on count
-position_window() {
-    local ID=$1
-    local X=$2
-    local Y=$3
-    local W=$4
-    local H=$5
-
-    echo "Positioning window $ID: ${W}x${H}+${X}+${Y}"
-
-    # Focus and float
-    niri msg action focus-window --id $ID
-    niri msg action move-window-to-floating
-    sleep 0.05
-
-    # Set size
-    niri msg action set-window-width $W
-    niri msg action set-window-height $H
-    sleep 0.05
-
-    # Get current position and calculate delta
-    CURRENT=$(niri msg --json windows | jq -r ".[] | select(.id == $ID) | .layout.tile_pos_in_workspace_view | \"\(.[0]) \(.[1])\"")
-    CX=$(echo $CURRENT | cut -d' ' -f1 | cut -d. -f1)
-    CY=$(echo $CURRENT | cut -d' ' -f2 | cut -d. -f1)
-    DX=$((X - CX))
-    DY=$((Y - CY))
-
-    # Move with delta
-    X_ARG=$([ $DX -ge 0 ] && echo "+$DX" || echo "$DX")
-    Y_ARG=$([ $DY -ge 0 ] && echo "+$DY" || echo "$DY")
-    niri msg action move-floating-window --id $ID -x $X_ARG -y $Y_ARG
-}
-
-# Apply 2p_vertical (side by side) layout for 2 instances
-if [ $INSTANCE_COUNT -eq 2 ]; then
-    IDS=($WINDOW_IDS)
-    HALF_W=$((MON_W / 2))
-    position_window ${IDS[0]} $MON_X $MON_Y $HALF_W $MON_H
-    position_window ${IDS[1]} $((MON_X + HALF_W)) $MON_Y $HALF_W $MON_H
-fi
-
-# Apply 4p_grid layout for 4 instances
-if [ $INSTANCE_COUNT -eq 4 ]; then
-    IDS=($WINDOW_IDS)
-    HALF_W=$((MON_W / 2))
-    HALF_H=$((MON_H / 2))
-    position_window ${IDS[0]} $MON_X $MON_Y $HALF_W $HALF_H                    # top-left
-    position_window ${IDS[1]} $((MON_X + HALF_W)) $MON_Y $HALF_W $HALF_H       # top-right
-    position_window ${IDS[2]} $MON_X $((MON_Y + HALF_H)) $HALF_W $HALF_H       # bottom-left
-    position_window ${IDS[3]} $((MON_X + HALF_W)) $((MON_Y + HALF_H)) $HALF_W $HALF_H  # bottom-right
-fi
-
-# Verify final positions
-echo ""
-echo "=== Final Window States ==="
-niri msg --json windows | jq '.[] | select(.app_id == "gamescope") | {id, pos: .layout.tile_pos_in_workspace_view, size: .layout.window_size}'
-
-echo ""
-echo "Press Enter to clean up..."
-read
-pkill -f "gamescope.*glxgears"
+# What splitux's window scan keys off (app_id contains gamescope, or PID is gamescope)
+niri msg --json windows | jq -r '.[] | select((.app_id // "") | ascii_downcase | contains("gamescope")) | {id, app_id, size: .layout.window_size}'
 ```
 
-### Expected Results
-
-For a 1920x1080 display at position (0, 0):
-
-**2-player side-by-side (2p_vertical):**
-| Window | Position | Size |
-|--------|----------|------|
-| P1 | (0, 0) | 960x1080 |
-| P2 | (960, 0) | 960x1080 |
-
-**4-player grid (4p_grid):**
-| Window | Position | Size |
-|--------|----------|------|
-| P1 | (0, 0) | 960x540 |
-| P2 | (960, 0) | 960x540 |
-| P3 | (0, 540) | 960x540 |
-| P4 | (960, 540) | 960x540 |
-
-## Automated Test via Rust
-
-A proper integration test would use splitux's internal APIs:
-
-```rust
-// Pseudocode for integration test
-#[test]
-fn test_niri_4p_grid_layout() {
-    let manager = NiriManager::new();
-
-    // Create mock layout context
-    let preset = &PRESET_4P_GRID;
-    let ctx = LayoutContext {
-        instances: vec![Instance::mock(); 4],
-        monitors: vec![Monitor { x: 0, y: 0, width: 1920, height: 1080, .. }],
-        preset,
-        instance_to_region: vec![0, 1, 2, 3],
-    };
-
-    // Launch 4 gamescope windows
-    // ...
-
-    // Apply positioning
-    manager.on_instances_launched(&ctx).unwrap();
-
-    // Verify each window position
-    let windows = manager.get_gamescope_windows().unwrap();
-    assert_eq!(windows.len(), 4);
-
-    // Check positions match expected
-    // P1: (0,0) P2: (960,0) P3: (0,540) P4: (960,540)
-}
-```
-
-## Known Limitations
-
-1. **Position jitter**: Small delays between niri actions may cause brief visual glitches
-2. **Window decorations**: Some themes add borders that affect actual visible size
-3. **Gamescope resize resistance**: Gamescope may enforce minimum sizes based on internal resolution
-
-## Debug Commands
+Then drive niri the way splitux does, to confirm a placement by hand:
 
 ```bash
-# List all windows
-niri msg --json windows | jq '.[] | {id, app_id, is_floating, pos: .layout.tile_pos_in_workspace_view, size: .layout.window_size}'
-
-# List monitors
-niri msg --json outputs | jq 'to_entries[] | {name: .key, x: .value.logical.x, y: .value.logical.y, w: .value.logical.width, h: .value.logical.height}'
-
-# Focus specific window
-niri msg action focus-window --id <ID>
-
-# Move to floating
-niri msg action move-window-to-floating
-
-# Set size
-niri msg action set-window-width 640
-niri msg action set-window-height 480
-
-# Move floating (delta-based)
-niri msg action move-floating-window -x +100 -y -50
+ID=<window-id>
+niri msg action focus-window --id "$ID"
+niri msg action move-window-to-monitor DP-1     # assign output
+niri msg action move-window-to-tiling           # ensure tiled (for split presets)
+niri msg action set-column-width 50%            # e.g. one half of a 2p_vertical
+# …or, for fullscreen — TOGGLE, only if not already covering the output:
+niri msg action fullscreen-window --id "$ID"
 ```
+
+> `fullscreen-window` is a toggle. Before calling it, check geometry:
+> `niri msg --json windows | jq '.[] | select(.id==<ID>) | .layout.window_size'`
+> equal to the output's logical size means it's already fullscreen — don't toggle.
+
+### End-to-end through splitux
+
+The real path is exercised by launching a session (CLI is easiest for scripted
+iteration):
+
+```bash
+splitux launch --game <Game> \
+  --player profile=<P>,input=local:gamepad \
+  --player profile=<Q>,input=local:gamepad \
+  --layout vertical            # or fullscreen / horizontal / grid
+# multi-monitor: add --display DP-1 --display HDMI-A-1
+```
+
+splitux logs each placement decision (`[splitux] wm::niri - …`), including which
+output each window went to and whether it left an already-fullscreen window
+alone — the quickest way to confirm the layout code did what you expected.
+
+## Expected geometry (1920×1080 output at 0,0)
+
+**2-player side-by-side (`2p_vertical`)** — two tiled columns:
+| Window | Column width | On-screen size (approx, minus gaps) |
+|--------|--------------|-------------------------------------|
+| P1 | 50% | ~947×1054 |
+| P2 | 50% | ~947×1054 |
+
+**4-player grid (`4p_grid`)** — two 50% columns, two stacked each:
+| Window | Column | Slot |
+|--------|--------|------|
+| P1 | left | top |
+| P2 | left | bottom |
+| P3 | right | top |
+| P4 | right | bottom |
+
+**Fullscreen (`*_fullscreen`)** — each window's `window_size` equals the output's
+logical size exactly (1920×1080), edge-to-edge with no gaps.

@@ -40,7 +40,8 @@
 - **Steam & Epic LAN emulation** - Play online-only games locally via the Goldberg (Steam) and EOS LAN (Epic Online Services) emulators
 - **Proton support** - Run Windows games through Proton/UMU Launcher
 - **Per-player profiles** - Separate saves, settings, and Steam identities per player
-- **Headless CLI** - Discover and launch sessions from a script or over SSH, no GUI
+- **Three ways to drive it** - a gamepad-navigable **GUI**, a keyboard-driven **TUI** (great over SSH), and a fully scriptable **CLI**
+- **Multi-game (CLI)** - run several *different* games at once, one per monitor, from a single command
 - **niri, Hyprland & KDE Plasma** - Native window manager integration
 
 ## How It Works
@@ -272,7 +273,9 @@ Each player count has selectable layout presets, chosen per-count in the launche
 - **4P**: Grid, Rows, Columns
 - **Fullscreen ("Independent")**: every instance gets its own full-resolution
   output instead of a tile — useful for multi-monitor setups and for remote
-  (splitux-together) seats.
+  (splitux-together) seats. With more instances than displays, the ones that
+  have to share an output are tiled side-by-side so every player stays visible
+  (rather than stacking, where only the focused window shows).
 
 Window placement is handled natively per WM (niri, Hyprland, KWin). Launched game
 processes are contained in a systemd cgroup scope tied to splitux, so a crash or
@@ -290,26 +293,121 @@ friend, who opens it in a browser and auto-joins that seat. Their input drives t
 instance exactly like a local controller. Combine with the **Fullscreen** layout
 so each remote player gets a full-resolution stream.
 
+## Three Ways to Drive It
+
+Splitux has one launch engine behind three front-ends, each suited to a different job:
+
+| Front-end | Best for | Multi-game | How to open |
+|-----------|----------|:----------:|-------------|
+| **GUI** | Couch use, gamepad-navigable, the most explicit setup | single-game by design | `splitux` (no subcommand) |
+| **TUI** | Keyboard-driven, works great over SSH; pick game, assign players, watch/kill/restart sessions | single-game by design | `splitux tui` |
+| **CLI** | Scripting and automation; exposes every feature | **yes** | `splitux <subcommand>` |
+
+The GUI and TUI are deliberately **single-game** — one game, configured explicitly per session. **Multi-game** (several *different* games at once) is a CLI capability, because that's the surface used for scripted/automated launches. All three call the same scan + launch pipeline, so behavior never diverges.
+
 ## Headless CLI
 
 Discover and launch sessions without the GUI — handy over SSH or from a script. A
-plain `splitux` (no subcommand) still opens the GUI.
+plain `splitux` (no subcommand) still opens the GUI; `splitux tui` opens the
+terminal UI.
+
+### Inspect the machine
 
 ```bash
-# List what's available
-splitux list games
-splitux list profiles
-splitux list inputs
+splitux list games       # installed game handlers
+splitux list profiles    # player profiles
+splitux list inputs       # gamepads / keyboards / mice
+splitux list monitors    # connectors + resolutions (for --display)
+splitux list layouts     # valid layout presets per player count
+```
 
-# Launch a session: one --player per seat
+### Launch a session
+
+One `--player` per seat. `--player` takes comma-separated `key=val`:
+
+- `profile=<name>` — player profile (default `Guest`; see `list profiles`)
+- `input=<spec>` — `local:kbm` | `local:gamepad` | `together:kbm` | `together:gamepad`
+  (`local:*` drives the host directly; `together:*` is a remote streamed seat)
+- `game=<name>` — which `--game` this player belongs to (multi-game only)
+
+```bash
+# Two local players, side-by-side split on the primary display
+splitux launch --game "Satisfactory" \
+  --player profile=Gabe,input=local:kbm \
+  --player profile=Ruth,input=local:gamepad \
+  --layout vertical
+
+# One player per monitor, each rendered fullscreen
+splitux launch --game "Palworld" \
+  --player profile=Alice,input=local:kbm \
+  --player profile=Bob,input=local:gamepad \
+  --layout fullscreen --display DP-1 --display HDMI-A-1
+
+# Two remote (together) seats — hand each player their invite URL
 splitux launch --game "Satisfactory" \
   --player profile=Gabe,input=together:gamepad \
   --player profile=Ruth,input=together:kbm
 ```
 
-`--player` takes comma-separated `key=val`: `profile=<name>` (default `Guest`) and
-`input=together:gamepad|together:kbm` (remote-seat inputs). The CLI reuses the
-exact scan + launch pipeline the GUI drives.
+**Layout / display overrides** (per launch, overriding `settings.json`):
+
+- `--layout <vertical|horizontal|grid|fullscreen>` — valid presets depend on
+  player count (see `list layouts`).
+- `--display <connector>` — repeatable. One value puts all instances on that
+  monitor; several distribute them across monitors (1:1 when counts match, else
+  round-robin). Two instances forced onto one display tile side-by-side.
+
+**Save anchoring** — carry a player's real progress in and sync it back:
+
+- `--master <profile>` — the profile that owns the canonical save.
+- `--save-anchor <path>` — original save to seed the master from (overrides the
+  handler's `original_save_path`).
+- `--save-sync-back` — write the master's saves back to the anchor when the
+  session ends (the original is always backed up first).
+- `--save-steam-id-remap` — remap Steam IDs embedded in save filenames (DRG-style).
+
+### Multi-game (CLI only)
+
+Pass `--game` more than once to run several **different** games concurrently in
+one coordinated session (one process, serialized bring-up — no inter-game race).
+Every `--player` then needs a `game=<name>` tag, and `--layout`/`--display`
+become game-tagged `<game>=<value>`:
+
+```bash
+splitux launch --game Satisfactory --game Palworld \
+  --player game=Satisfactory,profile=Gabe,input=local:gamepad \
+  --player game=Satisfactory,profile=Ruth,input=local:gamepad \
+  --player game=Palworld,profile=Alice,input=together:gamepad \
+  --layout Satisfactory=vertical \
+  --display Satisfactory=DP-2 --display Palworld=HDMI-A-1
+```
+
+### Templates & completions
+
+```bash
+# Save a reusable, pinned session template (shows up in the GUI/TUI session list)
+splitux save-session --game "Satisfactory" \
+  --player profile=Gabe,input=local:gamepad --name "Sat duo"
+
+# Shell completions (bash | zsh | fish | elvish | powershell)
+splitux completions zsh > ~/.zfunc/_splitux
+```
+
+Run `splitux launch --help` for the complete, authoritative flag reference.
+
+## Terminal UI (TUI)
+
+`splitux tui` is a keyboard-driven, ratatui front-end — a full GUI replacement
+that works cleanly over SSH. Pick a game, assemble players (profile, input,
+local/together), choose a window layout and a per-player display, then launch the
+session *detached* so the TUI stays live to watch, kill, and restart running
+sessions.
+
+Build-screen keys: `a` add / `d` delete player · `p` profile · `i` input · `m`
+display · `t` local/together · `L` layout · `c` save-anchor · `Enter` launch ·
+`s` sessions. The display picker only appears with more than one monitor, and the
+layout picker only offers presets valid for the current player count. Like the
+GUI, the TUI is single-game per session; reach for the CLI for multi-game.
 
 ## Controls
 
@@ -325,6 +423,14 @@ The launcher is fully navigable with a gamepad:
 | Start | Launch Game |
 | LB / RB | Switch Tabs |
 | Right Stick | Scroll |
+
+## Troubleshooting
+
+A game crashes the instant it launches (window flashes, then `Primary child shut down`),
+with a native crash in `GetJoystickNames` / SDL? A non-gamepad input device (e.g. a
+keyboard's "System Control" endpoint) is likely mis-tagged as a joystick and trips the
+game's old bundled SDL. See **[docs/input-device-troubleshooting.md](docs/input-device-troubleshooting.md)**
+and the udev template in `docs/udev/`.
 
 ## License
 
