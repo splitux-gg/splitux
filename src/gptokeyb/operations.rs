@@ -64,11 +64,10 @@ pub fn wait_for_virtual_device(instance_id: usize, timeout_ms: u64) -> Option<Pa
                 }
 
                 let name_path = entry.path().join("device/name");
-                if let Ok(name) = std::fs::read_to_string(&name_path) {
-                    if name.trim() == expected_name {
+                if let Ok(name) = std::fs::read_to_string(&name_path)
+                    && name.trim() == expected_name {
                         return Some(PathBuf::from("/dev/input").join(entry_name));
                     }
-                }
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(50));

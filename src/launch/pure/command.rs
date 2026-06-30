@@ -71,7 +71,7 @@ pub fn format_launch_cmd(cmd: &Command, i: usize) -> String {
     output.push_str(&format!("[splitux] CWD={}\n", cwd.display()));
 
     for var in cmd.get_envs() {
-        let value = var.1.ok_or_else(|| "").unwrap_or_default();
+        let value = var.1.ok_or("").unwrap_or_default();
         output.push_str(&format!(
             "[splitux] {}={}\n",
             var.0.to_string_lossy(),

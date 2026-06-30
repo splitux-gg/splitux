@@ -26,7 +26,7 @@ impl Splitux {
                 }
             }
             InstanceFocus::StartButton => {
-                if self.instances.len() > 0 {
+                if !self.instances.is_empty() {
                     self.prepare_game_launch();
                 }
             }
@@ -43,7 +43,7 @@ impl Splitux {
     pub(crate) fn process_instance_back_key(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions | InstanceFocus::StartButton => {
-                if self.instances.len() > 0 {
+                if !self.instances.is_empty() {
                     self.instance_focus = InstanceFocus::InstanceCard(
                         self.instances.len() - 1,
                         InstanceCardFocus::Profile

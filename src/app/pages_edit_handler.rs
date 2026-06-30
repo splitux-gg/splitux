@@ -41,7 +41,7 @@ impl Splitux {
         // Platform info (read-only)
         ui.horizontal(|ui| {
             ui.label("Platform:");
-            ui.label(RichText::new(&h.platform_name()).strong());
+            ui.label(RichText::new(h.platform_name()).strong());
             if let Some(app_id) = h.platform_app_id() {
                 ui.label("|");
                 ui.label("App ID:");
@@ -60,8 +60,8 @@ impl Splitux {
             ui.add(egui::TextEdit::singleline(&mut h.version).desired_width(50.0));
             ui.label("Icon:");
             ui.add(egui::Image::new(h.icon()).max_width(16.0).corner_radius(2));
-            if h.is_saved_handler() && ui.button("...").clicked() {
-                if let Some(file) = FileDialog::new()
+            if h.is_saved_handler() && ui.button("...").clicked()
+                && let Some(file) = FileDialog::new()
                     .set_title("Choose Icon:")
                     .set_directory(&*PATH_HOME)
                     .add_filter("PNG Image", &["png"])
@@ -75,7 +75,6 @@ impl Splitux {
                         msg("Error copying icon", &format!("{}", e));
                     }
                 }
-            }
         });
 
         ui.separator();
@@ -165,26 +164,24 @@ impl Splitux {
             ui.horizontal(|ui| {
                 ui.label("Game root folder:");
                 ui.add_enabled(false, egui::TextEdit::singleline(&mut h.path_gameroot));
-                if ui.button("...").clicked() {
-                    if let Ok(path) = dir_dialog() {
+                if ui.button("...").clicked()
+                    && let Ok(path) = dir_dialog() {
                         let path_str = path.to_string_lossy().to_string();
                         h.path_gameroot = path_str.clone();
                         h.set_platform_manual(path_str);
                     }
-                }
             });
         }
 
         ui.horizontal(|ui| {
             ui.label("Executable:");
             ui.add_enabled(false, egui::TextEdit::singleline(&mut h.exec));
-            if ui.button("...").clicked() {
-                if let Ok(base_path) = h.get_game_rootpath()
+            if ui.button("...").clicked()
+                && let Ok(base_path) = h.get_game_rootpath()
                     && let Ok(path) = file_dialog_relative(&PathBuf::from(base_path))
                 {
                     h.exec = path.to_string_lossy().to_string();
                 }
-            }
         });
 
         // Photon-specific settings (shown when Photon backend is enabled)
@@ -261,12 +258,11 @@ impl Splitux {
             });
         }
 
-        if h.spec_ver != HANDLER_SPEC_CURRENT_VERSION {
-            if ui.button("Update Handler Specification Version").clicked() {
+        if h.spec_ver != HANDLER_SPEC_CURRENT_VERSION
+            && ui.button("Update Handler Specification Version").clicked() {
                 h.spec_ver = HANDLER_SPEC_CURRENT_VERSION;
                 msg("Handler Specification Version Updated", "Remember to save your changes.");
             }
-        }
 
         ui.add_space(8.0);
         let mut save_clicked = false;
@@ -281,8 +277,8 @@ impl Splitux {
         });
 
         // Handle button clicks outside closure to avoid borrow issues
-        if save_clicked {
-            if let Some(ref mut h) = self.handler_edit {
+        if save_clicked
+            && let Some(ref mut h) = self.handler_edit {
                 if let Err(e) = h.save() {
                     msg("Error saving handler", &format!("{}", e));
                 } else {
@@ -291,7 +287,6 @@ impl Splitux {
                     self.handler_edit = None;
                 }
             }
-        }
         if cancel_clicked {
             self.show_edit_modal = false;
             self.handler_edit = None;

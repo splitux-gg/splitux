@@ -33,6 +33,7 @@ use super::super::setup_profiles;
 ///   1. per-game local-split (couch co-op) collapse,
 ///   2. per-monitor (or single-monitor) resolution sizing,
 ///   3. profile-name resolution,
+///
 /// then the shared [`run_session`]. Previously the CLI did all three inline while
 /// the GUI did its own subset (no local-split collapse, single-game only) — this
 /// facade is what makes "internal logic identical across CLI/TUI/GUI" true.
@@ -113,12 +114,11 @@ pub fn run_session(
     }
 
     // Initialize profile saves with master-based inheritance.
-    if handler.save_steam_cloud || !handler.original_save_path.is_empty() {
-        if let Err(err) = save_sync::initialize_profile_saves(handler, instances, master_profile) {
+    if (handler.save_steam_cloud || !handler.original_save_path.is_empty())
+        && let Err(err) = save_sync::initialize_profile_saves(handler, instances, master_profile) {
             println!("[splitux] Warning: Failed to initialize saves: {}", err);
             // Non-fatal — continue.
         }
-    }
 
     // Start shared backend sidecar services (e.g. Keen auth server) before the
     // games launch; they're killed at teardown below. No-op for backends that
@@ -142,12 +142,11 @@ pub fn run_session(
     ready.store(true, Ordering::Release);
 
     // Sync master profile's saves back to the original location.
-    if handler.save_sync_back {
-        if let Err(err) = save_sync::sync_master_saves_back(handler, instances, master_profile) {
+    if handler.save_sync_back
+        && let Err(err) = save_sync::sync_master_saves_back(handler, instances, master_profile) {
             println!("[splitux] Error syncing saves back: {}", err);
             notify("Save Sync Error", &format!("Failed to sync saves back: {err}"));
         }
-    }
 
     if let Err(err) = remove_guest_profiles() {
         println!("[splitux] Error removing guest profiles: {}", err);

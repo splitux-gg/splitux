@@ -193,11 +193,8 @@ impl Splitux {
                 }
                 _ => {}
             },
-            ProfileBuilderFocus::MouseSpeed => match direction {
-                NavDirection::Up => {
-                    self.profile_builder_focus = ProfileBuilderFocus::RightStickMouse;
-                }
-                _ => {}
+            ProfileBuilderFocus::MouseSpeed => if direction == NavDirection::Up {
+                self.profile_builder_focus = ProfileBuilderFocus::RightStickMouse;
             },
 
             // Default case

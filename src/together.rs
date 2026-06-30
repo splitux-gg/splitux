@@ -341,11 +341,10 @@ fn ensure_orchestrator(cfg: &SplituxConfig) -> Option<Child> {
     if web.is_dir() {
         cmd.arg("--web").arg(&web);
     }
-    if let Ok(log) = std::fs::File::create("/tmp/splitux-together-orchestrator.log") {
-        if let Ok(err) = log.try_clone() {
+    if let Ok(log) = std::fs::File::create("/tmp/splitux-together-orchestrator.log")
+        && let Ok(err) = log.try_clone() {
             cmd.stdout(Stdio::from(log)).stderr(Stdio::from(err));
         }
-    }
     match cmd.spawn() {
         Ok(child) => {
             println!("[splitux] together - started local orchestrator (web: {})", web.display());
@@ -363,9 +362,9 @@ fn ensure_orchestrator(cfg: &SplituxConfig) -> Option<Child> {
 ///
 /// Returns, in instance order:
 ///   * `seat_handles`   — the seat-streamer child per instance (+ a trailing
-///                        local-orchestrator handle, if we started one)
+///     local-orchestrator handle, if we started one)
 ///   * `seat_devices`   — the virtual pad/kbd/mouse paths to thread into
-///                        `launch_cmds` (None for instances without a seat)
+///     `launch_cmds` (None for instances without a seat)
 ///   * `invite_links`   — the URLs to pop up once windows are up
 ///
 /// No-op (all-None) when `together.enabled` is false, so normal local

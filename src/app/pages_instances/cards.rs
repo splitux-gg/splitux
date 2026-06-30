@@ -36,7 +36,7 @@ fn monitor_dropdown(
     let items: Vec<DropdownItem<usize>> = monitors
         .iter()
         .enumerate()
-        .map(|(idx, mon)| DropdownItem::new(idx, &mon.display_name(), idx == current_idx))
+        .map(|(idx, mon)| DropdownItem::new(idx, mon.display_name(), idx == current_idx))
         .collect();
 
     let current_name = monitors
@@ -185,8 +185,8 @@ impl Splitux {
                         }
 
                         // Wide mode: monitor + invite on same row
-                        if !card_mode.is_narrow() {
-                            if can_assign_displays {
+                        if !card_mode.is_narrow()
+                            && can_assign_displays {
                                 ui.add_space(8.0);
                                 ui.label("Monitor:");
                                 let monitor_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Monitor);
@@ -210,8 +210,6 @@ impl Splitux {
                                     }
                                 }
                             }
-
-                        }
                     });
 
                     // ── Row 2: Monitor (narrow mode only) ──
@@ -250,7 +248,7 @@ impl Splitux {
                     } else {
                         None
                     };
-                    let is_named_profile = profile_name.as_ref().map_or(false, |n| !n.starts_with('.') && n != "Guest");
+                    let is_named_profile = profile_name.as_ref().is_some_and(|n| !n.starts_with('.') && n != "Guest");
 
                     for (dev_idx, &dev) in instance.devices.iter().enumerate() {
                         let device_focused = is_element_focused(&current_focus, i, InstanceCardFocus::Device(dev_idx));
@@ -277,8 +275,8 @@ impl Splitux {
                             // Preferred controller star for named profiles
                             if is_named_profile {
                                 let dev_uniq = self.input_devices[dev].uniq();
-                                if !dev_uniq.is_empty() {
-                                    if let Some(ref prof_name) = profile_name {
+                                if !dev_uniq.is_empty()
+                                    && let Some(ref prof_name) = profile_name {
                                         let prefs = ProfilePreferences::load(prof_name);
                                         let is_preferred = prefs.preferred_controller.as_ref() == Some(&dev_uniq.to_string());
 
@@ -302,7 +300,6 @@ impl Splitux {
                                             }
                                         }
                                     }
-                                }
                             }
 
                             let remove_text = if card_mode.is_narrow() { icons::X } else { "Remove" };
@@ -368,14 +365,14 @@ impl Splitux {
                             let audio_override_open = self.active_dropdown == Some(ActiveDropdown::InstanceAudioOverride(i));
                             let has_override = self.audio_session_overrides.contains_key(&i);
 
-                            let is_muted = effective.as_ref().map_or(false, |(s, _, _)| s.is_empty());
+                            let is_muted = effective.as_ref().is_some_and(|(s, _, _)| s.is_empty());
                             let mut items: Vec<DropdownItem<AudioOverrideAction>> = self.audio_devices.iter()
                                 .map(|sink| {
-                                    let is_current = effective.as_ref().map_or(false, |(s, _, _)| s == &sink.name);
+                                    let is_current = effective.as_ref().is_some_and(|(s, _, _)| s == &sink.name);
                                     DropdownItem::new(AudioOverrideAction::SetDevice(sink.name.clone()), &sink.description, is_current)
                                 })
                                 .collect();
-                            items.push(DropdownItem::new(AudioOverrideAction::Mute, &format!("{} None (mute)", icons::SPEAKER_SLASH), is_muted));
+                            items.push(DropdownItem::new(AudioOverrideAction::Mute, format!("{} None (mute)", icons::SPEAKER_SLASH), is_muted));
                             if has_override {
                                 items.push(DropdownItem::new(AudioOverrideAction::Reset, "↩ Reset to profile", false));
                             }
@@ -411,8 +408,8 @@ impl Splitux {
                             }
 
                             // Audio preference for named profiles
-                            if is_named_profile {
-                                if let Some(ref prof_name) = profile_name {
+                            if is_named_profile
+                                && let Some(ref prof_name) = profile_name {
                                     let prefs = ProfilePreferences::load(prof_name);
                                     let pref_text = if card_mode.is_narrow() { icons_fill::STAR } else { "Pref..." };
                                     let pref_width = combo_width(ui, 60.0, 35.0);
@@ -470,7 +467,6 @@ impl Splitux {
                                         }
                                     }
                                 }
-                            }
                         });
                     }
 

@@ -237,6 +237,7 @@ pub struct Handler {
     /// - ~ or $HOME for home directory
     /// - For Windows games: relative paths like "AppData/LocalLow/Company/Game" are relative to windata
     /// - Absolute paths are used as-is
+    ///
     /// When set, original saves are copied to each profile before launch.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub original_save_path: String,
@@ -365,7 +366,7 @@ impl Handler {
 
         handler.path_handler = yaml_path
             .parent()
-            .ok_or_else(|| "Invalid path")?
+            .ok_or("Invalid path")?
             .to_path_buf();
         handler.img_paths = handler.get_imgs();
 
@@ -420,19 +421,18 @@ impl Handler {
     }
 
     pub fn from_cli(path_exec: &str, args: &str) -> Self {
-        let mut handler = Self::default();
-
-        handler.path_gameroot = Path::new(path_exec)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap();
-        handler.exec = Path::new(path_exec)
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap();
-        handler.args = args.to_string();
-
-        handler
+        Self {
+            path_gameroot: Path::new(path_exec)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap(),
+            exec: Path::new(path_exec)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap(),
+            args: args.to_string(),
+            ..Self::default()
+        }
     }
 
     // Steam asset methods moved to operations/steam_assets.rs

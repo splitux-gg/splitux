@@ -181,11 +181,10 @@ impl Splitux {
     /// the REAL local art + correct "installed" state (your machine is the source
     /// of truth) instead of depending on the remote CDN by id.
     fn registry_local_handler(&self, entry: &RegistryEntry) -> Option<usize> {
-        if let Some(appid) = entry.steam_appid {
-            if let Some(i) = self.handlers.iter().position(|h| h.steam_appid == Some(appid)) {
+        if let Some(appid) = entry.steam_appid
+            && let Some(i) = self.handlers.iter().position(|h| h.steam_appid == Some(appid)) {
                 return Some(i);
             }
-        }
         let norm = |s: &str| -> String {
             s.chars()
                 .filter(|c| c.is_ascii_alphanumeric())

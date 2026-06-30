@@ -602,12 +602,11 @@ fn save_session(
     }
 
     // --master must be one of the players (it anchors a player's save).
-    if let Some(m) = &master {
-        if !saved_players.iter().any(|p| p.profile.eq_ignore_ascii_case(m)) {
+    if let Some(m) = &master
+        && !saved_players.iter().any(|p| p.profile.eq_ignore_ascii_case(m)) {
             eprintln!("[splitux] master '{m}' is not one of the players.");
             return 2;
         }
-    }
 
     // Upsert by (game, profile-set) — same identity the GUI/TUI dedup on — then
     // pin it and apply name/anchor overrides on the resolved entry.

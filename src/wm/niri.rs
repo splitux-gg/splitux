@@ -18,11 +18,10 @@ struct NiriWindow {
 /// windows when the compositor reports no app_id (e.g. Proton titles on niri).
 /// Checks the exe symlink first (most reliable), then the thread comm name.
 fn pid_is_gamescope(pid: u64) -> bool {
-    if let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) {
-        if exe.to_string_lossy().to_lowercase().contains("gamescope") {
+    if let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe"))
+        && exe.to_string_lossy().to_lowercase().contains("gamescope") {
             return true;
         }
-    }
     std::fs::read_to_string(format!("/proc/{pid}/comm"))
         .map(|c| c.to_lowercase().contains("gamescope"))
         .unwrap_or(false)
@@ -95,8 +94,8 @@ impl NiriManager {
         if let Some(obj) = outputs.as_object() {
             for (name, output) in obj {
                 // Only include outputs with logical info (connected and enabled)
-                if let Some(logical) = output.get("logical") {
-                    if !logical.is_null() {
+                if let Some(logical) = output.get("logical")
+                    && !logical.is_null() {
                         result.push(WmMonitor {
                             name: name.clone(),
                             x: logical["x"].as_i64().unwrap_or(0) as i32,
@@ -105,7 +104,6 @@ impl NiriManager {
                             height: logical["height"].as_u64().unwrap_or(1080) as u32,
                         });
                     }
-                }
             }
         }
 
@@ -201,15 +199,14 @@ impl NiriManager {
                 let is_gamescope = (self.no_gamescope && scoped)
                     || app_id.to_lowercase().contains("gamescope")
                     || pid_is_gs;
-                if is_gamescope && pid.is_some_and(is_mine) {
-                    if let Some(id) = win["id"].as_u64() {
+                if is_gamescope && pid.is_some_and(is_mine)
+                    && let Some(id) = win["id"].as_u64() {
                         result.push(NiriWindow {
                             id,
                             app_id: app_id.to_string(),
                             is_floating: win["is_floating"].as_bool().unwrap_or(false),
                         });
                     }
-                }
             }
         }
         Ok(result)
@@ -220,14 +217,13 @@ impl NiriManager {
     /// Maps the instance's SDL monitor index → connector name → niri output,
     /// falling back to the session target monitor if the lookup fails.
     fn resolve_instance_monitor(&self, ctx: &LayoutContext, instance_idx: usize) -> Option<String> {
-        if let Some(inst) = ctx.instances.get(instance_idx) {
-            if let Some(sdl_monitor) = ctx.monitors.get(inst.monitor) {
+        if let Some(inst) = ctx.instances.get(instance_idx)
+            && let Some(sdl_monitor) = ctx.monitors.get(inst.monitor) {
                 let connector = sdl_monitor.connector_name();
                 if let Ok(monitor) = self.get_monitor_by_name(connector) {
                     return Some(monitor.name);
                 }
             }
-        }
         self.target_monitor.clone()
     }
 
@@ -249,12 +245,11 @@ impl NiriManager {
         outputs: &[WmMonitor],
         used: &mut Vec<String>,
     ) -> Option<String> {
-        if let Some(p) = preferred {
-            if !used.iter().any(|u| u == p) {
+        if let Some(p) = preferred
+            && !used.iter().any(|u| u == p) {
                 used.push(p.to_string());
                 return Some(p.to_string());
             }
-        }
         if let Some(free) = outputs.iter().find(|o| !used.iter().any(|u| u == &o.name)) {
             used.push(free.name.clone());
             return Some(free.name.clone());
@@ -286,7 +281,7 @@ impl NiriManager {
         // display so independent fullscreen windows don't stack invisibly — only
         // sharing an output once there are more instances than outputs.
         let mut assigned: Vec<(usize, Option<String>)> = Vec::with_capacity(windows.len());
-        for i in 0..windows.len() {
+        for (i, window) in windows.iter().enumerate() {
             let preferred = self.resolve_instance_monitor(ctx, i);
             let target = if ctx.displays_assigned {
                 preferred.clone()
@@ -295,7 +290,7 @@ impl NiriManager {
             };
             println!(
                 "[splitux] wm::niri - Fullscreen window {}: id={} app_id={} -> monitor {:?} (preferred {:?}, assigned={})",
-                i, windows[i].id, windows[i].app_id, target, preferred, ctx.displays_assigned
+                i, window.id, window.app_id, target, preferred, ctx.displays_assigned
             );
             assigned.push((i, target));
         }

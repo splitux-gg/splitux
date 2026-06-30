@@ -158,7 +158,7 @@ impl AnalogMode {
     }
 
     /// Convert to gptk value
-    pub fn to_gptk_value(&self) -> Option<&'static str> {
+    pub fn to_gptk_value(self) -> Option<&'static str> {
         match self {
             Self::Disabled => None,
             Self::MouseMovement => Some("mouse_movement"),

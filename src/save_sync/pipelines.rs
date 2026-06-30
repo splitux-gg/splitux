@@ -154,14 +154,13 @@ fn sync_master_from_original(h: &Handler, master: &str) -> Result<(), Box<dyn Er
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false);
 
-        if has_content {
-            if let Err(e) = backup_saves(&profile_save_path) {
+        if has_content
+            && let Err(e) = backup_saves(&profile_save_path) {
                 println!(
                     "[splitux] Warning: Failed to backup profile saves: {}",
                     e
                 );
             }
-        }
     }
 
     // Clear existing and copy fresh
@@ -246,11 +245,10 @@ pub fn initialize_profile_saves(
 
     // Step 1: Master profile ALWAYS syncs from original at session start
     // This ensures master always has the latest PC saves
-    if let Some(master) = master_profile {
-        if let Err(e) = sync_master_from_original(h, master) {
+    if let Some(master) = master_profile
+        && let Err(e) = sync_master_from_original(h, master) {
             println!("[splitux] Warning: Failed to sync master from original: {}", e);
         }
-    }
 
     // Step 2: Initialize each instance's profile
     for instance in instances {
@@ -295,13 +293,11 @@ pub fn initialize_profile_saves(
                         instance.profname, e
                     );
                 }
-            } else {
-                if let Err(e) = copy_original_saves_to_profile(h, &instance.profname) {
-                    println!(
-                        "[splitux] Warning: Failed to setup saves for '{}': {}",
-                        instance.profname, e
-                    );
-                }
+            } else if let Err(e) = copy_original_saves_to_profile(h, &instance.profname) {
+                println!(
+                    "[splitux] Warning: Failed to setup saves for '{}': {}",
+                    instance.profname, e
+                );
             }
         } else {
             println!(
@@ -391,8 +387,8 @@ pub fn sync_master_saves_back(
     // HARD GATE: we are about to destroy the original (real PC progress). If we
     // cannot first secure a backup of it, abort the sync-back rather than risk
     // losing it. Better to leave the original untouched than overwrite it blind.
-    if original_path.exists() {
-        if let Err(e) = backup_saves(&original_path) {
+    if original_path.exists()
+        && let Err(e) = backup_saves(&original_path) {
             return Err(format!(
                 "Aborting sync-back: failed to backup original saves at {} ({}). \
                  Original left untouched; session progress remains in master profile '{}'.",
@@ -402,7 +398,6 @@ pub fn sync_master_saves_back(
             )
             .into());
         }
-    }
 
     // Clear and copy
     if original_path.exists() {
@@ -487,8 +482,8 @@ pub fn sync_saves_back(h: &Handler, instances: &[Instance]) -> Result<(), Box<dy
     // Backup original saves before overwriting.
     // HARD GATE: same rule as sync_master_saves_back — never destroy the
     // original (real PC progress) without first securing a backup of it.
-    if original_path.exists() {
-        if let Err(e) = backup_saves(&original_path) {
+    if original_path.exists()
+        && let Err(e) = backup_saves(&original_path) {
             return Err(format!(
                 "Aborting sync-back: failed to backup original saves at {} ({}). \
                  Original left untouched; session progress remains in profile '{}'.",
@@ -498,7 +493,6 @@ pub fn sync_saves_back(h: &Handler, instances: &[Instance]) -> Result<(), Box<dy
             )
             .into());
         }
-    }
 
     // Clear and copy
     if original_path.exists() {

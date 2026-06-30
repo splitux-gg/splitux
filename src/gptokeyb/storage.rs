@@ -31,11 +31,10 @@ pub fn list_user_profiles() -> Vec<String> {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "gptk") {
-                if let Some(stem) = path.file_stem() {
+            if path.extension().is_some_and(|ext| ext == "gptk")
+                && let Some(stem) = path.file_stem() {
                     profiles.push(stem.to_string_lossy().into_owned());
                 }
-            }
         }
     }
     profiles.sort();

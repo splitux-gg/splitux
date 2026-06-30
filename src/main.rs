@@ -1,3 +1,12 @@
+// Design-level clippy lints we intentionally accept crate-wide: the launch and
+// UI pipelines legitimately take many parameters (threading instances, handlers,
+// monitors, config, devices, etc.), some module names mirror their parent
+// (e.g. `app::app`), and a few boxed-trait collections are inherently complex.
+// Refactoring these into param-structs/aliases would obscure more than it clarifies.
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::module_inception)]
+#![allow(clippy::type_complexity)]
+
 mod app;
 mod audio;
 mod backend;

@@ -93,7 +93,7 @@ pub fn download_handler(entry: &RegistryEntry) -> Result<(), Box<dyn Error>> {
 
     // Download handler.yaml
     let yaml_response = client
-        .get(&entry.yaml_url())
+        .get(entry.yaml_url())
         .header("User-Agent", "splitux")
         .send()?;
 
@@ -117,13 +117,11 @@ pub fn download_handler(entry: &RegistryEntry) -> Result<(), Box<dyn Error>> {
         (entry.logo_url(), "logo.png"),
         (entry.box_art_url(), "box_art.jpg"),
     ] {
-        if let Ok(resp) = client.get(&url).header("User-Agent", "splitux").send() {
-            if resp.status().is_success() {
-                if let Ok(bytes) = resp.bytes() {
+        if let Ok(resp) = client.get(&url).header("User-Agent", "splitux").send()
+            && resp.status().is_success()
+                && let Ok(bytes) = resp.bytes() {
                     let _ = std::fs::write(handler_dir.join(file), bytes);
                 }
-            }
-        }
     }
 
     Ok(())

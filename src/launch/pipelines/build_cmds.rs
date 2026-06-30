@@ -123,7 +123,7 @@ pub fn launch_cmds(
         } else {
             path_exec
                 .parent()
-                .ok_or_else(|| "couldn't get parent")?
+                .ok_or("couldn't get parent")?
                 .to_path_buf()
         };
         let path_prof = PATH_PARTY.join("profiles").join(&instance.profname);
@@ -576,12 +576,11 @@ pub fn launch_cmds(
             }
 
             // Set up audio routing inside container
-            if let Some(sink_name) = audio_sink_envs.get(i) {
-                if !sink_name.is_empty() {
+            if let Some(sink_name) = audio_sink_envs.get(i)
+                && !sink_name.is_empty() {
                     bwrap::setup_audio_env(&mut cmd, sink_name);
                     println!("[splitux] Instance {}: PULSE_SINK={}", i, sink_name);
                 }
-            }
 
             // Set up BepInEx environment for Linux native games with Facepunch
             if !win && h.has_facepunch() {
@@ -592,12 +591,11 @@ pub fn launch_cmds(
             }
 
             // Set Steam App ID for native Linux games (required for Steam API init)
-            if !win {
-                if let Some(appid) = h.steam_appid {
+            if !win
+                && let Some(appid) = h.steam_appid {
                     cmd.args(["--setenv", "SteamAppId", &appid.to_string()]);
                     cmd.args(["--setenv", "SteamGameId", &appid.to_string()]);
                 }
-            }
 
             // Log assigned devices and block unassigned devices
             if !h.disable_input_isolation {
@@ -673,13 +671,11 @@ pub fn launch_cmds(
         // wine wraps the space-containing arg in quotes when building the Windows
         // command line, so UE sees a single `-LogCmds=<value>` token (no inner
         // quoting needed). Used to surface why an EOS join aborts post-Success.
-        if h.has_eos() {
-            if let Ok(logcmds) = std::env::var("SPLITUX_GAME_LOGCMDS") {
-                if !logcmds.trim().is_empty() {
+        if h.has_eos()
+            && let Ok(logcmds) = std::env::var("SPLITUX_GAME_LOGCMDS")
+                && !logcmds.trim().is_empty() {
                     cmd.arg(format!("-LogCmds={logcmds}"));
                 }
-            }
-        }
 
         // 9. Handler arguments with variable substitution
         for arg in h.args.split_whitespace() {

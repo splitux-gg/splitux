@@ -175,11 +175,10 @@ impl Splitux {
             }
             // Remember which device kicked off a game-setup start (A or Start on a
             // game) so it becomes player 1 once we reach the setup screen.
-            if start_pressed && on_games_page && start_pressed_device_path.is_none() {
-                if let Some(dev) = self.input_devices.get(dev_idx) {
+            if start_pressed && on_games_page && start_pressed_device_path.is_none()
+                && let Some(dev) = self.input_devices.get(dev_idx) {
                     start_pressed_device_path = Some(dev.path().to_string());
                 }
-            }
         }
 
         // Inject key events

@@ -515,11 +515,10 @@ pub fn launch_game(
     crate::together::terminate_all(&mut together_handles);
 
     // Teardown audio routing
-    if !virtual_sinks.is_empty() {
-        if let Err(e) = teardown_audio_session(audio_system, &virtual_sinks) {
+    if !virtual_sinks.is_empty()
+        && let Err(e) = teardown_audio_session(audio_system, &virtual_sinks) {
             println!("[splitux] Warning: Audio teardown failed: {}", e);
         }
-    }
 
     Ok(())
 }
@@ -558,11 +557,10 @@ fn setup_audio_routing(
         .iter()
         .enumerate()
         .map(|(i, inst)| {
-            if cfg.audio.enabled {
-                if let Some(target) = cfg.audio.default_assignments.get(&i) {
+            if cfg.audio.enabled
+                && let Some(target) = cfg.audio.default_assignments.get(&i) {
                     return Some(target.clone());
                 }
-            }
             if inst.together {
                 return Some(crate::audio::AUDIO_CAPTURE_SENTINEL.to_string());
             }

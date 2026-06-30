@@ -13,7 +13,7 @@ pub fn is_wayland_session() -> bool {
 use eframe::egui::TextBuffer;
 use rfd::FileDialog;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn msg(title: &str, contents: &str) {
@@ -21,11 +21,10 @@ pub fn msg(title: &str, contents: &str) {
 }
 
 pub fn yesno(title: &str, contents: &str) -> bool {
-    if let Ok(prompt) = dialog::Question::new(contents).title(title).show() {
-        if prompt == Choice::Yes {
+    if let Ok(prompt) = dialog::Question::new(contents).title(title).show()
+        && prompt == Choice::Yes {
             return true;
         }
-    }
     false
 }
 
@@ -34,7 +33,7 @@ pub fn dir_dialog() -> Result<PathBuf, Box<dyn Error>> {
         .set_title("Select Folder")
         .set_directory(&*PATH_HOME)
         .pick_folder()
-        .ok_or_else(|| "No folder selected")?;
+        .ok_or("No folder selected")?;
     Ok(dir)
 }
 
@@ -43,7 +42,7 @@ pub fn file_dialog_relative(base_dir: &PathBuf) -> Result<PathBuf, Box<dyn Error
         .set_title("Select File")
         .set_directory(base_dir)
         .pick_file()
-        .ok_or_else(|| "No file selected")?;
+        .ok_or("No file selected")?;
 
     if file.starts_with(base_dir) {
         let relative_path = file.strip_prefix(base_dir)?;
@@ -53,7 +52,7 @@ pub fn file_dialog_relative(base_dir: &PathBuf) -> Result<PathBuf, Box<dyn Error
     }
 }
 
-pub fn copy_dir_recursive(src: &PathBuf, dest: &PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), Box<dyn Error>> {
     println!(
         "[splitux] util::copy_dir_recursive - src: {}, dest: {}",
         src.display(),
@@ -87,7 +86,7 @@ pub fn copy_dir_recursive(src: &PathBuf, dest: &PathBuf) -> Result<(), Box<dyn E
     Ok(())
 }
 
-pub fn zip_dir(src_dir: &PathBuf, dest: &PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn zip_dir(src_dir: &Path, dest: &Path) -> Result<(), Box<dyn Error>> {
     // Temp, should maybe be done with a crate
     std::process::Command::new("zip")
         .current_dir(src_dir)
@@ -111,15 +110,13 @@ pub fn get_installed_steamapps() -> Vec<Option<steamlocate::App>> {
                 Err(_) => continue,
             };
 
-            for app in library.apps() {
-                if let Ok(app) = app {
-                    games.push(Some(app));
-                }
+            for app in library.apps().flatten() {
+                games.push(Some(app));
             }
         }
     }
 
-    return games;
+    games
 }
 
 /// Get all Steam library folders from libraryfolders.vdf
@@ -154,7 +151,7 @@ fn get_steam_library_folders() -> Vec<PathBuf> {
 }
 
 /// Search for Proton in a directory's common folder
-fn find_proton_in_common(base_path: &PathBuf, proton_name: &str) -> Option<PathBuf> {
+fn find_proton_in_common(base_path: &Path, proton_name: &str) -> Option<PathBuf> {
     let common_path = base_path.join("steamapps/common");
     if let Ok(entries) = std::fs::read_dir(&common_path) {
         for entry in entries.flatten() {
@@ -507,8 +504,7 @@ pub fn check_for_splitux_update() -> bool {
         .get("https://api.github.com/repos/wunnr/splitux/releases/latest")
         .header("User-Agent", "splitux")
         .send()
-    {
-        if let Ok(release) = client.json::<serde_json::Value>() {
+        && let Ok(release) = client.json::<serde_json::Value>() {
             // Extract the tag name (vX.X.X format)
             if let Some(tag_name) = release["tag_name"].as_str() {
                 // Strip the 'v' prefix
@@ -526,7 +522,6 @@ pub fn check_for_splitux_update() -> bool {
                 }
             }
         }
-    }
 
     // Default to false if any part of the process fails
     false
@@ -589,7 +584,7 @@ pub trait OsFmt {
 impl OsFmt for String {
     fn os_fmt(&self, win: bool) -> String {
         if !win {
-            return self.clone();
+            self.clone()
         } else {
             let path_fmt = self.replace("/", "\\");
             format!("Z:{}", path_fmt)
@@ -600,7 +595,7 @@ impl OsFmt for String {
 impl OsFmt for PathBuf {
     fn os_fmt(&self, win: bool) -> String {
         if !win {
-            return self.to_string_lossy().to_string();
+            self.to_string_lossy().to_string()
         } else {
             let path_fmt = self.to_string_lossy().replace("/", "\\");
             format!("Z:{}", path_fmt)

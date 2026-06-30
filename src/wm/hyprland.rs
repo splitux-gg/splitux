@@ -156,8 +156,8 @@ impl HyprlandManager {
         if let Some(arr) = clients.as_array() {
             for client in arr {
                 let class = client["class"].as_str().unwrap_or("");
-                if class.to_lowercase().starts_with("gamescope") {
-                    if let Some(addr) = client["address"].as_str() {
+                if class.to_lowercase().starts_with("gamescope")
+                    && let Some(addr) = client["address"].as_str() {
                         let size = &client["size"];
                         let at = &client["at"];
                         windows.push(WindowInfo {
@@ -169,7 +169,6 @@ impl HyprlandManager {
                             y: at[1].as_i64().unwrap_or(0) as i32,
                         });
                     }
-                }
             }
         }
         Ok(windows)

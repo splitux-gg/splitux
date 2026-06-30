@@ -59,13 +59,13 @@ pub fn get_gamepad_hidraw_devices(
             }
 
             // Method 2: Look for input/event* nodes under device (works for USB controllers)
-            if !found_gamepad {
-                if let Ok(device_entries) = std::fs::read_dir(&device_path) {
+            if !found_gamepad
+                && let Ok(device_entries) = std::fs::read_dir(&device_path) {
                     for dev_entry in device_entries.flatten() {
                         let dev_name = dev_entry.file_name();
                         let dev_str = dev_name.to_string_lossy();
-                        if dev_str.starts_with("input") {
-                            if let Ok(input_entries) = std::fs::read_dir(dev_entry.path()) {
+                        if dev_str.starts_with("input")
+                            && let Ok(input_entries) = std::fs::read_dir(dev_entry.path()) {
                                 for input_entry in input_entries.flatten() {
                                     let input_name = input_entry.file_name();
                                     let input_str = input_name.to_string_lossy();
@@ -79,10 +79,8 @@ pub fn get_gamepad_hidraw_devices(
                                     }
                                 }
                             }
-                        }
                     }
                 }
-            }
 
             // Block this hidraw if it's a gamepad that's NOT assigned to this instance
             if found_gamepad && !is_assigned {

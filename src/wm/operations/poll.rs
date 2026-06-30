@@ -37,7 +37,7 @@ where
             return Ok(count);
         }
 
-        if start.elapsed().as_secs() % 5 == 0 && start.elapsed().as_millis() % 500 < 100 {
+        if start.elapsed().as_secs().is_multiple_of(5) && start.elapsed().as_millis() % 500 < 100 {
             println!(
                 "[splitux] wm::{} - Still waiting... ({}/{} windows)",
                 wm_name, count, expected

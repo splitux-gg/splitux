@@ -113,13 +113,11 @@ impl Splitux {
             save_btn = save_btn.stroke(theme::focus_stroke());
         }
         let save_response = ui.add_sized([ui.available_width(), 24.0], save_btn);
-        if save_response.clicked()
-            || (is_buttons_focused && self.settings_button_index == 0 && self.activate_focused)
-        {
-            if let Err(e) = save_cfg(&self.options) {
+        if (save_response.clicked()
+            || (is_buttons_focused && self.settings_button_index == 0 && self.activate_focused))
+            && let Err(e) = save_cfg(&self.options) {
                 crate::util::msg("Error", &format!("Couldn't save settings: {}", e));
             }
-        }
 
         ui.add_space(4.0);
         ui.separator();

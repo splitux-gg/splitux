@@ -123,8 +123,8 @@ impl Splitux {
         // Option 6: Erase Proton Prefix Data
         let r = self.settings_option_frame(6).show(ui, |ui| {
             let btn = ui.button("Erase All Proton Prefix Data");
-            if btn.clicked() || (self.is_settings_option_focused(6) && self.activate_focused) {
-                if yesno("Erase Prefix?", "This will erase all Proton prefixes. Are you sure?")
+            if (btn.clicked() || (self.is_settings_option_focused(6) && self.activate_focused))
+                && yesno("Erase Prefix?", "This will erase all Proton prefixes. Are you sure?")
                     && PATH_PARTY.join("prefixes").exists()
                 {
                     if let Err(err) = std::fs::remove_dir_all(PATH_PARTY.join("prefixes")) {
@@ -133,7 +133,6 @@ impl Splitux {
                         msg("Data Erased", "Proton prefix data successfully erased.");
                     }
                 }
-            }
         });
         self.scroll_to_settings_option_if_needed(6, &r.response);
 

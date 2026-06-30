@@ -203,12 +203,7 @@ pub fn get_presets_for_count(player_count: usize) -> &'static [&'static LayoutPr
 /// Get a specific preset by ID
 pub fn get_preset_by_id(id: &str) -> Option<&'static LayoutPreset> {
     // Check all preset arrays
-    for preset in PRESETS_2P.iter().chain(PRESETS_3P.iter()).chain(PRESETS_4P.iter()) {
-        if preset.id == id {
-            return Some(preset);
-        }
-    }
-    None
+    PRESETS_2P.iter().chain(PRESETS_3P.iter()).chain(PRESETS_4P.iter()).find(|&preset| preset.id == id).map(|v| v as _)
 }
 
 

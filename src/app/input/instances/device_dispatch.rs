@@ -117,7 +117,7 @@ impl Splitux {
                             continue;
                         }
                         InstanceFocus::StartButton => {
-                            if self.instances.len() > 0 {
+                            if !self.instances.is_empty() {
                                 self.prepare_game_launch();
                             }
                             i += 1;
@@ -238,7 +238,7 @@ impl Splitux {
                             self.instance_focus = InstanceFocus::Devices;
                         }
                         InstanceFocus::LaunchOptions | InstanceFocus::StartButton => {
-                            if self.instances.len() > 0 {
+                            if !self.instances.is_empty() {
                                 self.instance_focus = InstanceFocus::InstanceCard(
                                     self.instances.len() - 1,
                                     InstanceCardFocus::Profile
@@ -264,12 +264,12 @@ impl Splitux {
                             }
                         }
                         InstanceFocus::Devices => {
-                            if self.instance_add_dev != None {
+                            if self.instance_add_dev.is_some() {
                                 self.instance_add_dev = None;
                             } else if self.is_device_in_any_instance(i) {
                                 // kb/mouse join as one unit → X removes the whole player.
                                 self.remove_player_by_device(i);
-                            } else if self.instances.len() < 1 {
+                            } else if self.instances.is_empty() {
                                 self.cur_page = MenuPage::Games;
                                 self.instance_focus = InstanceFocus::Devices;
                             }
@@ -293,14 +293,13 @@ impl Splitux {
                         continue;
                     }
 
-                    if self.instance_add_dev == None {
-                        if let Some((instance, _)) = self.find_device_in_instance(i) {
+                    if self.instance_add_dev.is_none()
+                        && let Some((instance, _)) = self.find_device_in_instance(i) {
                             self.instance_add_dev = Some(instance);
                         }
-                    }
                 }
                 PollResult::Button(PadButton::StartBtn) => {
-                    if self.instances.len() > 0 && self.is_device_in_any_instance(i) {
+                    if !self.instances.is_empty() && self.is_device_in_any_instance(i) {
                         self.prepare_game_launch();
                     }
                 }

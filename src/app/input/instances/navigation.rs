@@ -7,7 +7,7 @@ impl Splitux {
     pub(super) fn handle_instance_up(&mut self) {
         match &self.instance_focus {
             InstanceFocus::LaunchOptions => {
-                if self.instances.len() > 0 {
+                if !self.instances.is_empty() {
                     self.instance_focus = InstanceFocus::InstanceCard(
                         self.instances.len() - 1,
                         InstanceCardFocus::AudioPreference
@@ -87,7 +87,7 @@ impl Splitux {
     pub(super) fn handle_instance_down(&mut self) {
         match &self.instance_focus {
             InstanceFocus::Devices => {
-                if self.instances.len() > 0 {
+                if !self.instances.is_empty() {
                     self.instance_focus = InstanceFocus::InstanceCard(0, InstanceCardFocus::Profile);
                 }
             }
@@ -172,7 +172,7 @@ impl Splitux {
             }
             InstanceFocus::InstanceCard(idx, element) => {
                 if *idx > 0 {
-                    self.instance_focus = InstanceFocus::InstanceCard(idx - 1, element.clone());
+                    self.instance_focus = InstanceFocus::InstanceCard(idx - 1, *element);
                 } else {
                     // Left off the first card → step into the games sidebar.
                     self.enter_games_sidebar();
@@ -195,7 +195,7 @@ impl Splitux {
             }
             InstanceFocus::InstanceCard(idx, element) => {
                 if *idx + 1 < self.instances.len() {
-                    self.instance_focus = InstanceFocus::InstanceCard(idx + 1, element.clone());
+                    self.instance_focus = InstanceFocus::InstanceCard(idx + 1, *element);
                 }
             }
             // Right out of the sidebar returns to the setup content.

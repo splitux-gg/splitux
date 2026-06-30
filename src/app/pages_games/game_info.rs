@@ -324,7 +324,7 @@ impl Splitux {
                             // Open file picker
                             let dest_path = required_mod.dest_full_path(&handler_path);
                             if let Some(file) = FileDialog::new()
-                                .set_title(&format!("Select {} file", required_mod.name))
+                                .set_title(format!("Select {} file", required_mod.name))
                                 .set_directory(&*PATH_HOME)
                                 .add_filter("DLL files", &["dll"])
                                 .add_filter("All files", &["*"])
@@ -411,22 +411,22 @@ impl Splitux {
                 if let Some(readme) = &readme_content {
                     // Simple markdown-ish rendering
                     for line in readme.lines() {
-                        if line.starts_with("# ") {
+                        if let Some(rest) = line.strip_prefix("# ") {
                             ui.add_space(4.0);
-                            ui.label(RichText::new(&line[2..]).strong().size(18.0));
+                            ui.label(RichText::new(rest).strong().size(18.0));
                             ui.add_space(2.0);
-                        } else if line.starts_with("## ") {
+                        } else if let Some(rest) = line.strip_prefix("## ") {
                             ui.add_space(6.0);
-                            ui.label(RichText::new(&line[3..]).strong().size(15.0));
+                            ui.label(RichText::new(rest).strong().size(15.0));
                             ui.add_space(2.0);
-                        } else if line.starts_with("### ") {
+                        } else if let Some(rest) = line.strip_prefix("### ") {
                             ui.add_space(4.0);
-                            ui.label(RichText::new(&line[4..]).strong());
+                            ui.label(RichText::new(rest).strong());
                             ui.add_space(1.0);
-                        } else if line.starts_with("- ") {
+                        } else if let Some(rest) = line.strip_prefix("- ") {
                             ui.horizontal(|ui| {
                                 ui.label("  •");
-                                ui.label(&line[2..]);
+                                ui.label(rest);
                             });
                         } else if line.starts_with("```") {
                             // Skip code fence markers

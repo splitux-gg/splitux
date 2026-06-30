@@ -7,17 +7,11 @@ pub struct PermissionStatus {
     pub denied_count: usize,
     /// Example paths that were denied (for error messages)
     pub denied_paths: Vec<String>,
-    /// Whether udev rules appear to be installed
-    pub rules_installed: bool,
 }
 
 /// Check for permission issues with gamepad devices specifically
 pub fn check_permissions() -> PermissionStatus {
     let mut status = PermissionStatus::default();
-
-    // Check if our udev rules are installed
-    status.rules_installed =
-        std::path::Path::new("/etc/udev/rules.d/99-splitux-gamepads.rules").exists();
 
     // Use udevadm to find actual joystick/gamepad devices
     if let Ok(output) = std::process::Command::new("udevadm")
@@ -31,8 +25,8 @@ pub fn check_permissions() -> PermissionStatus {
         for line in db.lines() {
             if line.starts_with("P: ") {
                 // New device entry - check previous one
-                if is_joystick {
-                    if let Some(ref node) = current_node {
+                if is_joystick
+                    && let Some(ref node) = current_node {
                         let path = format!("/dev/{}", node);
                         match std::fs::File::open(&path) {
                             Ok(_) => {} // Access OK
@@ -45,7 +39,6 @@ pub fn check_permissions() -> PermissionStatus {
                             Err(_) => {} // Other errors are fine
                         }
                     }
-                }
                 current_node = None;
                 is_joystick = false;
             } else if line.starts_with("N: ") && line.contains("input/event") {
@@ -57,8 +50,8 @@ pub fn check_permissions() -> PermissionStatus {
         }
 
         // Check last device
-        if is_joystick {
-            if let Some(ref node) = current_node {
+        if is_joystick
+            && let Some(ref node) = current_node {
                 let path = format!("/dev/{}", node);
                 match std::fs::File::open(&path) {
                     Ok(_) => {}
@@ -71,7 +64,6 @@ pub fn check_permissions() -> PermissionStatus {
                     Err(_) => {}
                 }
             }
-        }
     }
 
     status

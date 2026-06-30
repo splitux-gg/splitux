@@ -112,14 +112,12 @@ impl WindowManagerBackend {
         }
 
         // 2. Check for KWin (via D-Bus or KDE_SESSION_VERSION)
-        if std::env::var("KDE_SESSION_VERSION").is_ok()
-            || std::env::var("KDE_FULL_SESSION").is_ok()
-        {
-            if KWinManager::is_available() {
+        if (std::env::var("KDE_SESSION_VERSION").is_ok()
+            || std::env::var("KDE_FULL_SESSION").is_ok())
+            && KWinManager::is_available() {
                 println!("[splitux] wm - Detected KWin compositor");
                 return Self::KWin(KWinManager::new());
             }
-        }
 
         // 3. Check for Niri (via NIRI_SOCKET env var or niri msg)
         if std::env::var("NIRI_SOCKET").is_ok() || NiriManager::is_available() {
@@ -139,32 +137,26 @@ impl WindowManagerBackend {
         if let Ok(output) = std::process::Command::new("pgrep")
             .args(["-x", "Hyprland"])
             .output()
-        {
-            if output.status.success() && HyprlandManager::is_available() {
+            && output.status.success() && HyprlandManager::is_available() {
                 println!("[splitux] wm - Detected Hyprland via process");
                 return Self::Hyprland(HyprlandManager::new());
             }
-        }
 
         if let Ok(output) = std::process::Command::new("pgrep")
             .args(["-x", "kwin_wayland"])
             .output()
-        {
-            if output.status.success() && KWinManager::is_available() {
+            && output.status.success() && KWinManager::is_available() {
                 println!("[splitux] wm - Detected KWin via process");
                 return Self::KWin(KWinManager::new());
             }
-        }
 
         if let Ok(output) = std::process::Command::new("pgrep")
             .args(["-x", "niri"])
             .output()
-        {
-            if output.status.success() && NiriManager::is_available() {
+            && output.status.success() && NiriManager::is_available() {
                 println!("[splitux] wm - Detected Niri via process");
                 return Self::Niri(NiriManager::new());
             }
-        }
 
         // 6. Default to no WM positioning
         println!("[splitux] wm - No supported WM detected, using Gamescope-only mode");

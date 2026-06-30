@@ -203,17 +203,16 @@ impl Splitux {
             self.show_edit_modal = true;
         }
 
-        if ui.button("Open Folder").clicked() {
-            if let Err(_) = std::process::Command::new("xdg-open")
+        if ui.button("Open Folder").clicked()
+            && let Err(_) = std::process::Command::new("xdg-open")
                 .arg(self.handlers[i].path_handler.clone())
                 .status()
             {
                 msg("Error", "Couldn't open handler folder!");
             }
-        }
 
-        if ui.button("Remove").clicked() {
-            if yesno(
+        if ui.button("Remove").clicked()
+            && yesno(
                 "Remove handler?",
                 &format!(
                     "Are you sure you want to remove {}?",
@@ -233,13 +232,11 @@ impl Splitux {
                     self.selected_handler = 0;
                 }
             }
-        }
 
-        if ui.button("Export").clicked() {
-            if let Err(err) = self.handlers[i].export() {
+        if ui.button("Export").clicked()
+            && let Err(err) = self.handlers[i].export() {
                 println!("[splitux] Failed to export handler: {}", err);
                 msg("Error", &format!("Failed to export handler: {}", err));
             }
-        }
     }
 }

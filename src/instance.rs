@@ -96,8 +96,8 @@ pub fn set_instance_resolutions(
 }
 
 pub fn set_instance_resolutions_multimonitor(
-    instances: &mut Vec<Instance>,
-    monitors: &Vec<Monitor>,
+    instances: &mut [Instance],
+    monitors: &[Monitor],
     cfg: &SplituxConfig,
 ) {
     // The fullscreen preset is keyed by the TOTAL player count (matching the

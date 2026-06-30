@@ -58,8 +58,7 @@ pub fn smart_split_dot_notation(key: &str) -> Vec<&str> {
             let rest = &key[settings_prefix.len()..];
 
             // Check if this is a settings.* key
-            if rest.starts_with("settings.") {
-                let settings_key = &rest["settings.".len()..];
+            if let Some(settings_key) = rest.strip_prefix("settings.") {
                 // Return [backend, "settings", "everything.else.as.one.key"]
                 return vec![backend, "settings", settings_key];
             } else {

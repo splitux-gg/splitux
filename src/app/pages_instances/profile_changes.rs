@@ -30,8 +30,8 @@ impl Splitux {
             if let Some(ref preferred_uniq) = prefs.preferred_controller {
                 if let Some(dev_idx) = find_device_by_uniq(&self.input_devices, preferred_uniq) {
                     if !is_device_assigned(dev_idx, &self.instances) {
-                        if instance_idx < self.instances.len() {
-                            if !self.instances[instance_idx].devices.contains(&dev_idx) {
+                        if instance_idx < self.instances.len()
+                            && !self.instances[instance_idx].devices.contains(&dev_idx) {
                                 self.instances[instance_idx].devices.push(dev_idx);
                                 println!(
                                     "[splitux] Auto-assigned {} to profile '{}'",
@@ -39,7 +39,6 @@ impl Splitux {
                                     profile_name
                                 );
                             }
-                        }
                     } else {
                         self.controller_warnings.push(format!(
                             "{}'s controller ({}) is assigned to another player",

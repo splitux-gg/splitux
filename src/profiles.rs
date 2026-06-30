@@ -113,7 +113,7 @@ share_leaderboards_over_network=0
 pub fn create_profile_gamesave(name: &str, h: &Handler) -> Result<(), Box<dyn Error>> {
     let uid = h.handler_dir_name();
     let path_prof = PATH_PARTY.join("profiles").join(name);
-    let path_gamesave = path_prof.join("gamesaves").join(&uid);
+    let path_gamesave = path_prof.join("gamesaves").join(uid);
     let path_home = path_prof.join("home");
     let path_windata = path_prof.join("windata");
 
@@ -126,9 +126,9 @@ pub fn create_profile_gamesave(name: &str, h: &Handler) -> Result<(), Box<dyn Er
     
     if let Some(appid) = h.steam_appid && h.use_goldberg {
         let path_exec = path_gamesave.join(&h.exec);
-        let path_execdir = path_exec.parent().ok_or_else(|| "couldn't get parent")?;
+        let path_execdir = path_exec.parent().ok_or("couldn't get parent")?;
         if !path_execdir.exists() {
-            std::fs::create_dir_all(&path_execdir)?;
+            std::fs::create_dir_all(path_execdir)?;
         }
         std::fs::write(path_execdir.join("steam_appid.txt"), appid.to_string())?;
     }

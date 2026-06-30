@@ -174,8 +174,8 @@ pub fn ensure_stripped(game_root: &Path, exec_rel: &Path, appid: u32) -> Option<
     }
 
     // NATIVE Linux ELF SteamStub: strip in-process (no Steamless/Proton needed).
-    if let Ok(data) = fs::read(&src) {
-        if data.starts_with(b"\x7fELF") {
+    if let Ok(data) = fs::read(&src)
+        && data.starts_with(b"\x7fELF") {
             if !has_steamstub_elf(&data) {
                 return None; // not wrapped
             }
@@ -186,7 +186,6 @@ pub fn ensure_stripped(game_root: &Path, exec_rel: &Path, appid: u32) -> Option<
             let _ = fs::create_dir_all(&cache_dir);
             return strip_steamstub_elf(&data, &cache).then_some(cache);
         }
-    }
 
     if !has_steamstub(&src) {
         return None; // not wrapped — nothing to strip

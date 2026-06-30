@@ -42,14 +42,14 @@ impl Handler {
                 let mut i = 1;
                 while PATH_PARTY
                     .join("handlers")
-                    .join(&format!("{}-{}", self.name, i))
+                    .join(format!("{}-{}", self.name, i))
                     .exists()
                 {
                     i += 1;
                 }
                 self.path_handler = PATH_PARTY
                     .join("handlers")
-                    .join(&format!("{}-{}", self.name, i));
+                    .join(format!("{}-{}", self.name, i));
             }
         }
 
@@ -73,7 +73,7 @@ impl Handler {
             .set_directory(&*PATH_HOME)
             .add_filter("Splitux Handler Package", &["spx"])
             .save_file()
-            .ok_or_else(|| "File not specified")?;
+            .ok_or("File not specified")?;
 
         if file.extension().is_none() || file.extension() != Some("spx".as_ref()) {
             file.set_extension("spx");

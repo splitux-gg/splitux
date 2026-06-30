@@ -272,38 +272,34 @@ impl Splitux {
 
     /// Navigate up in custom layout mode (find region above current)
     pub(crate) fn navigate_custom_layout_up(&mut self) {
-        if let Some(preset) = self.get_current_preset() {
-            if let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Up) {
+        if let Some(preset) = self.get_current_preset()
+            && let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Up) {
                 self.layout_focused_region = new_region;
             }
-        }
     }
 
     /// Navigate down in custom layout mode
     pub(crate) fn navigate_custom_layout_down(&mut self) {
-        if let Some(preset) = self.get_current_preset() {
-            if let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Down) {
+        if let Some(preset) = self.get_current_preset()
+            && let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Down) {
                 self.layout_focused_region = new_region;
             }
-        }
     }
 
     /// Navigate left in custom layout mode
     pub(crate) fn navigate_custom_layout_left(&mut self) {
-        if let Some(preset) = self.get_current_preset() {
-            if let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Left) {
+        if let Some(preset) = self.get_current_preset()
+            && let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Left) {
                 self.layout_focused_region = new_region;
             }
-        }
     }
 
     /// Navigate right in custom layout mode
     pub(crate) fn navigate_custom_layout_right(&mut self) {
-        if let Some(preset) = self.get_current_preset() {
-            if let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Right) {
+        if let Some(preset) = self.get_current_preset()
+            && let Some(new_region) = find_region_in_direction(preset, self.layout_focused_region, Direction::Right) {
                 self.layout_focused_region = new_region;
             }
-        }
     }
 }
 

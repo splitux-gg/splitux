@@ -61,22 +61,21 @@ pub fn get_profile_save_path(profile_name: &str, h: &Handler) -> (PathBuf, bool)
     // Steam Cloud / Remote Storage games: the profile copy lives where Goldberg
     // emulates remote storage — profiles/<profile>/goldberg-saves/<appid>/remote
     // (matches GseSavePath in build_cmds). The real save is the Steam userdata dir.
-    if h.save_steam_cloud {
-        if let Some(appid) = h.get_steam_appid() {
+    if h.save_steam_cloud
+        && let Some(appid) = h.get_steam_appid() {
             let dest = profile_path
                 .join("goldberg-saves")
                 .join(appid.to_string())
                 .join("remote");
             return (dest, false);
         }
-    }
 
     let original = expand_path(&h.original_save_path);
     let handler_name = get_handler_name(h);
 
     // Check if save path is inside game directory
-    if let Some(game_root) = get_game_root(h) {
-        if let Ok(relative) = original.strip_prefix(&game_root) {
+    if let Some(game_root) = get_game_root(h)
+        && let Ok(relative) = original.strip_prefix(&game_root) {
             // Saves are inside game dir -> goes to gamesaves overlay upperdir
             let dest = profile_path
                 .join("gamesaves")
@@ -84,7 +83,6 @@ pub fn get_profile_save_path(profile_name: &str, h: &Handler) -> (PathBuf, bool)
                 .join(relative);
             return (dest, true);
         }
-    }
 
     // Check if under HOME (Linux native games)
     if let Ok(relative) = original.strip_prefix(&*PATH_HOME) {
@@ -149,11 +147,10 @@ pub fn anchor_steam_id(h: &crate::handler::Handler) -> Option<u64> {
 /// reads/writes the real save in place, exactly like a direct Steam launch.
 /// Falls back to the deterministic per-profile id (multiplayer / no real save).
 pub fn effective_steam_id(h: &crate::handler::Handler, profile_name: &str) -> u64 {
-    if h.save_steam_id_remap {
-        if let Some(id) = anchor_steam_id(h) {
+    if h.save_steam_id_remap
+        && let Some(id) = anchor_steam_id(h) {
             return id;
         }
-    }
     crate::profiles::generate_steam_id(profile_name)
 }
 
@@ -167,13 +164,11 @@ pub fn steam_id_regex() -> Regex {
 /// Returns Some((steam_id, rest_of_filename)) if detected
 pub fn extract_steam_id_from_filename(filename: &str) -> Option<(u64, String)> {
     let re = steam_id_regex();
-    if let Some(caps) = re.captures(filename) {
-        if let (Some(id_match), Some(rest_match)) = (caps.get(1), caps.get(2)) {
-            if let Ok(steam_id) = id_match.as_str().parse::<u64>() {
+    if let Some(caps) = re.captures(filename)
+        && let (Some(id_match), Some(rest_match)) = (caps.get(1), caps.get(2))
+            && let Ok(steam_id) = id_match.as_str().parse::<u64>() {
                 return Some((steam_id, rest_match.as_str().to_string()));
             }
-        }
-    }
     None
 }
 

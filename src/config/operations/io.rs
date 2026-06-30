@@ -13,8 +13,8 @@ pub fn load_photon_ids() -> PhotonAppIds {
 pub fn load_cfg() -> SplituxConfig {
     let path = PATH_PARTY.join("settings.json");
 
-    if let Ok(file) = File::open(path) {
-        if let Ok(mut config) = serde_json::from_reader::<_, SplituxConfig>(BufReader::new(file)) {
+    if let Ok(file) = File::open(path)
+        && let Ok(mut config) = serde_json::from_reader::<_, SplituxConfig>(BufReader::new(file)) {
             // Migrate old enable_kwin_script setting to window_manager
             // If enable_kwin_script is false and window_manager is Auto, set to GamescopeOnly
             if !config.enable_kwin_script && config.window_manager == WindowManagerType::Auto {
@@ -24,7 +24,6 @@ pub fn load_cfg() -> SplituxConfig {
             config.migrate();
             return config;
         }
-    }
 
     // Return default settings if file doesn't exist or has error
     SplituxConfig::default()

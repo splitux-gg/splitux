@@ -85,12 +85,11 @@ impl Splitux {
         let mut remap: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         let mut new_games: Vec<usize> = Vec::new();
         for inst in &self.instances {
-            if let std::collections::hash_map::Entry::Vacant(e) = remap.entry(inst.game) {
-                if let Some(&h) = self.selected_games.get(inst.game) {
+            if let std::collections::hash_map::Entry::Vacant(e) = remap.entry(inst.game)
+                && let Some(&h) = self.selected_games.get(inst.game) {
                     e.insert(new_games.len());
                     new_games.push(h);
                 }
-            }
         }
         // No instances yet → leave selected_games as the picked set.
         if new_games.is_empty() {

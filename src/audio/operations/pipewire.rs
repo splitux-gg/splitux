@@ -359,15 +359,14 @@ pub fn cleanup_sinks(sinks: &[VirtualSink]) -> AudioResult<()> {
 
             if let Err(e) = output {
                 errors.push(format!("module {}: {}", cleanup_id, e));
-            } else if let Ok(o) = output {
-                if !o.status.success() {
+            } else if let Ok(o) = output
+                && !o.status.success() {
                     errors.push(format!(
                         "module {}: {}",
                         cleanup_id,
                         String::from_utf8_lossy(&o.stderr)
                     ));
                 }
-            }
         }
     }
 

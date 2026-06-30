@@ -59,8 +59,8 @@ pub fn find_icon(app_id: u32) -> Option<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&app_cache) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+            if path.is_file()
+                && let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
                     // Skip known non-icon files
                     if filename.starts_with("library_")
                         || filename.starts_with("header")
@@ -69,13 +69,11 @@ pub fn find_icon(app_id: u32) -> Option<PathBuf> {
                         continue;
                     }
 
-                    if let Some(ext) = path.extension() {
-                        if ext == "jpg" || ext == "png" || ext == "ico" {
+                    if let Some(ext) = path.extension()
+                        && (ext == "jpg" || ext == "png" || ext == "ico") {
                             return Some(path);
                         }
-                    }
                 }
-            }
         }
     }
 

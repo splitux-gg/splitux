@@ -403,14 +403,13 @@ pub fn stop_unit_slice(launch_id: &str, game: usize) {
 /// Stop whatever launch slice is currently active (used by exit hooks).
 pub fn stop_active_slice() {
     let slice = ACTIVE_SLICE.lock().ok().and_then(|g| g.clone());
-    if let Some(slice) = slice {
-        if systemd_user_available() {
+    if let Some(slice) = slice
+        && systemd_user_available() {
             println!("[splitux] scope - on-exit: stopping {slice}");
             let _ = Command::new("systemctl")
                 .args(["--user", "stop", &slice])
                 .status();
         }
-    }
     clear_active_slice();
 }
 

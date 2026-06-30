@@ -846,11 +846,10 @@ fn handle_build(app: &mut App, code: KeyCode) {
         }
         KeyCode::Char('p') => {
             let n = app.profiles.len();
-            if let Some(pl) = app.players.get_mut(app.player_cursor) {
-                if n > 0 {
+            if let Some(pl) = app.players.get_mut(app.player_cursor)
+                && n > 0 {
                     pl.profile = (pl.profile + 1) % n;
                 }
-            }
         }
         KeyCode::Char('i') => {
             if let Some(pl) = app.players.get_mut(app.player_cursor) {

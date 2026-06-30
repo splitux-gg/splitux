@@ -66,11 +66,10 @@ pub fn extract_interfaces(bytes: &[u8]) -> Vec<String> {
         let re = Regex::new(patt).expect("valid interface regex");
         for m in re.find_iter(bytes) {
             // Matches are ASCII by construction, so utf8 conversion never fails.
-            if let Ok(s) = std::str::from_utf8(m.as_bytes()) {
-                if seen.insert(s.to_owned()) {
+            if let Ok(s) = std::str::from_utf8(m.as_bytes())
+                && seen.insert(s.to_owned()) {
                     out.push(s.to_owned());
                 }
-            }
         }
     }
     out

@@ -51,9 +51,8 @@ impl RequiredMod {
     /// Check if a filename matches the pattern (supports * wildcard)
     fn matches_pattern(&self, filename: &str) -> bool {
         let pattern = &self.file_pattern;
-        if pattern.starts_with('*') {
+        if let Some(suffix) = pattern.strip_prefix('*') {
             // *.dll -> check if ends with .dll
-            let suffix = &pattern[1..];
             filename.ends_with(suffix)
         } else if pattern.ends_with('*') {
             // prefix* -> check if starts with prefix

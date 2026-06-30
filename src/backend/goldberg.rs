@@ -150,7 +150,7 @@ impl Backend for Goldberg {
         game_root: &Path,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
         // Find Steam API DLLs in the game directory
-        let mut dlls = find_steam_api_dlls(&game_root.to_path_buf())?;
+        let mut dlls = find_steam_api_dlls(game_root)?;
 
         // Filter out NetworkingSockets unless explicitly enabled
         if !self.settings.networking_sockets {
@@ -232,8 +232,8 @@ impl Backend for Goldberg {
         // overlay lowerdir). Returns None when the exe isn't DRM-wrapped.
         // Gate: Windows steamclient games (the original case) OR any native goldberg
         // game (ELF SteamStub is detected cheaply and is a no-op when absent).
-        if self.settings.steamclient || !is_windows {
-            if let Some(appid) = handler.get_steam_appid() {
+        if (self.settings.steamclient || !is_windows)
+            && let Some(appid) = handler.get_steam_appid() {
                 let exec_rel = std::path::Path::new(&handler.exec);
                 if let Some(stripped) = operations::ensure_stripped(game_root, exec_rel, appid) {
                     for overlay in &overlays {
@@ -254,7 +254,6 @@ impl Backend for Goldberg {
                     }
                 }
             }
-        }
 
         Ok(overlays)
     }

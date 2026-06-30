@@ -128,7 +128,7 @@ fn collect_enabled_backends(handler: &Handler) -> Vec<Box<dyn Backend>> {
     }
 
     // Sort by priority (highest first)
-    backends.sort_by(|a, b| b.priority().cmp(&a.priority()));
+    backends.sort_by_key(|b| std::cmp::Reverse(b.priority()));
 
     backends
 }

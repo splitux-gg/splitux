@@ -235,11 +235,10 @@ pub fn list_markers() -> Vec<RuntimeMarker> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(runtime_dir()) {
         for e in entries.flatten() {
-            if let Ok(data) = std::fs::read_to_string(e.path()) {
-                if let Ok(m) = serde_json::from_str::<RuntimeMarker>(&data) {
+            if let Ok(data) = std::fs::read_to_string(e.path())
+                && let Ok(m) = serde_json::from_str::<RuntimeMarker>(&data) {
                     out.push(m);
                 }
-            }
         }
     }
     out

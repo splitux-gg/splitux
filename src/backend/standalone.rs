@@ -71,7 +71,7 @@ impl Backend for Standalone {
     fn create_all_overlays(
         &self,
         _handler: &Handler,
-        instances: &[Instance],
+        _instances: &[Instance],
         global_indices: &[usize],
         _is_windows: bool,
         _game_dir: &Path,
@@ -87,11 +87,11 @@ impl Backend for Standalone {
 
         let mut overlays = Vec::new();
 
-        for i in 0..instances.len() {
+        for (i, &global_index) in global_indices.iter().enumerate() {
             // GLOBAL index in the dir name so two concurrent games don't collide.
             let overlay_dir = PATH_PARTY
                 .join("tmp")
-                .join(format!("standalone-{}", global_indices[i]));
+                .join(format!("standalone-{}", global_index));
 
             // Clean previous overlay
             if overlay_dir.exists() {
@@ -219,11 +219,10 @@ fn find_bepinex_root(base_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Err
     if let Ok(entries) = fs::read_dir(base_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                if path.join("winhttp.dll").exists() && path.join("BepInEx").exists() {
+            if path.is_dir()
+                && path.join("winhttp.dll").exists() && path.join("BepInEx").exists() {
                     return Ok(path);
                 }
-            }
         }
     }
 

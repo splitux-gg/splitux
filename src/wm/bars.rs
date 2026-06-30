@@ -87,11 +87,10 @@ fn spawn_bar(program: &str, args: &[String]) {
         cmd.arg("--").arg(program).args(args);
         // `--user` service registration returns promptly; status() ensures it's
         // registered before we move on (and exit).
-        if let Ok(s) = cmd.status() {
-            if s.success() {
+        if let Ok(s) = cmd.status()
+            && s.success() {
                 return;
             }
-        }
         // systemd-run failed — either systemd-user is unavailable, OR a racer
         // already registered the unit (the bar is up now). Only fall back to a
         // direct spawn if the bar is STILL not running, so we never double it.

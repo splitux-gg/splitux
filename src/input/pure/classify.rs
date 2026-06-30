@@ -7,11 +7,11 @@ use crate::input::types::DeviceType;
 
 /// Classify an evdev device by its supported keys
 pub fn classify_device(supported_keys: Option<&AttributeSetRef<KeyCode>>) -> DeviceType {
-    if supported_keys.map_or(false, |keys| keys.contains(KeyCode::BTN_SOUTH)) {
+    if supported_keys.is_some_and(|keys| keys.contains(KeyCode::BTN_SOUTH)) {
         DeviceType::Gamepad
-    } else if supported_keys.map_or(false, |keys| keys.contains(KeyCode::BTN_LEFT)) {
+    } else if supported_keys.is_some_and(|keys| keys.contains(KeyCode::BTN_LEFT)) {
         DeviceType::Mouse
-    } else if supported_keys.map_or(false, |keys| keys.contains(KeyCode::KEY_SPACE)) {
+    } else if supported_keys.is_some_and(|keys| keys.contains(KeyCode::KEY_SPACE)) {
         DeviceType::Keyboard
     } else {
         DeviceType::Other

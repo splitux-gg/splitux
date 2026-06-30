@@ -24,8 +24,8 @@ pub fn profile_has_existing_saves(profile_name: &str, h: &Handler) -> bool {
 /// Copy a directory recursively with Steam ID remapping in filenames
 /// If original_steam_id is detected in a filename, it's replaced with target_steam_id
 pub fn copy_dir_with_steam_id_remap(
-    src: &PathBuf,
-    dest: &PathBuf,
+    src: &Path,
+    dest: &Path,
     target_steam_id: u64,
 ) -> Result<Option<u64>, Box<dyn Error>> {
     let mut detected_original_id: Option<u64> = None;
@@ -79,7 +79,7 @@ pub fn copy_dir_with_steam_id_remap(
 }
 
 /// Copy a directory recursively (standard copy without remapping)
-pub fn copy_dir_recursive(src: &PathBuf, dest: &PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), Box<dyn Error>> {
     let walk_path = walkdir::WalkDir::new(src).min_depth(1).follow_links(false);
 
     for entry in walk_path {
@@ -165,7 +165,7 @@ mod tests {
 }
 
 /// Backup saves before overwriting
-pub fn backup_saves(path: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
+pub fn backup_saves(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
     let backup_base = PATH_PARTY.join("save_backups");
     std::fs::create_dir_all(&backup_base)?;
 
@@ -207,11 +207,10 @@ pub fn primary_save_size(dir: &Path) -> u64 {
         let name = entry.file_name().to_string_lossy().to_lowercase();
         // Primary save files only — skip rotated backups and run snapshots.
         let is_save = name.starts_with("save") && name.ends_with(".json") && !name.ends_with(".bak");
-        if is_save {
-            if let Ok(md) = entry.metadata() {
+        if is_save
+            && let Ok(md) = entry.metadata() {
                 best = best.max(md.len());
             }
-        }
     }
     best
 }
@@ -262,11 +261,10 @@ pub fn detect_original_steam_id(path: &PathBuf) -> Option<u64> {
         return Some(id);
     }
     for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-        if let Some(filename) = entry.path().file_name().and_then(|f| f.to_str()) {
-            if let Some((steam_id, _)) = extract_steam_id_from_filename(filename) {
+        if let Some(filename) = entry.path().file_name().and_then(|f| f.to_str())
+            && let Some((steam_id, _)) = extract_steam_id_from_filename(filename) {
                 return Some(steam_id);
             }
-        }
     }
     None
 }
@@ -278,8 +276,8 @@ pub fn detect_original_steam_id(path: &PathBuf) -> Option<u64> {
 /// corrupt the save (a contributor to the 400hr loss). Flat / filename-keyed
 /// layouts fall back to the whole-dir remap.
 pub fn copy_canonical_save_to_profile(
-    original_path: &PathBuf,
-    dest: &PathBuf,
+    original_path: &Path,
+    dest: &Path,
     target_steam_id: u64,
 ) -> Result<Option<u64>, Box<dyn Error>> {
     if let Some((id, folder)) = canonical_save_folder(original_path) {

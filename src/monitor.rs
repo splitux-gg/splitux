@@ -41,11 +41,10 @@ fn get_monitors_niri() -> Option<Vec<Monitor>> {
 
     // Sort by logical x position for consistent ordering
     monitors.sort_by_key(|m| {
-        if let Some(info) = obj.get(&m.name) {
-            if let Some(logical) = info.get("logical") {
+        if let Some(info) = obj.get(&m.name)
+            && let Some(logical) = info.get("logical") {
                 return logical.get("x").and_then(|x| x.as_i64()).unwrap_or(0);
             }
-        }
         0
     });
 
@@ -116,11 +115,10 @@ impl Monitor {
         };
 
         // Try Wayland format: last segment after " - " that looks like a connector
-        if self.name.contains(" - ") {
-            if let Some(connector) = self.name.rsplit(" - ").find(|s| is_connector(s)) {
+        if self.name.contains(" - ")
+            && let Some(connector) = self.name.rsplit(" - ").find(|s| is_connector(s)) {
                 return connector;
             }
-        }
 
         // Try X11 format: first token before space
         self.name.split_whitespace().next().unwrap_or(&self.name)

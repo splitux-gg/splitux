@@ -25,8 +25,8 @@ pub fn find_eos_dlls(game_dir: &Path) -> Result<Vec<EosDll>, Box<dyn std::error:
                 || filename_lower == "eossdk-win32-shipping.dll"
                 || filename_lower == "libeossdk-linux-shipping.so";
 
-            if is_eos_dll {
-                if let Ok(rel_path) = path.strip_prefix(game_dir) {
+            if is_eos_dll
+                && let Ok(rel_path) = path.strip_prefix(game_dir) {
                     let is_64bit = filename_lower.contains("64")
                         || filename_lower.contains("linux");
 
@@ -40,7 +40,6 @@ pub fn find_eos_dlls(game_dir: &Path) -> Result<Vec<EosDll>, Box<dyn std::error:
                         if is_64bit { "64-bit" } else { "32-bit" }
                     );
                 }
-            }
         }
     }
 

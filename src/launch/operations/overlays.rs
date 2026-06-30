@@ -18,7 +18,7 @@ use crate::paths::PATH_PARTY;
 /// 5. Upper dir - per-profile save data (read-write)
 pub fn fuse_overlayfs_mount_gamedirs(
     handlers: &[Handler],
-    instances: &Vec<Instance>,
+    instances: &[Instance],
     backend_overlays: &[Vec<PathBuf>],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_dir = crate::paths::launch_tmp_dir();
@@ -44,7 +44,7 @@ pub fn fuse_overlayfs_mount_gamedirs(
         let gamename = h.handler_dir_name().to_string();
 
         // Apply this game's patches the first time we see the game, then reuse.
-        if !patches_by_game.contains_key(&instance.game) {
+        if let std::collections::hash_map::Entry::Vacant(e) = patches_by_game.entry(instance.game) {
             let computed = if !h.game_patches.is_empty() {
                 let patches_dir = tmp_dir.join(format!("game-patches-g{}", instance.game));
                 // Clear any previous patches for this game.
@@ -57,7 +57,7 @@ pub fn fuse_overlayfs_mount_gamedirs(
             } else {
                 None
             };
-            patches_by_game.insert(instance.game, computed);
+            e.insert(computed);
         }
         let patches_overlay = &patches_by_game[&instance.game];
 

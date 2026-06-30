@@ -32,11 +32,10 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
             {
                 if let Ok(rel_path) = path.strip_prefix(game_dir) {
                     let is_64bit = detect_bitness(path, &filename_lower);
-                    if is_64bit {
-                        if let Some(dir) = rel_path.parent() {
+                    if is_64bit
+                        && let Some(dir) = rel_path.parent() {
                             dirs_with_64bit_steam_api.push(dir.to_path_buf());
                         }
-                    }
                     dlls.push(SteamApiDll {
                         rel_path: rel_path.to_path_buf(),
                         is_64bit,
@@ -50,11 +49,10 @@ pub fn find_steam_api_dlls(game_dir: &Path) -> Result<Vec<SteamApiDll>, Box<dyn 
                 }
             }
             // GameNetworkingSockets.dll - defer bitness detection
-            else if filename_lower == "gamenetworkingsockets.dll" {
-                if let Ok(rel_path) = path.strip_prefix(game_dir) {
+            else if filename_lower == "gamenetworkingsockets.dll"
+                && let Ok(rel_path) = path.strip_prefix(game_dir) {
                     networking_sockets_paths.push((path.to_path_buf(), rel_path.to_path_buf()));
                 }
-            }
         }
     }
 

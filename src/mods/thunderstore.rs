@@ -160,11 +160,10 @@ fn get_cached_version(cache_base: &Path, community: &str, package: &str) -> Opti
     // Find version directories
     if let Ok(entries) = fs::read_dir(&package_dir) {
         for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                if let Some(version) = entry.file_name().to_str() {
+            if entry.path().is_dir()
+                && let Some(version) = entry.file_name().to_str() {
                     return Some(version.to_string());
                 }
-            }
         }
     }
 
@@ -223,8 +222,8 @@ pub fn fetch_bepinex_pack(
     }
 
     // Check if we have an older version cached
-    if let Some(cached_version) = get_cached_version(cache_base, community, package) {
-        if cached_version != latest_version {
+    if let Some(cached_version) = get_cached_version(cache_base, community, package)
+        && cached_version != latest_version {
             eprintln!(
                 "[mods] Updating {}: {} -> {}",
                 package, cached_version, latest_version
@@ -237,7 +236,6 @@ pub fn fetch_bepinex_pack(
                 .join(&cached_version);
             fs::remove_dir_all(&old_cache).ok();
         }
-    }
 
     // Download and extract latest
     eprintln!(

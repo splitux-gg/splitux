@@ -35,7 +35,7 @@ pub fn scan_handlers() -> Vec<Handler> {
             }
         }
     }
-    out.sort_by(|a, b| a.display().to_lowercase().cmp(&b.display().to_lowercase()));
+    out.sort_by_key(|a| a.display().to_lowercase());
     out
 }
 
@@ -73,7 +73,7 @@ pub fn import_handler() -> Result<(), Box<dyn Error>> {
     fileclone.set_extension("");
     let name = fileclone
         .file_name()
-        .ok_or_else(|| "No filename")?
+        .ok_or("No filename")?
         .to_string_lossy();
 
     let path = {
@@ -83,12 +83,12 @@ pub fn import_handler() -> Result<(), Box<dyn Error>> {
             let mut i = 1;
             while PATH_PARTY
                 .join("handlers")
-                .join(&format!("{}-{}", name, i))
+                .join(format!("{}-{}", name, i))
                 .exists()
             {
                 i += 1;
             }
-            dir_handlers.join(&format!("{}-{}", name, i))
+            dir_handlers.join(format!("{}-{}", name, i))
         }
     };
 
