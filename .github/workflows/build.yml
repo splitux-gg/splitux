@@ -37,7 +37,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    runs-on: [self-hosted, Linux, X64, splitux]
+    # 2026-07-03: moved off the shared bare-metal `splitux` fleet onto a
+    # dedicated ephemeral, per-repo container runner (Phase 2 of the
+    # org-wide containerization pilot - see ~/ssh-workspace/ci-runners/README.md
+    # on the lab). gamescope-splitux and gbe_fork-splitux's Linux jobs keep
+    # using the shared `splitux` label, completely unaffected.
+    runs-on: [self-hosted, Linux, X64, splitux-ci]
     needs: [cleanup-nightly]
     if: always() && (needs.cleanup-nightly.result == 'success' || needs.cleanup-nightly.result == 'skipped')
 
@@ -339,7 +344,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-flatpak:
-    runs-on: [self-hosted, Linux, X64, splitux]
+    # Same dedicated ephemeral runner as `build` above. This job's
+    # flatpak-builder step runs a nested bubblewrap sandbox internally - the
+    # ephemeral container it runs in needs --cap-add SYS_ADMIN
+    # --security-opt unmask=ALL at launch (set in the poller's systemd unit
+    # on the lab) or bwrap's own proc mount is rejected.
+    runs-on: [self-hosted, Linux, X64, splitux-ci]
     needs: [build]
     if: always() && needs.build.result == 'success'
 
