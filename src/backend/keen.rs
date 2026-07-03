@@ -139,8 +139,8 @@ impl Backend for Keen {
         let child = Command::new(&bin)
             .env("KEEN_ADDR", &self.settings.addr)
             .env("KEEN_DATA_FILE", &data_file)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()?;
 
         // Give the emu a moment to bind and write the data file before any game
