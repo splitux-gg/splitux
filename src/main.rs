@@ -75,9 +75,24 @@ fn main() -> eframe::Result {
     }
 
     // Headless CLI: if a subcommand was given, handle it and exit before any GUI
-    // or process-scoping setup. No subcommand → fall through to the GUI.
+    // or process-scoping setup. No subcommand → fall through to the GUI. This
+    // also covers `splitux <subcommand> --help`/`--version` via clap's own
+    // per-subcommand help, so those must NOT be intercepted by the top-level
+    // checks below.
     if let Some(code) = cli::run_if_cli() {
         std::process::exit(code);
+    }
+
+    // Top-level `--help`/`--version` (GUI-mode invocation, no subcommand): handle
+    // before any scope re-exec / monitor probing side effects, so both are
+    // instant and side-effect-free like every other CLI tool.
+    if std::env::args().any(|arg| arg == "--help" || arg == "-h") {
+        println!("{}", USAGE_TEXT);
+        std::process::exit(0);
+    }
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("splitux {}", env!("SPLITUX_VERSION"));
+        std::process::exit(0);
     }
 
     // Re-exec into a dedicated systemd scope so every process we launch lives in
@@ -105,11 +120,6 @@ fn main() -> eframe::Result {
     }
 
     let args: Vec<String> = std::env::args().collect();
-
-    if std::env::args().any(|arg| arg == "--help") {
-        println!("{}", USAGE_TEXT);
-        std::process::exit(0);
-    }
 
     if std::env::args().any(|arg| arg == "--kwin") {
         use crate::wm::{KWinManager, NestedSession};
@@ -283,14 +293,24 @@ fn main() -> eframe::Result {
     )
 }
 
-static USAGE_TEXT: &str = r#"
-{}
-Usage: splitux [OPTIONS]
+static USAGE_TEXT: &str = r#"Usage: splitux [OPTIONS]
+       splitux <COMMAND> [ARGS]
 
-Options:
+Run with no options to open the GUI.
+
+GUI options:
     --exec <executable>   Execute the specified executable in splitscreen. If this isn't specified, Splitux will launch in the regular GUI mode.
     --args [args]         Specify arguments for the executable to be launched with. Must be quoted if containing spaces.
     --fullscreen          Start the GUI in fullscreen mode
     --kwin                Launch Splitux inside of a nested KWin session
     --hyprland            Launch Splitux inside of a nested Hyprland session
+    -h, --help            Print this help
+    -V, --version         Print version
+
+Commands (headless CLI / TUI — run `splitux <command> --help` for details):
+    list <what>           Inspect the machine: games, profiles, inputs, monitors, layouts
+    launch                Launch a full session headlessly (no GUI)
+    save-session          Save a session as a reusable, pinned template
+    tui                   Interactive terminal UI (keyboard-driven GUI replacement)
+    completions <shell>   Print a shell completion script
 "#;
