@@ -540,25 +540,17 @@ pub fn launch_cmds(
 
             // Get gamepad paths for this instance
             let mut gamepad_paths = bwrap::get_assigned_gamepad_paths(input_devices, &instance.devices);
-            // Remote seats set to Gamepad input contribute their virtual pad, so
-            // the game's SDL reads the friend's controller. Kb+Mouse seats add no
-            // pad (no phantom controller for a pad-based game). A local-split
-            // instance carries several gamepad seats → several pads on one game.
-            //
-            // EXCEPTION — EOS games: a session JOIN only completes once the game
-            // has a device-backed local player. UE CommonUser binds a UserIdx on
-            // a "controller connection changed" event; a Kb+Mouse seat is injected
-            // by gamescope and exposes NO input device, so the joiner never binds a
-            // local player and the EOS join silently aborts to the menu (E007) —
-            // the game receives JoinSession=EOS_Success but then makes no further
-            // EOS calls and never travels. The seat-streamer always creates a
-            // virtual pad (wait_for_seat_devices requires pad+kbd+mouse), so for
-            // EOS games we wire it in for Kb+Mouse seats too: it gives the joiner
-            // the controller-connection it needs to bind a local player while
-            // keyboard/mouse still drive gameplay via gamescope injection.
-            let wire_seat_pads = instance.together_input
-                == crate::instance::TogetherInput::Gamepad
-                || h.has_eos();
+            // Every together seat wires its virtual pad — the remote player drives
+            // whichever device they actually have (browser gamepad → pad, keys/touch
+            // → gamescope-injected kbd/mouse) without the seat type pre-deciding it.
+            // This also keeps EOS games working: a session JOIN only completes once
+            // the game binds a UserIdx on a "controller connection changed" event,
+            // so a seat with no pad device silently aborts the join to the menu
+            // (E007). The seat-streamer always creates the pad; wiring it costs a
+            // dormant controller at worst. (Formerly gated on TogetherInput::Gamepad
+            // — a phantom-controller precaution that in practice just made kbm seats
+            // padless; per 2026-07-02 directive all input goes to all together seats.)
+            let wire_seat_pads = !seats.is_empty();
             if wire_seat_pads {
                 for seat in seats {
                     if let Some(pad) = &seat.pad {
