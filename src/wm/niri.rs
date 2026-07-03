@@ -12,6 +12,7 @@ struct NiriWindow {
     id: u64,
     app_id: String,
     is_floating: bool,
+    pid: Option<u64>,
 }
 
 /// Whether `pid`'s process is a gamescope binary. Used to identify gamescope
@@ -27,13 +28,34 @@ fn pid_is_gamescope(pid: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// Which instance (index into `ctx.instances`) owns `pid`, via its dedicated
+/// systemd scope (`splitux-<launch_ns>-g<game>-i<idx>.scope` — see
+/// `launch::operations::scope::wrap_command`). This is what makes "window i
+/// belongs to instance i" an actual invariant rather than an assumption about
+/// spawn order: a gamescope-bypassed instance's native Wayland surface can
+/// appear in niri's window list before or after a nested gamescope instance's
+/// surface, so list position alone can't be trusted once a launch mixes both
+/// kinds of instance. `None` when scoping is disabled or no instance's scope
+/// owns this pid (caller falls back to positional order in that case).
+fn resolve_window_instance(ctx: &LayoutContext, pid: u64) -> Option<usize> {
+    if !crate::launch::scope::enabled() {
+        return None;
+    }
+    let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+    let ns = crate::paths::launch_ns();
+    ctx.instances.iter().enumerate().find_map(|(i, inst)| {
+        let unit = format!("splitux-{ns}-g{}-i{i}.scope", inst.game);
+        cgroup.contains(&unit).then_some(i)
+    })
+}
+
 pub struct NiriManager {
     target_monitor: Option<String>,
     bar_manager: StatusBarManager,
-    /// Set from `LayoutContext::no_gamescope` in `setup`. When true the launch
-    /// bypassed gamescope (single local seat) and the game window is a plain
-    /// host surface, so window matching relaxes the gamescope marker and
-    /// positioning misses are non-fatal.
+    /// Set from `LayoutContext::no_gamescope` in `setup`. When true, at least
+    /// one instance in this launch bypassed gamescope, so window matching
+    /// relaxes the gamescope marker (falling back to scope ownership) and
+    /// positioning misses are non-fatal for the whole launch.
     no_gamescope: bool,
 }
 
@@ -152,8 +174,12 @@ impl NiriManager {
         Err(format!("Monitor '{}' not found after {} retries", connector_name, max_retries).into())
     }
 
-    /// Get list of gamescope windows belonging to THIS launch.
-    fn get_gamescope_windows(&self) -> WmResult<Vec<NiriWindow>> {
+    /// Get list of gamescope windows belonging to THIS launch, ordered to match
+    /// `ctx.instances` (window i ↔ instance i) via each window's owning scope —
+    /// see [`resolve_window_instance`]. Windows whose owning instance can't be
+    /// resolved (scoping disabled) keep their original relative order, so
+    /// behavior is unchanged for launches that were never scope-identifiable.
+    fn get_gamescope_windows(&self, ctx: &LayoutContext) -> WmResult<Vec<NiriWindow>> {
         let response = self.niri_msg(&["windows"])?;
         let windows: serde_json::Value = serde_json::from_str(&response)
             .map_err(|e| format!("Failed to parse windows: {}", e))?;
@@ -189,11 +215,14 @@ impl NiriManager {
                 // backed by a gamescope binary is ours regardless of app_id.
                 let pid = win["pid"].as_u64();
                 let pid_is_gs = pid.is_some_and(pid_is_gamescope);
-                // Gamescope-bypass launch: the game runs directly under niri with
-                // NO gamescope process, so the gamescope marker never matches.
-                // Ownership alone (the window's pid is in our launch scope) then
-                // identifies our window — there's exactly one instance in this
-                // mode, so the scoped match can't grab anything but the game.
+                // Gamescope-bypass instance: that instance's game runs directly
+                // under niri with NO gamescope process, so the gamescope marker
+                // never matches its window. Ownership alone (the window's pid is
+                // in our launch scope) identifies it instead — safe even in a
+                // mixed launch (bypass + nested gamescope side by side) because
+                // this only widens the candidate set to "every window in our
+                // scope"; the sort below (`resolve_window_instance`) is what
+                // actually attributes each window to its owning instance.
                 // Requires `scoped` (else `is_mine` is unconditionally true and
                 // we'd grab every window on the desktop).
                 let is_gamescope = (self.no_gamescope && scoped)
@@ -205,10 +234,16 @@ impl NiriManager {
                             id,
                             app_id: app_id.to_string(),
                             is_floating: win["is_floating"].as_bool().unwrap_or(false),
+                            pid,
                         });
                     }
             }
         }
+        result.sort_by_key(|w| {
+            w.pid
+                .and_then(|pid| resolve_window_instance(ctx, pid))
+                .unwrap_or(usize::MAX)
+        });
         Ok(result)
     }
 
@@ -371,7 +406,7 @@ impl NiriManager {
 
     /// Position all gamescope windows according to layout using tiled mode
     fn position_windows(&self, ctx: &LayoutContext) -> WmResult<()> {
-        let windows = self.get_gamescope_windows()?;
+        let windows = self.get_gamescope_windows(ctx)?;
         if windows.is_empty() {
             return Err("No gamescope windows found".into());
         }
@@ -466,7 +501,7 @@ impl NiriManager {
         }
 
         // Step 2: Apply tiling plan — re-fetch windows after tiling changes
-        let windows = self.get_gamescope_windows()?;
+        let windows = self.get_gamescope_windows(ctx)?;
 
         for (col_idx, column) in plan.columns.iter().enumerate() {
             let width = format!("{}%", column.width_percent);
@@ -642,7 +677,7 @@ impl WindowManager for NiriManager {
             if let Err(e) = crate::wm::operations::poll::wait_for_windows(
                 "niri",
                 expected_count,
-                || self.get_gamescope_windows().unwrap_or_default().len(),
+                || self.get_gamescope_windows(ctx).unwrap_or_default().len(),
             ) {
                 println!(
                     "[splitux] wm::niri - game window not matched ({e}); leaving placement to \
@@ -658,7 +693,7 @@ impl WindowManager for NiriManager {
 
         println!("[splitux] wm::niri - Waiting for gamescope windows...");
         crate::wm::operations::poll::wait_for_windows("niri", expected_count, || {
-            self.get_gamescope_windows().unwrap_or_default().len()
+            self.get_gamescope_windows(ctx).unwrap_or_default().len()
         })?;
 
         self.position_windows(ctx)

@@ -241,17 +241,39 @@ pub fn launch_game(
     println!("[splitux] Layout: instance_to_region = {:?}", instance_to_region);
 
     // Gamescope-bypass: mirror build_cmds' per-instance decision EXACTLY so the WM
-    // agrees with the command that was actually built. build_cmds gates on the
+    // agrees with the commands that were actually built. build_cmds gates on the
     // instance's resolved seat list being empty (`seats.is_empty()`), NOT on
     // `inst.together` — a together instance whose seat-streamer failed to spawn
     // has an empty seat list, so build_cmds bypasses gamescope; if we keyed off
     // `inst.together` here instead, the WM would wait for a gamescope window that
-    // was never created and the LaunchGuard would kill the running game. Use the
-    // same seat-list emptiness (instance 0, since this only engages for len==1).
-    let no_gamescope = instances.len() == 1
-        && together_devices.first().map(|s| s.is_empty()).unwrap_or(true)
-        && !handlers[instances[0].game].disable_bwrap
-        && handlers[instances[0].game].effective_disable_gamescope(cfg);
+    // was never created and the LaunchGuard would kill the running game.
+    //
+    // Computed per instance (same monitor-sharing rule as build_cmds' bypass_gamescope):
+    // a mixed launch — e.g. one local instance alone on its own monitor plus a
+    // together instance on another — bypasses gamescope for the local instance
+    // only. `no_gamescope` (used by the WM to relax window matching and to pick
+    // the best-effort — vs hard-fail — wait/position path) is true whenever ANY
+    // instance bypasses: the WM's per-window ownership resolution (see
+    // `wm::niri::resolve_window_instance`) then sorts out which window belongs to
+    // which instance, so relaxing matching for the whole launch is safe. This does
+    // mean a mixed launch never takes the strict hard-fail path even for its
+    // gamescope-backed instances — an intentional trade toward "never kill a
+    // running game over a WM positioning miss" (see the soft-path comment below).
+    let mon_instance_counts: Vec<usize> = {
+        let max_monitor = instances.iter().map(|inst| inst.monitor).max().unwrap_or(0);
+        let mut counts = vec![0usize; max_monitor + 1];
+        for inst in instances.iter() {
+            counts[inst.monitor] += 1;
+        }
+        counts
+    };
+    let no_gamescope = instances.iter().enumerate().any(|(i, inst)| {
+        let h = &handlers[inst.game];
+        h.effective_disable_gamescope(cfg)
+            && mon_instance_counts[inst.monitor] == 1
+            && together_devices.get(i).map(|s| s.is_empty()).unwrap_or(true)
+            && !h.disable_bwrap
+    });
 
     let ctx = LayoutContext {
         instances: instances.to_vec(),

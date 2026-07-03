@@ -38,12 +38,15 @@ pub struct LayoutContext {
     /// Maps spawn index to region index (for custom layout ordering)
     /// e.g., [1, 0] means window 0 goes to region 1, window 1 goes to region 0
     pub instance_to_region: Vec<usize>,
-    /// The launch is bypassing the nested gamescope compositor for a single
-    /// local seat (`cfg.disable_gamescope`). The game window is then a plain
-    /// host-compositor surface, NOT a gamescope window, so the niri backend
-    /// matches our scoped window without requiring the gamescope marker and
-    /// never hard-aborts the launch on a positioning miss (the game is already
-    /// rendering — placement is best-effort). No effect on the normal path.
+    /// At least one instance in this launch is bypassing the nested gamescope
+    /// compositor (`cfg.disable_gamescope`) — e.g. a local instance alone on its
+    /// own monitor, possibly alongside a together instance elsewhere that still
+    /// needs gamescope for its PipeWire capture. A bypassed instance's game
+    /// window is a plain host-compositor surface, NOT a gamescope window, so the
+    /// niri backend relaxes matching to scoped-ownership instead of requiring the
+    /// gamescope marker, and never hard-aborts the launch on a positioning miss
+    /// (the game is already rendering — placement is best-effort). No effect on
+    /// a launch where every instance keeps its nested gamescope.
     pub no_gamescope: bool,
 }
 

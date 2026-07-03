@@ -90,6 +90,19 @@ pub fn launch_cmds(
 
     let mut cmds: Vec<(Command, usize)> = Vec::new();
 
+    // How many instances share each monitor index — used below to decide
+    // gamescope-bypass PER INSTANCE rather than for the launch as a whole, so
+    // a local instance alone on its own monitor can bypass even in a mixed
+    // launch that also has a together instance (on a different monitor).
+    let mon_instance_counts: Vec<usize> = {
+        let max_monitor = instances.iter().map(|inst| inst.monitor).max().unwrap_or(0);
+        let mut counts = vec![0usize; max_monitor + 1];
+        for inst in instances.iter() {
+            counts[inst.monitor] += 1;
+        }
+        counts
+    };
+
     for (i, instance) in instances.iter().enumerate() {
         // This instance's unit handler. Single-game: always handlers[0].
         let h = &handlers[instance.game];
@@ -149,16 +162,22 @@ pub fn launch_cmds(
         let seats: &[crate::together::TogetherSeatDevices] =
             together_devices.get(i).map(Vec::as_slice).unwrap_or(&[]);
 
-        // Gamescope-bypass (cfg.disable_gamescope): run a single LOCAL seat
-        // directly under the host compositor, with NO nested gamescope. ONLY for
-        // a lone, non-together, bwrap'd instance — split-screen needs gamescope's
-        // per-instance geometry and together needs its PipeWire capture, so those
-        // always keep the nested compositor. Removes the double-compositor
-        // scan-line artifact on high-refresh panels (see SplituxConfig docs). The
-        // game inherits the session's X display (Xwayland-satellite), so its wine
-        // display driver is unchanged — only the redundant compositor is dropped.
+        // Gamescope-bypass (cfg.disable_gamescope): run a LOCAL seat directly
+        // under the host compositor, with NO nested gamescope. Decided PER
+        // INSTANCE (by monitor, not by launch-wide instance count): safe only
+        // when this instance doesn't share its monitor with another instance
+        // (same-monitor split-screen needs gamescope's per-instance geometry)
+        // and this instance itself has no together seats (together needs
+        // PipeWire capture, which requires the nested compositor). A mixed
+        // launch — e.g. one local instance fullscreen on its own monitor plus
+        // a together instance on another — lets the local instance bypass
+        // while the together instance keeps nested gamescope. Removes the
+        // double-compositor scan-line artifact on high-refresh panels (see
+        // SplituxConfig docs). The game inherits the session's X display
+        // (Xwayland-satellite), so its wine display driver is unchanged —
+        // only the redundant compositor is dropped.
         let bypass_gamescope = h.effective_disable_gamescope(cfg)
-            && instances.len() == 1
+            && mon_instance_counts[instance.monitor] == 1
             && seats.is_empty()
             && !h.disable_bwrap;
         if bypass_gamescope {
@@ -193,8 +212,15 @@ pub fn launch_cmds(
             cmd.env(k, v);
         }
 
-        // Proton debug logging
+        // Proton debug logging. PROTON_LOG_DIR is set per-instance because
+        // Proton's default log path ($HOME/steam-<appid>.log) is keyed only by
+        // SteamAppId — with 2+ concurrent instances of the SAME game, they all
+        // open the same path in truncate mode and clobber each other's log,
+        // making a real per-instance failure look like a near-empty log.
         cmd.env("PROTON_LOG", "1");
+        let path_protonlog = crate::paths::launch_tmp_dir().join(format!("proton-log-{}", i));
+        std::fs::create_dir_all(&path_protonlog)?;
+        cmd.env("PROTON_LOG_DIR", &path_protonlog);
         cmd.env("WINEDEBUG", "trace+dinput,trace+xinput");
         cmd.env("PROTON_USE_XALIA", "0");
 
