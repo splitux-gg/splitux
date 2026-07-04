@@ -585,7 +585,9 @@ pub fn launch_cmds(
                 }
             }
             if !gamepad_paths.is_empty() {
-                println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(","));
+                // Colon-joined to match what setup_sdl_env actually exports
+                // (SDL's SDL_JOYSTICK_DEVICE list separator is ':').
+                println!("[splitux] Instance {}: SDL_JOYSTICK_DEVICE={}", i, gamepad_paths.join(":"));
             }
 
             // Set up SDL environment inside container. This must run whenever this

@@ -39,9 +39,15 @@ pub fn setup_sdl_env(cmd: &mut Command, gamepad_paths: &[String]) {
     cmd.args(["--setenv", "SDL_JOYSTICK_DEBUG", "1"]);
     cmd.args(["--setenv", "SDL_LOGGING", "debug"]);
 
-    // Set the specific gamepad device(s) for this instance
+    // Set the specific gamepad device(s) for this instance. SDL2 parses
+    // SDL_JOYSTICK_DEVICE as a COLON-separated list (PATH-style; see SDL's
+    // LINUX_JoystickInit) — a comma-joined list is read as one bogus path.
+    // SDL games masked this (they also enumerate udev on their own), but
+    // Brotato's custom Godot treats this var as the authoritative pad list:
+    // with the comma list it open()s the literal joined string, gets ENOENT,
+    // and ends up with ZERO pads (2-seat local-split Brotato regression).
     if !gamepad_paths.is_empty() {
-        cmd.args(["--setenv", "SDL_JOYSTICK_DEVICE", &gamepad_paths.join(",")]);
+        cmd.args(["--setenv", "SDL_JOYSTICK_DEVICE", &gamepad_paths.join(":")]);
     }
 }
 
