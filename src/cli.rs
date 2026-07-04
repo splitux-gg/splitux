@@ -89,7 +89,10 @@ enum Command {
         game: Vec<String>,
         /// One player per flag, repeatable. Comma-separated `key=val`:
         ///   profile=<name>   profile to run as (default: Guest; see `list profiles`)
-        ///   input=<spec>     local:kbm | local:gamepad | together:kbm | together:gamepad
+        ///   input=<spec>     local:kbm | local:gamepad | together
+        ///                    (a together seat streams kb/m AND gamepad to the
+        ///                    remote player, so it takes no flavor;
+        ///                    together:kbm / together:gamepad are aliases)
         ///   game=<name>      which --game this player belongs to (multi-game only;
         ///                    omit when there's a single game)
         /// e.g. --player profile=Gabe,input=local:kbm
@@ -162,6 +165,9 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Manage saved session templates (the entries `save-session` creates).
+    #[command(subcommand)]
+    Template(TemplateCmd),
     /// Interactive terminal UI: pick a game, assign profiles/inputs, launch, and
     /// watch / kill / restart running sessions (a keyboard-driven GUI replacement).
     Tui,
@@ -170,6 +176,24 @@ enum Command {
         /// Target shell.
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateCmd {
+    /// List saved templates (id · name · game · players).
+    List,
+    /// Delete a template by id or (unambiguous) name.
+    Delete {
+        /// Template id (e.g. "brotato|Josh,Justin") or its display name.
+        target: String,
+    },
+    /// Rename a template.
+    Rename {
+        /// Template id or its current (unambiguous) display name.
+        target: String,
+        /// The new display name.
+        new_name: String,
     },
 }
 
@@ -222,7 +246,8 @@ pub fn run_if_cli() -> Option<i32> {
     let first = std::env::args().nth(1);
     if !matches!(
         first.as_deref(),
-        Some("list") | Some("launch") | Some("save-session") | Some("completions") | Some("tui")
+        Some("list") | Some("launch") | Some("save-session") | Some("template") | Some("completions")
+            | Some("tui")
     ) {
         return None;
     }
@@ -259,6 +284,7 @@ pub fn run_if_cli() -> Option<i32> {
             save_sync_back,
             name,
         } => save_session(&game, &players, master, save_sync_back, name),
+        Command::Template(cmd) => template_cmd(cmd),
         Command::Tui => crate::tui::run(),
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "splitux", &mut std::io::stdout());
@@ -636,6 +662,90 @@ fn save_session(
     0
 }
 
+/// Resolve a template by exact id, else by case-insensitive display name.
+/// Errors (with a message printed) on no match or an ambiguous name.
+fn find_template(sessions: &[session_store::SavedSession], target: &str) -> Result<String, ()> {
+    if let Some(s) = sessions.iter().find(|s| s.id == target) {
+        return Ok(s.id.clone());
+    }
+    let by_name: Vec<&session_store::SavedSession> = sessions
+        .iter()
+        .filter(|s| s.name.eq_ignore_ascii_case(target))
+        .collect();
+    match by_name.len() {
+        1 => Ok(by_name[0].id.clone()),
+        0 => {
+            eprintln!("[splitux] no template with id or name '{target}' — run `splitux template list`.");
+            Err(())
+        }
+        n => {
+            eprintln!(
+                "[splitux] name '{target}' is ambiguous ({n} templates) — use the id instead:"
+            );
+            for s in by_name {
+                eprintln!("  {}", s.id);
+            }
+            Err(())
+        }
+    }
+}
+
+/// `splitux template list|delete|rename` — manage sessions.json entries. Same
+/// store the GUI/TUI/save-session use, so every surface sees changes instantly.
+fn template_cmd(cmd: TemplateCmd) -> i32 {
+    let mut sessions = session_store::load();
+    match cmd {
+        TemplateCmd::List => {
+            if sessions.is_empty() {
+                println!("(no saved templates)");
+                return 0;
+            }
+            for s in &sessions {
+                let players = s
+                    .players
+                    .iter()
+                    .map(|p| p.profile.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let pin = if s.pinned { " [pinned]" } else { "" };
+                println!("{}\t{}\t{}\t{}{}", s.id, s.name, s.game, players, pin);
+            }
+            0
+        }
+        TemplateCmd::Delete { target } => {
+            let Ok(id) = find_template(&sessions, &target) else { return 2 };
+            // Mirror the TUI's guard: never delete a template whose session is
+            // currently running (it would orphan the runtime correlation).
+            if session_store::find_marker(&id).is_some() {
+                eprintln!("[splitux] template '{id}' has a RUNNING session — stop it first.");
+                return 2;
+            }
+            let name = sessions
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.name.clone())
+                .unwrap_or_default();
+            sessions.retain(|s| s.id != id);
+            session_store::save(&sessions);
+            println!("[splitux] deleted template '{name}' (id: {id}).");
+            0
+        }
+        TemplateCmd::Rename { target, new_name } => {
+            if new_name.trim().is_empty() {
+                eprintln!("[splitux] new name must not be empty.");
+                return 2;
+            }
+            let Ok(id) = find_template(&sessions, &target) else { return 2 };
+            let entry = sessions.iter_mut().find(|s| s.id == id).unwrap();
+            let new = new_name.trim().to_string();
+            let old = std::mem::replace(&mut entry.name, new.clone());
+            session_store::save(&sessions);
+            println!("[splitux] renamed '{old}' -> '{new}' (id: {id}).");
+            0
+        }
+    }
+}
+
 /// Parse one `--player key=val,key=val` spec into an Instance. P2 supports
 /// `profile=<name>` and `input=together:gamepad|together:kbm`; local-device
 /// inputs (pad/kbm) land in P3.
@@ -670,7 +780,10 @@ fn parse_player(spec: &str, profiles: &[String]) -> Result<(Instance, Option<Str
                     .ok_or_else(|| format!("profile '{val}' not found (try `splitux list profiles`)"))?;
             }
             "input" => match val.trim() {
-                "together:gamepad" => {
+                // A together seat streams BOTH kb/m and gamepad to the remote
+                // player, so there is no flavor to pick — bare `together` is
+                // the canonical spec. The suffixed forms stay as aliases.
+                "together" | "together:gamepad" => {
                     together = true;
                     together_input = TogetherInput::Gamepad;
                 }
